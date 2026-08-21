@@ -14,10 +14,13 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: bt-linux-amd64
+            driver: bt-driver-airpods-linux-amd64
           - os: macos-latest
             artifact: bt-macos-arm64
+            driver: bt-driver-airpods-macos-arm64
           - os: windows-latest
             artifact: bt-windows-amd64.exe
+            driver: bt-driver-airpods-windows-amd64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +29,15 @@ jobs:
           go-version: '1.24.x'
       - name: Build
         shell: bash
-        run: go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.artifact }}" ./cmd/bt
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.artifact }}" ./cmd/bt
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.driver }}" ./cmd/bt-driver-airpods
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}
+            ${{ matrix.driver }}
 
   publish:
     needs: build

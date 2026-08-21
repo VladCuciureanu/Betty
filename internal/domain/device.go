@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Transport string
 
@@ -17,15 +20,50 @@ type Endpoint struct {
 }
 
 type Device struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Paired      bool              `json:"paired"`
-	Connected   bool              `json:"connected"`
-	RSSI        *int16            `json:"rssi,omitempty"`
-	Services    []string          `json:"services,omitempty"`
-	Information map[string]string `json:"information,omitempty"`
-	Endpoints   []Endpoint        `json:"endpoints"`
-	LastSeenAt  *time.Time        `json:"last_seen_at,omitempty"`
+	ID               string                      `json:"id"`
+	Name             string                      `json:"name"`
+	Paired           bool                        `json:"paired"`
+	Connected        bool                        `json:"connected"`
+	RSSI             *int16                      `json:"rssi,omitempty"`
+	Services         []string                    `json:"services,omitempty"`
+	Information      map[string]string           `json:"information,omitempty"`
+	ManufacturerData []ManufacturerData          `json:"manufacturer_data,omitempty"`
+	ServiceData      []ServiceData               `json:"service_data,omitempty"`
+	Identification   *Identification             `json:"identification,omitempty"`
+	PossibleMatches  []string                    `json:"possible_matches,omitempty"`
+	Properties       map[string]Property         `json:"properties,omitempty"`
+	Capabilities     map[string]DeviceCapability `json:"capabilities,omitempty"`
+	Endpoints        []Endpoint                  `json:"endpoints"`
+	LastSeenAt       *time.Time                  `json:"last_seen_at,omitempty"`
+}
+
+type ManufacturerData struct {
+	CompanyID uint16 `json:"company_id"`
+	Data      string `json:"data"`
+}
+type ServiceData struct {
+	UUID string `json:"uuid"`
+	Data string `json:"data"`
+}
+type Identification struct {
+	Vendor     string `json:"vendor"`
+	Family     string `json:"family"`
+	Model      string `json:"model,omitempty"`
+	Confidence string `json:"confidence"`
+}
+type Property struct {
+	Value      json.RawMessage `json:"value"`
+	Unit       string          `json:"unit,omitempty"`
+	Display    string          `json:"display,omitempty"`
+	Estimated  bool            `json:"estimated,omitempty"`
+	Resolution int             `json:"resolution,omitempty"`
+}
+type DeviceCapability struct {
+	Status   string   `json:"status"`
+	Readable bool     `json:"readable,omitempty"`
+	Writable bool     `json:"writable,omitempty"`
+	Values   []string `json:"values,omitempty"`
+	Reason   string   `json:"reason,omitempty"`
 }
 
 type Support string

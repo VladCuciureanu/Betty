@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"github.com/vladcuciureanu/betty/internal/backend"
 	"github.com/vladcuciureanu/betty/internal/ble"
 	"github.com/vladcuciureanu/betty/internal/domain"
+	"github.com/vladcuciureanu/betty/internal/driver"
+	"github.com/vladcuciureanu/betty/internal/l2cap"
 	"github.com/vladcuciureanu/betty/internal/output"
 	"github.com/vladcuciureanu/betty/internal/resolver"
 )
@@ -25,6 +28,7 @@ type application struct {
 	render  output.Renderer
 	timeout time.Duration
 	version string
+	drivers *driver.Manager
 }
 
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version string) int {
@@ -43,7 +47,9 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		renderer.Failure(err)
 		return domain.ExitCode(err)
 	}
-	a := application{backend: backend.New(), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version}
+	drivers := driver.New()
+	drivers.SetHost(l2cap.New())
+	a := application{backend: backend.New(), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, opts.timeout)
@@ -114,6 +120,8 @@ func (a application) run(ctx context.Context, args []string) error {
 		return a.gatt(ctx, args[1:])
 	case "capabilities":
 		return a.render.Data(a.backend.Capabilities())
+	case "driver":
+		return a.driverCommand(ctx, args[1:])
 	default:
 		return a.device(ctx, args)
 	}
@@ -124,9 +132,11 @@ func (a application) scan(ctx context.Context) ([]domain.Device, error) {
 		devices []domain.Device
 		err     error
 	}
+	discoveryCtx, cancel := context.WithTimeout(ctx, scanBudget(ctx))
+	defer cancel()
 	ch := make(chan result, 2)
-	go func() { d, e := a.backend.Scan(ctx); ch <- result{d, e} }()
-	go func() { d, e := a.ble.Scan(ctx); ch <- result{d, e} }()
+	go func() { d, e := a.backend.Scan(discoveryCtx); ch <- result{d, e} }()
+	go func() { d, e := a.ble.Scan(discoveryCtx); ch <- result{d, e} }()
 	var all []domain.Device
 	var errs []error
 	for range 2 {
@@ -137,6 +147,9 @@ func (a application) scan(ctx context.Context) ([]domain.Device, error) {
 			all = merge(all, r.devices)
 		}
 	}
+	if a.drivers != nil {
+		all = a.drivers.Inspect(ctx, all)
+	}
 	if len(all) == 0 && len(errs) > 0 {
 		return nil, errs[0]
 	}
@@ -146,7 +159,7 @@ func merge(dst, src []domain.Device) []domain.Device {
 	for _, candidate := range src {
 		found := -1
 		for i, d := range dst {
-			if d.ID == candidate.ID || (candidate.Name != "" && strings.EqualFold(d.Name, candidate.Name)) {
+			if sameEndpoint(d, candidate) {
 				found = i
 				break
 			}
@@ -167,6 +180,29 @@ func merge(dst, src []domain.Device) []domain.Device {
 		d.Connected = d.Connected || candidate.Connected
 	}
 	return dst
+}
+func sameEndpoint(a, b domain.Device) bool {
+	if a.ID == b.ID {
+		return true
+	}
+	for _, left := range a.Endpoints {
+		for _, right := range b.Endpoints {
+			if left.Transport == right.Transport && left.Address != "" && strings.EqualFold(left.Address, right.Address) {
+				return true
+			}
+		}
+	}
+	return false
+}
+func scanBudget(ctx context.Context) time.Duration {
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > time.Second {
+			return remaining - time.Second
+		}
+		return remaining
+	}
+	return 9 * time.Second
 }
 func (a application) inventory(ctx context.Context, discover bool) ([]domain.Device, error) {
 	if !discover {
@@ -218,6 +254,23 @@ func (a application) device(ctx context.Context, args []string) error {
 		return a.render.Data(d)
 	}
 	if len(args) == 2 && args[1] == "battery" {
+		if a.drivers != nil {
+			devices = a.drivers.InspectFor(ctx, devices, "battery")
+			d, err = resolver.Resolve(devices, args[0])
+			if err != nil {
+				return err
+			}
+		}
+		if property, ok := d.Properties["battery"]; ok {
+			if a.render.Mode == output.Human && property.Display != "" {
+				return a.render.Data(property.Display)
+			}
+			var value any
+			if err := json.Unmarshal(property.Value, &value); err != nil {
+				return err
+			}
+			return a.render.Data(map[string]any{"device": d, "property": "battery", "value": value, "unit": property.Unit, "estimated": property.Estimated, "resolution": property.Resolution})
+		}
 		address, err := bleAddress(d)
 		if err != nil {
 			return err
@@ -243,6 +296,47 @@ func (a application) device(ctx context.Context, args []string) error {
 		}
 	}
 	return domain.NewError(domain.CodeUsage, "unknown device command")
+}
+
+func (a application) driverCommand(ctx context.Context, args []string) error {
+	if a.drivers == nil {
+		return domain.NewError(domain.CodeUnsupported, "drivers are unavailable")
+	}
+	if len(args) == 0 || args[0] == "list" {
+		items, err := a.drivers.List()
+		if err != nil {
+			return err
+		}
+		return a.render.Data(items)
+	}
+	switch args[0] {
+	case "install":
+		if len(args) != 2 {
+			return domain.NewError(domain.CodeUsage, "usage: bt driver install <executable>")
+		}
+		item, err := a.drivers.Install(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		return a.render.Data(item)
+	case "remove":
+		if len(args) != 2 {
+			return domain.NewError(domain.CodeUsage, "usage: bt driver remove <id>")
+		}
+		return a.drivers.Remove(args[1])
+	case "export-state":
+		if len(args) != 3 {
+			return domain.NewError(domain.CodeUsage, "usage: bt driver export-state <id> <file>")
+		}
+		return a.drivers.ExportState(args[1], args[2])
+	case "import-state":
+		if len(args) != 3 {
+			return domain.NewError(domain.CodeUsage, "usage: bt driver import-state <id> <file>")
+		}
+		return a.drivers.ImportState(args[1], args[2])
+	default:
+		return domain.NewError(domain.CodeUsage, "unknown driver command %q", args[0])
+	}
 }
 func (a application) gatt(ctx context.Context, args []string) error {
 	if len(args) < 2 {
@@ -339,6 +433,13 @@ Commands:
   list                         list devices known to the OS
   pair|unpair <device>         change pairing state
   connect|disconnect <device>  change OS-managed connection state
+  driver install <executable>  install an optional device driver
+  driver list                  list installed drivers
+  driver remove <id>           remove an installed driver
+  driver export-state <id> <file>
+                               export private driver state with mode 0600
+  driver import-state <id> <file>
+                               replace private driver state from an export
   <device>                     inspect a device
   <device> battery             read the standard BLE battery level
   gatt <device> services

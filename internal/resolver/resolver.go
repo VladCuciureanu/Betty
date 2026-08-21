@@ -43,10 +43,42 @@ func Resolve(devices []domain.Device, query string) (domain.Device, error) {
 	if len(partial) == 1 {
 		return partial[0], nil
 	}
+	if preferred, ok := preferredRelated(partial); ok {
+		return preferred, nil
+	}
 	if len(partial) > 1 {
 		return ambiguous(query, partial)
 	}
 	return domain.Device{}, domain.NewError(domain.CodeNotFound, "no device matches %q", query)
+}
+
+func preferredRelated(matches []domain.Device) (domain.Device, bool) {
+	for _, candidate := range matches {
+		if !candidate.Paired && !candidate.Connected {
+			continue
+		}
+		allRelated := true
+		for _, other := range matches {
+			if other.ID == candidate.ID {
+				continue
+			}
+			related := false
+			for _, id := range other.PossibleMatches {
+				if id == candidate.ID {
+					related = true
+					break
+				}
+			}
+			if !related {
+				allRelated = false
+				break
+			}
+		}
+		if allRelated {
+			return candidate, true
+		}
+	}
+	return domain.Device{}, false
 }
 
 func ambiguous(query string, matches []domain.Device) (domain.Device, error) {

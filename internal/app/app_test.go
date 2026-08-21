@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/output"
 )
 
@@ -30,5 +31,12 @@ func TestVersion(t *testing.T) {
 	}
 	if out.String() != "bt 1.2.3\n" {
 		t.Fatalf("output=%q", out.String())
+	}
+}
+
+func TestMergeDoesNotUseDeviceNameAsIdentity(t *testing.T) {
+	devices := merge([]domain.Device{{ID: "one", Name: "Fridge", Endpoints: []domain.Endpoint{{Transport: domain.TransportBLE, Address: "a"}}}}, []domain.Device{{ID: "two", Name: "Fridge", Endpoints: []domain.Endpoint{{Transport: domain.TransportBLE, Address: "b"}}}})
+	if len(devices) != 2 {
+		t.Fatalf("merged distinct same-name devices: %#v", devices)
 	}
 }

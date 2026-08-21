@@ -30,3 +30,10 @@ func TestResolveNotFound(t *testing.T) {
 		t.Fatalf("code = %q", domain.AsError(err).Code)
 	}
 }
+func TestResolvePrefersPairedPossibleMatch(t *testing.T) {
+	devices := []domain.Device{{ID: "classic", Name: "AirPods Pro", Paired: true}, {ID: "ble", Name: "AirPods Pro 2", PossibleMatches: []string{"classic"}}}
+	got, err := Resolve(devices, "airpods")
+	if err != nil || got.ID != "classic" {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+}

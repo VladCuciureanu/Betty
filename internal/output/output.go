@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
@@ -83,6 +84,37 @@ func (r Renderer) human(data any) error {
 			sort.Strings(keys)
 			for _, key := range keys {
 				fmt.Fprintf(r.Out, "%-12s%s\n", key, v.Information[key])
+			}
+		}
+		if len(v.Properties) > 0 {
+			keys := make([]string, 0, len(v.Properties))
+			for key := range v.Properties {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				property := v.Properties[key]
+				display := property.Display
+				if display == "" {
+					display = string(property.Value)
+				}
+				fmt.Fprintf(r.Out, "%-12s%s\n", key, display)
+			}
+		}
+		if len(v.Capabilities) > 0 {
+			keys := make([]string, 0, len(v.Capabilities))
+			for key := range v.Capabilities {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			fmt.Fprintln(r.Out, "capabilities")
+			for _, key := range keys {
+				capability := v.Capabilities[key]
+				fmt.Fprintf(r.Out, "  %-18s %s", key, capability.Status)
+				if len(capability.Values) > 0 {
+					fmt.Fprintf(r.Out, " (%s)", strings.Join(capability.Values, ", "))
+				}
+				fmt.Fprintln(r.Out)
 			}
 		}
 		return nil

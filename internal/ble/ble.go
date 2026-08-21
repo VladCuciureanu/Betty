@@ -2,6 +2,7 @@ package ble
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -77,8 +78,17 @@ func (b *TinyGo) Scan(ctx context.Context) ([]domain.Device, error) {
 				services = append(services, uuid.String())
 			}
 			now := time.Now().UTC()
+			manufacturer := make([]domain.ManufacturerData, 0, len(result.ManufacturerData()))
+			for _, item := range result.ManufacturerData() {
+				copied := append([]byte(nil), item.Data...)
+				manufacturer = append(manufacturer, domain.ManufacturerData{CompanyID: item.CompanyID, Data: hex.EncodeToString(copied)})
+			}
+			serviceData := make([]domain.ServiceData, 0, len(result.ServiceData()))
+			for _, item := range result.ServiceData() {
+				serviceData = append(serviceData, domain.ServiceData{UUID: item.UUID.String(), Data: hex.EncodeToString(append([]byte(nil), item.Data...))})
+			}
 			mu.Lock()
-			byID[id] = domain.Device{ID: id, Name: name, RSSI: &rssi, Services: services, LastSeenAt: &now,
+			byID[id] = domain.Device{ID: id, Name: name, RSSI: &rssi, Services: services, ManufacturerData: manufacturer, ServiceData: serviceData, LastSeenAt: &now,
 				Endpoints: []domain.Endpoint{{ID: result.Address.String(), Address: result.Address.String(), Transport: domain.TransportBLE}}}
 			mu.Unlock()
 		})
