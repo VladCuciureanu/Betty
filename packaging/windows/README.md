@@ -1,0 +1,50 @@
+# Betty Windows package
+
+`build.ps1` produces the single Windows release artifact: `betty-windows-x64.msi`.
+
+The package contains:
+
+- the `bt` CLI and a system `PATH` entry;
+- the optional AirPods executable driver in Betty's read-only bundled-driver layout;
+- `BettyAAP.sys`, its INF, and signed catalog;
+- a small elevated setup helper that stages/binds the driver during install and unbinds/removes it during uninstall.
+
+The KMDF driver is a narrow bridge. It binds only to the AirPods AAP SDP service UUID, opens the requested encrypted/authenticated Classic L2CAP channel, and exposes connect, disconnect, send, and bounded receive operations through a Betty-owned device-interface GUID. All AAP parsing and feature behavior remains in the optional Go driver.
+
+## Build requirements
+
+- x64 Windows 11
+- Visual Studio with C++ build tools
+- Windows Driver Kit 10.0.28000.2526 (restored through its pinned NuGet package)
+- Go 1.24
+- .NET SDK capable of building the pinned WiX Toolset 7.0.0 SDK
+
+Run:
+
+```powershell
+./packaging/windows/build.ps1 -Version 1.0.0
+```
+
+Release signing credentials are described in the root README. Windows 10/11 requires Microsoft Hardware Dev Center signing for new kernel drivers. Prepare the submission with:
+
+```powershell
+./packaging/windows/build-driver-submission.ps1 -Version 1.0.0
+```
+
+Upload the signed CAB to Hardware Dev Center for attestation or WHCP signing. After downloading Microsoft's signed package, build the release MSI with:
+
+```powershell
+./packaging/windows/build.ps1 -Version 1.0.0 `
+  -MicrosoftSignedDriverDir C:\signed\BettyAAP `
+  -RequireMicrosoftDriverSignature -RequireSigning
+```
+
+The first requirement verifies the returned catalog using kernel signing policy. The second requires Authenticode credentials for Betty's executables and MSI. Tag releases enforce both and fetch the Microsoft-signed package from the protected `BETTY_MICROSOFT_SIGNED_DRIVER_URL` secret.
+
+## Lifecycle
+
+Installation is per-machine and elevated. The MSI copies its payload, stages the driver package with `SetupCopyOEMInfW`, asks Windows to bind matching devices with `DiInstallDriverW`, and records the exact published OEM INF name. If a later MSI action fails, rollback uninstalls that package.
+
+Uninstall runs while the INF and setup helper still exist. It calls `DiUninstallDriverW`, removes the recorded package with `SetupUninstallOEMInfW`, removes the system `PATH` entry and program files, and then removes the machine registry key. The inverse rollback action reinstalls the package if MSI removal fails later.
+
+Per-user state is outside MSI ownership and is preserved. This prevents one account uninstalling the application from silently destroying another account's exported or acquired AirPods keys.

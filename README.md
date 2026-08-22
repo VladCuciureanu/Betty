@@ -64,7 +64,7 @@ Drivers use a versioned duplex JSON protocol over stdin/stdout; they do not add 
 
 The driver binary and AAP implementation are cross-platform; transport availability is separate. Linux uses a native `AF_BLUETOOTH`/L2CAP socket and may require `CAP_NET_RAW`. macOS rejects the reserved AirPods PSM for third-party processes, but can obtain advertisement keys from its System keychain with user authorization. Windows uses the same AAP implementation through an optional Bluetooth profile driver: Betty discovers its device interface and sends the same L2CAP byte stream through a narrow `DeviceIoControl` transport.
 
-Windows does not offer arbitrary Classic L2CAP channels to ordinary desktop applications. Exact active battery reads therefore require a signed profile driver bound to the AirPods SDP service. Betty currently implements the user-mode ABI used by the in-development [LibrePods Windows profile driver](https://github.com/librepods-org/librepods/pull/716); it does not bundle, install, or silently elevate to install that kernel component. When the interface is absent, the active transport reports `unsupported` internally and the AirPods driver can still return passive estimates or use imported advertisement keys.
+Windows does not offer arbitrary Classic L2CAP channels to ordinary desktop applications. Exact active battery reads therefore require a signed profile driver bound to the AirPods SDP service. The Windows MSI contains Betty's independently authored KMDF profile driver and installs it through Windows' supported Driver Store APIs. When the interface is absent, the active transport reports `unsupported` internally and the AirPods driver can still return passive estimates or use imported advertisement keys. The design and protocol were cross-checked against the [LibrePods Windows investigation](https://github.com/librepods-org/librepods/pull/716), but its kernel source and interface GUID are not bundled or copied.
 
 When an AAP transport is available, the driver requests and stores the AirPods IRK and advertisement-encryption key. On macOS, an explicit battery read instead asks the Security framework for the paired device's `MobileBluetooth` item in the System keychain; macOS may display an authorization prompt. Ordinary scans never request Keychain access. The driver can then decrypt private BLE advertisements to obtain exact battery levels without an active L2CAP channel. Driver state can be moved to another machine:
 
@@ -109,6 +109,22 @@ Errors use the same envelope with a structured `error`. Exit codes are `2` usage
 go test ./...
 go vet ./...
 ```
+
+### Windows MSI
+
+The Windows release is a signed, machine-wide MSI. It installs `bt.exe`, adds Betty to the system `PATH`, registers the bundled AirPods userspace driver, and stages and binds the signed `BettyAAP` Bluetooth profile driver. Installation requires administrator approval because Windows kernel drivers and the machine `PATH` are system-wide resources.
+
+Build it from an x64 Windows 11 machine with Visual Studio, the WDK, Go, and the .NET SDK:
+
+```powershell
+./packaging/windows/build.ps1 -Version 1.0.0
+```
+
+Unsigned builds are only suitable for compile-time validation. Current Windows releases require new kernel drivers to be signed by Microsoft through Hardware Dev Center; an ordinary code-signing PFX is not sufficient. `build-driver-submission.ps1` produces the EV-signed submission CAB. After Microsoft returns the signed package, pass its directory with `-MicrosoftSignedDriverDir` and use `-RequireMicrosoftDriverSignature` to verify it under kernel policy before packaging.
+
+The executables and final MSI separately require either `BETTY_SIGNING_PFX` plus `BETTY_SIGNING_PFX_PASSWORD`, their `BETTY_SIGNING_PFX_BASE64` CI equivalent, or `BETTY_SIGNING_CERT_SHA1`. Passing `-RequireSigning` makes missing application-signing credentials fatal. Tag releases require both signing stages and refuse to publish an MSI built around an unsigned or non-Microsoft-signed kernel package.
+
+Normal removal through Windows Settings or `msiexec /x` first unbinds the profile driver, deletes its published package from the Driver Store, removes Betty's system `PATH` entry and application files, and deletes its machine installation state. MSI rollback reverses a partially completed driver install or uninstall. Per-user AirPods keys under the user's Betty configuration directory are deliberately preserved as user data; they can be removed separately if desired.
 
 Hardware tests are intentionally separate from the default suite. Real releases require validation with a Classic device and a generic BLE peripheral on all three operating systems. Native L2CAP can be probed with `BETTY_HARDWARE_CLASSIC_ID=macos:<address> go test -tags=hardware -run TestNativeChannelLifecycle -v ./internal/l2cap`. AirPods are expected to return the explicit macOS unsupported error for PSM `0x1001`.
 

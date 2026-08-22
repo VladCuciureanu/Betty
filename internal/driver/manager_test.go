@@ -111,3 +111,27 @@ func TestExportImportDriverState(t *testing.T) {
 		t.Fatalf("value=%q found=%t err=%v", value, found, err)
 	}
 }
+
+func TestBundledDriversAreDiscoveredButNotRemoved(t *testing.T) {
+	m := NewAt(t.TempDir())
+	m.bundled = t.TempDir()
+	id := "official/airpods"
+	dir := filepath.Join(m.bundled, safeID(id))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(protocol.Manifest{Protocol: protocol.Version, ID: id, Name: "AirPods"})
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	items, err := m.List()
+	if err != nil || len(items) != 1 || items[0].ID != id {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	if err := m.Remove(id); err == nil {
+		t.Fatal("expected bundled driver removal to be rejected")
+	}
+	if err := m.storageSet(id, "keys/test", "secret"); err != nil {
+		t.Fatalf("bundled driver state should remain user-writable: %v", err)
+	}
+}

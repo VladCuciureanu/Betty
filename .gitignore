@@ -1,6 +1,7 @@
 /bt
 /bt-driver-*
 /dist/
+/packaging/windows/artifacts/
 *.exe
 *.test
 .DS_Store

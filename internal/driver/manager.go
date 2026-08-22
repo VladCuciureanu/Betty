@@ -20,16 +20,17 @@ import (
 )
 
 type Manager struct {
-	root string
-	host Host
+	root    string
+	bundled string
+	host    Host
 }
 
 func New() *Manager {
 	if root := os.Getenv("BETTY_DRIVER_DIR"); root != "" {
-		return &Manager{root: root, host: UnsupportedHost{}}
+		return &Manager{root: root, bundled: bundledDriverRoot(), host: UnsupportedHost{}}
 	}
 	root, _ := os.UserConfigDir()
-	return &Manager{root: filepath.Join(root, "betty", "drivers"), host: UnsupportedHost{}}
+	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), host: UnsupportedHost{}}
 }
 func NewAt(root string) *Manager { return &Manager{root: root, host: UnsupportedHost{}} }
 func (m *Manager) SetHost(host Host) {
@@ -113,7 +114,7 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 		return manifest, err
 	}
 	dir := filepath.Join(m.root, safeID(manifest.ID))
-	if _, err := os.Stat(dir); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err == nil {
 		return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
 	}
 	if err := os.MkdirAll(m.root, 0o755); err != nil {
@@ -132,40 +133,58 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 	if err := os.WriteFile(filepath.Join(temp, "manifest.json"), append(bytes, '\n'), 0o644); err != nil {
 		return manifest, err
 	}
-	if err := os.Rename(temp, dir); err != nil {
-		return manifest, err
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		if err := os.Rename(temp, dir); err != nil {
+			return manifest, err
+		}
+	} else {
+		if err := os.Rename(target, filepath.Join(dir, executableName())); err != nil {
+			return manifest, err
+		}
+		if err := os.Rename(filepath.Join(temp, "manifest.json"), filepath.Join(dir, "manifest.json")); err != nil {
+			_ = os.Remove(filepath.Join(dir, executableName()))
+			return manifest, err
+		}
 	}
 	return manifest, nil
 }
 func (m *Manager) Remove(id string) error {
-	for _, item := range mustList(m) {
-		if item.ID == id {
-			return os.RemoveAll(filepath.Join(m.root, safeID(id)))
-		}
+	path := filepath.Join(m.root, safeID(id))
+	if _, err := os.Stat(filepath.Join(path, "manifest.json")); err == nil {
+		return os.RemoveAll(path)
+	}
+	if _, err := os.Stat(filepath.Join(m.bundled, safeID(id), "manifest.json")); err == nil {
+		return domain.NewError(domain.CodeUnsupported, "driver %q is bundled with Betty and is removed by the application installer", id)
 	}
 	return domain.NewError(domain.CodeNotFound, "driver %q is not installed", id)
 }
 func (m *Manager) List() ([]protocol.Manifest, error) {
-	entries, err := os.ReadDir(m.root)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var out []protocol.Manifest
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	byID := map[string]protocol.Manifest{}
+	for _, root := range []string{m.bundled, m.root} {
+		if root == "" {
 			continue
 		}
-		bytes, e := os.ReadFile(filepath.Join(m.root, entry.Name(), "manifest.json"))
-		if e != nil {
-			continue
+		entries, err := os.ReadDir(root)
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
 		}
-		var item protocol.Manifest
-		if json.Unmarshal(bytes, &item) == nil {
-			out = append(out, item)
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			bytes, e := os.ReadFile(filepath.Join(root, entry.Name(), "manifest.json"))
+			if e != nil {
+				continue
+			}
+			var item protocol.Manifest
+			if json.Unmarshal(bytes, &item) == nil {
+				byID[item.ID] = item
+			}
 		}
+	}
+	out := make([]protocol.Manifest, 0, len(byID))
+	for _, item := range byID {
+		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
@@ -240,7 +259,7 @@ func (m *Manager) installed(id string) bool {
 func mustList(m *Manager) []protocol.Manifest { items, _ := m.List(); return items }
 func (m *Manager) call(ctx context.Context, item protocol.Manifest, request protocol.Request) (protocol.Response, error) {
 	var response protocol.Response
-	path := filepath.Join(m.root, safeID(item.ID), executableName())
+	path := m.driverPath(item.ID)
 	cmd := exec.CommandContext(ctx, path)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -447,6 +466,9 @@ func (m *Manager) writeStorage(driverID string, values map[string]string) error 
 		return err
 	}
 	dir := filepath.Join(m.root, safeID(driverID))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
 	temp, err := os.CreateTemp(dir, ".storage-")
 	if err != nil {
 		return err
@@ -512,6 +534,23 @@ func executableName() string {
 		return "driver.exe"
 	}
 	return "driver"
+}
+func bundledDriverRoot() string {
+	if root := os.Getenv("BETTY_BUNDLED_DRIVER_DIR"); root != "" {
+		return root
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(executable), "drivers")
+}
+func (m *Manager) driverPath(id string) string {
+	user := filepath.Join(m.root, safeID(id), executableName())
+	if _, err := os.Stat(user); err == nil {
+		return user
+	}
+	return filepath.Join(m.bundled, safeID(id), executableName())
 }
 func copyExecutable(source, target string) error {
 	in, err := os.Open(source)

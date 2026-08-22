@@ -1,0 +1,43 @@
+name: Windows installer
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-installer.yml'
+      - 'cmd/bt-windows-setup/**'
+      - 'internal/l2cap/**'
+      - 'packaging/windows/**'
+      - 'go.mod'
+      - 'go.sum'
+  push:
+    branches: ['main']
+    paths:
+      - '.github/workflows/windows-installer.yml'
+      - 'cmd/bt-windows-setup/**'
+      - 'internal/l2cap/**'
+      - 'packaging/windows/**'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  build-msi:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build unsigned validation MSI
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -Version 0.0.0
+      - name: Smoke-test MSI install and clean uninstall
+        shell: pwsh
+        run: ./packaging/windows/test-installer.ps1 -Msi (Get-ChildItem ./packaging/windows/artifacts/msi -Filter *.msi -Recurse | Select-Object -First 1).FullName -SkipDriver
+      - uses: actions/upload-artifact@v4
+        with:
+          name: betty-windows-unsigned-validation
+          path: packaging/windows/artifacts/msi/**/*.msi

@@ -23,7 +23,7 @@ import (
 // desktop process. This host speaks the small DeviceIoControl ABI exposed by
 // the optional AirPods Bluetooth profile driver proposed by LibrePods. Battery
 // parsing and AAP remain entirely in Betty's portable AirPods driver.
-var airPodsInterfaceGUID = guid{0xc0ffee00, 0x1337, 0x4a5b, [8]byte{0x9e, 0x6f, 0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6}}
+var airPodsInterfaceGUID = guid{0xb377a1a0, 0x8cb0, 0x4a5c, [8]byte{0x9b, 0xa2, 0x53, 0xbd, 0xcc, 0x4c, 0x5e, 0x21}}
 
 const (
 	ioctlConnect    = uint32(0x80002000)

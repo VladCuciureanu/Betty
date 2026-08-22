@@ -1,0 +1,51 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=Bluetooth
+ClassGuid={e0cbf06c-cd8b-4647-bb8a-263b43f0f974}
+Provider=%Betty%
+DriverVer=08/21/2026,1.0.0.0
+CatalogFile=BettyAAP.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir=13
+
+[SourceDisksNames]
+1=%DiskName%,,,""
+
+[SourceDisksFiles]
+BettyAAP.sys=1,,
+
+[Manufacturer]
+%Betty%=BettyModels,NTamd64.10.0.1..16299
+
+[BettyModels.NTamd64.10.0.1..16299]
+%BettyAAP.DeviceDesc%=BettyAAP_Install,BTHENUM\{74ec2172-0bad-4d01-8f77-997b2be0722a}
+
+[BettyAAP_Install.NT]
+CopyFiles=BettyAAP_CopyFiles
+
+[BettyAAP_CopyFiles]
+BettyAAP.sys
+
+[BettyAAP_Install.NT.Services]
+AddService=BettyAAP,0x00000002,BettyAAP_Service
+
+[BettyAAP_Service]
+DisplayName=%BettyAAP.ServiceDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\BettyAAP.sys
+
+[BettyAAP_Install.NT.Wdf]
+KmdfService=BettyAAP,BettyAAP_Wdf
+
+[BettyAAP_Wdf]
+KmdfLibraryVersion=1.15
+
+[Strings]
+Betty="Betty"
+DiskName="Betty AirPods Driver Installation Media"
+BettyAAP.DeviceDesc="Betty AirPods AAP Transport"
+BettyAAP.ServiceDesc="Betty AirPods Bluetooth Profile Driver"
