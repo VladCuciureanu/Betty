@@ -15,12 +15,15 @@ jobs:
           - os: ubuntu-latest
             artifact: bt-linux-amd64
             driver: bt-driver-airpods-linux-amd64
+            sony: bt-driver-sony-linux-amd64
           - os: macos-latest
             artifact: bt-macos-arm64
             driver: bt-driver-airpods-macos-arm64
+            sony: bt-driver-sony-macos-arm64
           - os: windows-latest
             artifact: bt-windows-amd64.exe
             driver: bt-driver-airpods-windows-amd64.exe
+            sony: bt-driver-sony-windows-amd64.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -32,12 +35,18 @@ jobs:
         run: |
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.artifact }}" ./cmd/bt
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.driver }}" ./cmd/bt-driver-airpods
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.sony }}" ./cmd/bt-driver-sony
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            ./packaging/linux/build-deb.sh "${GITHUB_REF_NAME}" dist-deb
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}
             ${{ matrix.driver }}
+            ${{ matrix.sony }}
+            dist-deb/*.deb
 
   windows-msi:
     runs-on: windows-2025-vs2026
@@ -69,7 +78,10 @@ jobs:
         run: ./packaging/windows/build.ps1 -Version "${env:GITHUB_REF_NAME}" -MicrosoftSignedDriverDir $env:BETTY_MICROSOFT_SIGNED_DRIVER_DIR -RequireSigning -RequireMicrosoftDriverSignature
       - name: Smoke-test signed MSI install and clean uninstall
         shell: pwsh
-        run: ./packaging/windows/test-installer.ps1 -Msi (Get-ChildItem ./packaging/windows/artifacts/msi -Filter *.msi -Recurse | Select-Object -First 1).FullName
+        run: |
+          $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
+          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-airpods-advanced-windows-x64.msi -Recurse).FullName
+          ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced
       - uses: actions/upload-artifact@v4
         with:
           name: betty-windows-msi

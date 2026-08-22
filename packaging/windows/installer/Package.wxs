@@ -10,51 +10,29 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of Betty is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
+    <Property Id="BETTYAIRPODSADVANCED">
+      <RegistrySearch Id="AdvancedSupportSearch" Root="HKLM" Key="Software\Betty\AirPodsAdvanced" Name="Installed" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="NOT (Installed AND REMOVE~=&quot;ALL&quot; AND BETTYAIRPODSADVANCED) OR UPGRADINGPRODUCTCODE" Message="Remove Betty AirPods Advanced Support before uninstalling Betty." />
+
     <Feature Id="MainFeature" Title="Betty" Level="1">
       <ComponentGroupRef Id="ProductComponents" />
     </Feature>
 
-    <CustomAction Id="InstallProfileDriver" FileRef="WindowsSetupExe" ExeCommand="install &quot;kernel-driver\BettyAAP.inf&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="RollbackProfileDriverInstall" FileRef="WindowsSetupExe" ExeCommand="uninstall &quot;kernel-driver\BettyAAP.inf&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-    <CustomAction Id="UninstallProfileDriver" FileRef="WindowsSetupExe" ExeCommand="uninstall &quot;kernel-driver\BettyAAP.inf&quot;" Execute="deferred" Impersonate="no" Return="check" />
-    <CustomAction Id="RollbackProfileDriverUninstall" FileRef="WindowsSetupExe" ExeCommand="install &quot;kernel-driver\BettyAAP.inf&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
-
-    <InstallExecuteSequence>
-      <Custom Action="RollbackProfileDriverInstall" After="InstallFiles" Condition="NOT Installed AND NOT SKIPDRIVER" />
-      <Custom Action="InstallProfileDriver" After="RollbackProfileDriverInstall" Condition="NOT Installed AND NOT SKIPDRIVER" />
-      <Custom Action="RollbackProfileDriverUninstall" Before="UninstallProfileDriver" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT SKIPDRIVER" />
-      <Custom Action="UninstallProfileDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT SKIPDRIVER" />
-    </InstallExecuteSequence>
   </Package>
 
   <Fragment>
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Betty">
-        <Directory Id="BUNDLEDDRIVERS" Name="drivers">
-          <Directory Id="AIRPODSDRIVER" Name="b2ZmaWNpYWwvYWlycG9kcw" />
-        </Directory>
-        <Directory Id="KERNELDRIVER" Name="kernel-driver" />
       </Directory>
     </StandardDirectory>
     <ComponentGroup Id="ProductComponents">
       <Component Directory="INSTALLFOLDER" Id="BettyExecutable" Guid="{01AB9783-23BB-4FB8-9ED6-BE819B94ED95}">
         <File Id="BettyExe" Source="$(var.PayloadDir)\bt.exe" KeyPath="yes" />
       </Component>
-      <Component Directory="INSTALLFOLDER" Id="WindowsSetupExecutable" Guid="{D4946041-AE5E-44DD-9A42-B83A46DAD81B}">
-        <File Id="WindowsSetupExe" Source="$(var.PayloadDir)\bt-windows-setup.exe" KeyPath="yes" />
-      </Component>
       <Component Directory="INSTALLFOLDER" Id="PathEnvironment" Guid="{6E7AE6FD-B2B3-44A9-BD15-A0661355A7E2}">
         <Environment Id="BettyPath" Name="PATH" Value="[INSTALLFOLDER]" Action="set" Part="last" System="yes" />
         <RegistryValue Root="HKLM" Key="Software\Betty" Name="InstallDirectory" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
-      </Component>
-      <Component Directory="AIRPODSDRIVER" Id="AirPodsDriverBundle" Guid="{F511274F-251E-4FAE-B5A6-1E82B72EDB1A}">
-        <File Id="AirPodsDriverExe" Source="$(var.PayloadDir)\bt-driver-airpods.exe" Name="driver.exe" KeyPath="yes" />
-        <File Id="AirPodsDriverManifest" Source="$(var.PayloadDir)\airpods-manifest.json" Name="manifest.json" />
-      </Component>
-      <Component Directory="KERNELDRIVER" Id="KernelDriverPackage" Guid="{02ABFDD5-F5EA-450D-AFF4-E8F1D0DB0D25}">
-        <File Id="KernelDriverInf" Source="$(var.DriverDir)\BettyAAP.inf" KeyPath="yes" />
-        <File Id="KernelDriverSys" Source="$(var.DriverDir)\BettyAAP.sys" />
-        <File Id="KernelDriverCat" Source="$(var.DriverDir)\BettyAAP.cat" />
       </Component>
     </ComponentGroup>
   </Fragment>

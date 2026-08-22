@@ -20,25 +20,36 @@ import (
 )
 
 type Manager struct {
-	root    string
-	bundled string
-	host    Host
+	root          string
+	bundled       string
+	systemBundled string
+	host          Host
+	rfcomm        RFCOMMHost
 }
 
 func New() *Manager {
 	if root := os.Getenv("BETTY_DRIVER_DIR"); root != "" {
-		return &Manager{root: root, bundled: bundledDriverRoot(), host: UnsupportedHost{}}
+		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
 	}
 	root, _ := os.UserConfigDir()
-	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), host: UnsupportedHost{}}
+	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
 }
-func NewAt(root string) *Manager { return &Manager{root: root, host: UnsupportedHost{}} }
+func NewAt(root string) *Manager {
+	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+}
 func (m *Manager) SetHost(host Host) {
 	if host == nil {
 		m.host = UnsupportedHost{}
 		return
 	}
 	m.host = host
+}
+func (m *Manager) SetRFCOMMHost(host RFCOMMHost) {
+	if host == nil {
+		m.rfcomm = UnsupportedRFCOMMHost{}
+		return
+	}
+	m.rfcomm = host
 }
 
 func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain.Device {
@@ -153,14 +164,16 @@ func (m *Manager) Remove(id string) error {
 	if _, err := os.Stat(filepath.Join(path, "manifest.json")); err == nil {
 		return os.RemoveAll(path)
 	}
-	if _, err := os.Stat(filepath.Join(m.bundled, safeID(id), "manifest.json")); err == nil {
-		return domain.NewError(domain.CodeUnsupported, "driver %q is bundled with Betty and is removed by the application installer", id)
+	for _, root := range m.bundledRoots() {
+		if _, err := os.Stat(filepath.Join(root, safeID(id), "manifest.json")); err == nil {
+			return domain.NewError(domain.CodeUnsupported, "driver %q is bundled with Betty and is removed by the application installer", id)
+		}
 	}
 	return domain.NewError(domain.CodeNotFound, "driver %q is not installed", id)
 }
 func (m *Manager) List() ([]protocol.Manifest, error) {
 	byID := map[string]protocol.Manifest{}
-	for _, root := range []string{m.bundled, m.root} {
+	for _, root := range append(m.bundledRoots(), m.root) {
 		if root == "" {
 			continue
 		}
@@ -281,7 +294,17 @@ func (m *Manager) call(ctx context.Context, item protocol.Manifest, request prot
 	for _, device := range request.Devices {
 		allowedDevices[device.ID] = true
 	}
-	channels := map[string]bool{}
+	channels := map[string]string{}
+	defer func() {
+		for channel, transport := range channels {
+			switch transport {
+			case "l2cap":
+				_ = m.host.CloseL2CAP(context.Background(), channel)
+			case "rfcomm":
+				_ = m.rfcomm.CloseRFCOMM(context.Background(), channel)
+			}
+		}
+	}()
 	for {
 		var raw json.RawMessage
 		if err := decoder.Decode(&raw); err != nil {
@@ -321,7 +344,7 @@ func (m *Manager) call(ctx context.Context, item protocol.Manifest, request prot
 	return response, nil
 }
 
-func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, message protocol.Message, allowedDevices map[string]bool, channels map[string]bool) (json.RawMessage, error) {
+func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, message protocol.Message, allowedDevices map[string]bool, channels map[string]string) (json.RawMessage, error) {
 	marshal := func(value any) (json.RawMessage, error) { bytes, err := json.Marshal(value); return bytes, err }
 	required := ""
 	if len(message.Method) >= 6 && message.Method[:6] == "l2cap." {
@@ -329,6 +352,9 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 	}
 	if len(message.Method) >= 8 && message.Method[:8] == "storage." {
 		required = "driver-storage"
+	}
+	if len(message.Method) >= 7 && message.Method[:7] == "rfcomm." {
+		required = "rfcomm"
 	}
 	if required != "" && !hasPermission(driver, required) {
 		return nil, domain.NewError(domain.CodePermission, "driver %s lacks %s permission", driver.ID, required)
@@ -346,14 +372,14 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 		if err != nil {
 			return nil, err
 		}
-		channels[channel] = true
+		channels[channel] = "l2cap"
 		return marshal(map[string]string{"channel_id": channel})
 	case protocol.HostL2CAPRead:
 		var p protocol.L2CAPReadParams
 		if err := json.Unmarshal(message.Params, &p); err != nil {
 			return nil, err
 		}
-		if !channels[p.ChannelID] {
+		if channels[p.ChannelID] != "l2cap" {
 			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
 		}
 		if p.MaxBytes < 1 || p.MaxBytes > 65535 {
@@ -378,7 +404,7 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 		if err := json.Unmarshal(message.Params, &p); err != nil {
 			return nil, err
 		}
-		if !channels[p.ChannelID] {
+		if channels[p.ChannelID] != "l2cap" {
 			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
 		}
 		data, err := hex.DecodeString(p.Data)
@@ -395,10 +421,79 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 		if err := json.Unmarshal(message.Params, &p); err != nil {
 			return nil, err
 		}
-		if !channels[p.ChannelID] {
+		if channels[p.ChannelID] != "l2cap" {
 			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
 		}
 		if err := m.host.CloseL2CAP(ctx, p.ChannelID); err != nil {
+			return nil, err
+		}
+		delete(channels, p.ChannelID)
+		return marshal(map[string]bool{"closed": true})
+	case protocol.HostRFCOMMOpen:
+		var p protocol.RFCOMMOpenParams
+		if err := json.Unmarshal(message.Params, &p); err != nil {
+			return nil, err
+		}
+		if !allowedDevices[p.DeviceID] {
+			return nil, domain.NewError(domain.CodePermission, "driver cannot access device %q", p.DeviceID)
+		}
+		channel, err := m.rfcomm.OpenRFCOMM(ctx, p.DeviceID, p.ServiceUUID)
+		if err != nil {
+			return nil, err
+		}
+		channels[channel] = "rfcomm"
+		return marshal(map[string]string{"channel_id": channel})
+	case protocol.HostRFCOMMRead:
+		var p protocol.RFCOMMReadParams
+		if err := json.Unmarshal(message.Params, &p); err != nil {
+			return nil, err
+		}
+		if channels[p.ChannelID] != "rfcomm" {
+			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
+		}
+		if p.MaxBytes < 1 || p.MaxBytes > 65535 {
+			return nil, domain.NewError(domain.CodeUsage, "max_bytes must be between 1 and 65535")
+		}
+		readCtx := ctx
+		cancel := func() {}
+		if p.TimeoutMS > 0 {
+			if p.TimeoutMS > 30000 {
+				return nil, domain.NewError(domain.CodeUsage, "timeout_ms must not exceed 30000")
+			}
+			readCtx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
+		}
+		defer cancel()
+		data, err := m.rfcomm.ReadRFCOMM(readCtx, p.ChannelID, p.MaxBytes)
+		if err != nil {
+			return nil, err
+		}
+		return marshal(map[string]string{"data": hex.EncodeToString(data)})
+	case protocol.HostRFCOMMWrite:
+		var p protocol.RFCOMMWriteParams
+		if err := json.Unmarshal(message.Params, &p); err != nil {
+			return nil, err
+		}
+		if channels[p.ChannelID] != "rfcomm" {
+			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
+		}
+		data, err := hex.DecodeString(p.Data)
+		if err != nil {
+			return nil, domain.NewError(domain.CodeUsage, "invalid hexadecimal RFCOMM data")
+		}
+		written, err := m.rfcomm.WriteRFCOMM(ctx, p.ChannelID, data)
+		if err != nil {
+			return nil, err
+		}
+		return marshal(map[string]int{"written": written})
+	case protocol.HostRFCOMMClose:
+		var p protocol.RFCOMMChannelParams
+		if err := json.Unmarshal(message.Params, &p); err != nil {
+			return nil, err
+		}
+		if channels[p.ChannelID] != "rfcomm" {
+			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
+		}
+		if err := m.rfcomm.CloseRFCOMM(ctx, p.ChannelID); err != nil {
 			return nil, err
 		}
 		delete(channels, p.ChannelID)
@@ -550,7 +645,24 @@ func (m *Manager) driverPath(id string) string {
 	if _, err := os.Stat(user); err == nil {
 		return user
 	}
+	for _, root := range m.bundledRoots() {
+		path := filepath.Join(root, safeID(id), executableName())
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
 	return filepath.Join(m.bundled, safeID(id), executableName())
+}
+
+func (m *Manager) bundledRoots() []string {
+	var roots []string
+	if m.bundled != "" {
+		roots = append(roots, m.bundled)
+	}
+	if m.systemBundled != "" && m.systemBundled != m.bundled {
+		roots = append(roots, m.systemBundled)
+	}
+	return roots
 }
 func copyExecutable(source, target string) error {
 	in, err := os.Open(source)

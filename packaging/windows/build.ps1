@@ -4,7 +4,8 @@ param(
     [string]$Configuration = "Release",
     [string]$MicrosoftSignedDriverDir,
     [switch]$RequireSigning,
-    [switch]$RequireMicrosoftDriverSignature
+    [switch]$RequireMicrosoftDriverSignature,
+    [switch]$BaseOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,31 +23,36 @@ $driverVersion = $msiVersion
 while ($driverVersion.Split('.').Count -lt 4) { $driverVersion += ".0" }
 
 New-Item -ItemType Directory -Force $payload, $driverOutput, $obj, $msiOutput | Out-Null
+Get-ChildItem $msiOutput -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
 
 Push-Location $root
 try {
     go test ./...
     go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $payload "bt.exe") ./cmd/bt
-    go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $payload "bt-driver-airpods.exe") ./cmd/bt-driver-airpods
-    go build -trimpath -ldflags "-s -w" -o (Join-Path $payload "bt-windows-setup.exe") ./cmd/bt-windows-setup
-    Copy-Item (Join-Path $PSScriptRoot "airpods-manifest.json") (Join-Path $payload "airpods-manifest.json") -Force
+    if (-not $BaseOnly) {
+        go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $payload "bt-driver-airpods.exe") ./cmd/bt-driver-airpods
+        go build -trimpath -ldflags "-s -w" -o (Join-Path $payload "bt-windows-setup.exe") ./cmd/bt-windows-setup
+        Copy-Item (Join-Path $PSScriptRoot "airpods-manifest.json") (Join-Path $payload "airpods-manifest.json") -Force
+    }
 } finally {
     Pop-Location
 }
 
-$driverProject = Join-Path $PSScriptRoot "driver\BettyAAP.vcxproj"
-if ($MicrosoftSignedDriverDir) {
-    foreach ($name in @("BettyAAP.inf", "BettyAAP.sys", "BettyAAP.cat")) {
-        $source = Join-Path $MicrosoftSignedDriverDir $name
-        if (-not (Test-Path $source)) { throw "Microsoft-signed driver package is missing $name" }
-        Copy-Item $source (Join-Path $driverOutput $name) -Force
+if (-not $BaseOnly) {
+    $driverProject = Join-Path $PSScriptRoot "driver\BettyAAP.vcxproj"
+    if ($MicrosoftSignedDriverDir) {
+        foreach ($name in @("BettyAAP.inf", "BettyAAP.sys", "BettyAAP.cat")) {
+            $source = Join-Path $MicrosoftSignedDriverDir $name
+            if (-not (Test-Path $source)) { throw "Microsoft-signed driver package is missing $name" }
+            Copy-Item $source (Join-Path $driverOutput $name) -Force
+        }
+    } else {
+        if ($RequireMicrosoftDriverSignature) {
+            throw "A Microsoft Hardware Dev Center-signed driver package is required for the Advanced Support MSI"
+        }
+        msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
+        if ($LASTEXITCODE -ne 0) { throw "WDK driver build failed" }
     }
-} else {
-    if ($RequireMicrosoftDriverSignature) {
-        throw "A Microsoft Hardware Dev Center-signed driver package is required for a release MSI"
-    }
-    msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
-    if ($LASTEXITCODE -ne 0) { throw "WDK driver build failed" }
 }
 
 function Invoke-Sign([string[]]$Files) {
@@ -92,21 +98,29 @@ function Find-WindowsKitTool([string]$Name) {
 }
 
 $script:SignTool = Find-WindowsKitTool "signtool.exe"
-Invoke-Sign @(
-    (Join-Path $payload "bt.exe"),
-    (Join-Path $payload "bt-driver-airpods.exe"),
-    (Join-Path $payload "bt-windows-setup.exe")
-)
+$executables = @((Join-Path $payload "bt.exe"))
+if (-not $BaseOnly) {
+    $executables += (Join-Path $payload "bt-driver-airpods.exe"), (Join-Path $payload "bt-windows-setup.exe")
+}
+Invoke-Sign $executables
 
-if ($MicrosoftSignedDriverDir) {
+if (-not $BaseOnly -and $MicrosoftSignedDriverDir) {
     & $script:SignTool verify /kp /v /c (Join-Path $driverOutput "BettyAAP.cat") (Join-Path $driverOutput "BettyAAP.sys")
     if ($LASTEXITCODE -ne 0) { throw "Driver package does not have a valid Microsoft kernel-policy signature" }
 }
 
-$installerProject = Join-Path $PSScriptRoot "installer\Betty.Installer.wixproj"
-dotnet build $installerProject -c $Configuration -p:Version=$msiVersion -p:PayloadDir=$payload -p:DriverDir=$driverOutput -p:OutputPath=$msiOutput
-if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
-$msi = Get-ChildItem $msiOutput -Filter "*.msi" -Recurse | Select-Object -First 1
-if (-not $msi) { throw "MSI build completed without producing an MSI" }
-Invoke-Sign @($msi.FullName)
-Write-Output $msi.FullName
+$installerProjects = @(
+    (Join-Path $PSScriptRoot "installer\Betty.Installer.wixproj")
+)
+if (-not $BaseOnly) {
+    $installerProjects += (Join-Path $PSScriptRoot "installer\Betty.AirPodsAdvanced.wixproj")
+}
+foreach ($installerProject in $installerProjects) {
+    dotnet build $installerProject -c $Configuration -p:Version=$msiVersion -p:PayloadDir=$payload -p:DriverDir=$driverOutput -p:OutputPath=$msiOutput
+    if ($LASTEXITCODE -ne 0) { throw "MSI build failed for $installerProject" }
+}
+$msis = @(Get-ChildItem $msiOutput -Filter "*.msi" -Recurse)
+$expectedMSIs = if ($BaseOnly) { 1 } else { 2 }
+if ($msis.Count -ne $expectedMSIs) { throw "MSI build expected $expectedMSIs package(s) but produced $($msis.Count)" }
+Invoke-Sign @($msis.FullName)
+$msis.FullName | Write-Output

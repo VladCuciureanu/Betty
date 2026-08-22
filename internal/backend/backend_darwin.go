@@ -19,7 +19,7 @@ import (
 
 type darwinBackend struct{}
 
-func newPlatformBackend() Backend { return &darwinBackend{} }
+func newPlatformBackend(PairingIO) Backend { return &darwinBackend{} }
 func (*darwinBackend) Capabilities() domain.Capabilities {
 	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Unsupported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
 }

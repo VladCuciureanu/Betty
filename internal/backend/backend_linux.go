@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 	"github.com/vladcuciureanu/betty/internal/domain"
@@ -17,11 +18,12 @@ const bluez = "org.bluez"
 type linuxBackend struct {
 	conn    *dbus.Conn
 	initErr error
+	pairing PairingIO
 }
 
-func newPlatformBackend() Backend {
+func newPlatformBackend(pairing PairingIO) Backend {
 	conn, err := dbus.SystemBus()
-	return &linuxBackend{conn: conn, initErr: err}
+	return &linuxBackend{conn: conn, initErr: err, pairing: pairing}
 }
 func (b *linuxBackend) Capabilities() domain.Capabilities {
 	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Supported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
@@ -37,7 +39,9 @@ func (b *linuxBackend) Scan(ctx context.Context) ([]domain.Device, error) {
 	}
 	defer b.conn.Object(bluez, adapter).Call("org.bluez.Adapter1.StopDiscovery", 0)
 	<-ctx.Done()
-	return b.List(context.Background())
+	listCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return b.List(listCtx)
 }
 
 func (b *linuxBackend) List(ctx context.Context) ([]domain.Device, error) {
@@ -74,13 +78,25 @@ func (b *linuxBackend) List(ctx context.Context) ([]domain.Device, error) {
 }
 
 func (b *linuxBackend) Pair(ctx context.Context, d domain.Device) error {
-	return b.deviceCall(ctx, d, "Pair")
+	path, err := endpointPath(d)
+	if err != nil {
+		return err
+	}
+	cleanup, err := b.registerPairingAgent()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if err := translateDBus(b.conn.Object(bluez, path).CallWithContext(ctx, "org.bluez.Device1.Pair", 0).Err); err != nil {
+		return err
+	}
+	return b.waitProperty(ctx, path, "Paired", true)
 }
 func (b *linuxBackend) Connect(ctx context.Context, d domain.Device) error {
-	return b.deviceCall(ctx, d, "Connect")
+	return b.deviceCall(ctx, d, "Connect", "Connected", true)
 }
 func (b *linuxBackend) Disconnect(ctx context.Context, d domain.Device) error {
-	return b.deviceCall(ctx, d, "Disconnect")
+	return b.deviceCall(ctx, d, "Disconnect", "Connected", false)
 }
 func (b *linuxBackend) Unpair(ctx context.Context, d domain.Device) error {
 	path, err := endpointPath(d)
@@ -89,14 +105,60 @@ func (b *linuxBackend) Unpair(ctx context.Context, d domain.Device) error {
 	}
 	adapter := dbus.ObjectPath(strings.SplitN(string(path), "/dev_", 2)[0])
 	call := b.conn.Object(bluez, adapter).CallWithContext(ctx, "org.bluez.Adapter1.RemoveDevice", 0, path)
-	return translateDBus(call.Err)
+	if err := translateDBus(call.Err); err != nil {
+		return err
+	}
+	return b.waitRemoved(ctx, path)
 }
-func (b *linuxBackend) deviceCall(ctx context.Context, d domain.Device, method string) error {
+func (b *linuxBackend) deviceCall(ctx context.Context, d domain.Device, method, property string, desired bool) error {
 	path, err := endpointPath(d)
 	if err != nil {
 		return err
 	}
-	return translateDBus(b.conn.Object(bluez, path).CallWithContext(ctx, "org.bluez.Device1."+method, 0).Err)
+	if err := translateDBus(b.conn.Object(bluez, path).CallWithContext(ctx, "org.bluez.Device1."+method, 0).Err); err != nil {
+		return err
+	}
+	return b.waitProperty(ctx, path, property, desired)
+}
+
+func (b *linuxBackend) waitProperty(ctx context.Context, path dbus.ObjectPath, property string, desired bool) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var value dbus.Variant
+		err := b.conn.Object(bluez, path).CallWithContext(ctx, "org.freedesktop.DBus.Properties.Get", 0, "org.bluez.Device1", property).Store(&value)
+		if err == nil {
+			if current, ok := value.Value().(bool); ok && current == desired {
+				return nil
+			}
+		} else if translated := translateDBus(err); translated != nil {
+			return translated
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (b *linuxBackend) waitRemoved(ctx context.Context, path dbus.ObjectPath) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		objects, err := b.objects(ctx)
+		if err != nil {
+			return err
+		}
+		if _, exists := objects[path]; !exists {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 func (b *linuxBackend) adapter(ctx context.Context) (dbus.ObjectPath, error) {
 	objects, err := b.objects(ctx)

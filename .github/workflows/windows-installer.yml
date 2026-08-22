@@ -36,7 +36,10 @@ jobs:
         run: ./packaging/windows/build.ps1 -Version 0.0.0
       - name: Smoke-test MSI install and clean uninstall
         shell: pwsh
-        run: ./packaging/windows/test-installer.ps1 -Msi (Get-ChildItem ./packaging/windows/artifacts/msi -Filter *.msi -Recurse | Select-Object -First 1).FullName -SkipDriver
+        run: |
+          $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
+          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-airpods-advanced-windows-x64.msi -Recurse).FullName
+          ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced -SkipDriver
       - uses: actions/upload-artifact@v4
         with:
           name: betty-windows-unsigned-validation

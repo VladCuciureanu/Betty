@@ -1,0 +1,10 @@
+{
+  "protocol": 1,
+  "id": "official/sony-headphones",
+  "name": "Sony Headphones",
+  "version": "bundled",
+  "permissions": [
+    "device-metadata",
+    "rfcomm"
+  ]
+}

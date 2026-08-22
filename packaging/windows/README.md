@@ -1,11 +1,15 @@
 # Betty Windows package
 
-`build.ps1` produces the single Windows release artifact: `betty-windows-x64.msi`.
+`build.ps1` produces two independent Windows release artifacts:
 
-The package contains:
+- `betty-windows-x64.msi`, the device-generic Betty CLI;
+- `betty-airpods-advanced-windows-x64.msi`, optional AirPods Advanced Support.
 
-- the `bt` CLI and a system `PATH` entry;
-- the optional AirPods executable driver in Betty's read-only bundled-driver layout;
+The normal package contains only `bt.exe` and a system `PATH` entry. It has no AirPods parser, model data, setup helper, or kernel payload.
+
+The optional Advanced Support package contains:
+
+- the AirPods executable driver in Betty's read-only bundled-driver layout;
 - `BettyAAP.sys`, its INF, and signed catalog;
 - a small elevated setup helper that stages/binds the driver during install and unbinds/removes it during uninstall.
 
@@ -25,13 +29,15 @@ Run:
 ./packaging/windows/build.ps1 -Version 1.0.0
 ```
 
+Use `-BaseOnly` to build only `betty-windows-x64.msi`; this path does not compile or require the AirPods userspace driver, setup helper, WDK project, or kernel package.
+
 Release signing credentials are described in the root README. Windows 10/11 requires Microsoft Hardware Dev Center signing for new kernel drivers. Prepare the submission with:
 
 ```powershell
 ./packaging/windows/build-driver-submission.ps1 -Version 1.0.0
 ```
 
-Upload the signed CAB to Hardware Dev Center for attestation or WHCP signing. After downloading Microsoft's signed package, build the release MSI with:
+Upload the signed CAB to Hardware Dev Center for attestation or WHCP signing. After downloading Microsoft's signed package, build both release MSIs with:
 
 ```powershell
 ./packaging/windows/build.ps1 -Version 1.0.0 `
@@ -43,8 +49,8 @@ The first requirement verifies the returned catalog using kernel signing policy.
 
 ## Lifecycle
 
-Installation is per-machine and elevated. The MSI copies its payload, stages the driver package with `SetupCopyOEMInfW`, asks Windows to bind matching devices with `DiInstallDriverW`, and records the exact published OEM INF name. If a later MSI action fails, rollback uninstalls that package.
+Both installations are per-machine and elevated. The normal MSI installs only Betty. Advanced Support requires the normal MSI, copies its payload, stages the driver package with `SetupCopyOEMInfW`, asks Windows to bind matching devices with `DiInstallDriverW`, and records the exact published OEM INF name. If a later MSI action fails, rollback uninstalls that package.
 
-Uninstall runs while the INF and setup helper still exist. It calls `DiUninstallDriverW`, removes the recorded package with `SetupUninstallOEMInfW`, removes the system `PATH` entry and program files, and then removes the machine registry key. The inverse rollback action reinstalls the package if MSI removal fails later.
+Advanced Support uninstall runs while the INF and setup helper still exist. It calls `DiUninstallDriverW`, removes the recorded package with `SetupUninstallOEMInfW`, removes only its own application files and machine state, and leaves Betty installed. The inverse rollback action reinstalls the package if MSI removal fails later. The normal Betty uninstall is blocked until Advanced Support is removed, after which it removes `bt.exe`, its `PATH` entry, and its remaining machine state.
 
 Per-user state is outside MSI ownership and is preserved. This prevents one account uninstalling the application from silently destroying another account's exported or acquired AirPods keys.

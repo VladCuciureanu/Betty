@@ -38,7 +38,7 @@ type deviceSearchParams struct {
 }
 type windowsBackend struct{}
 
-func newPlatformBackend() Backend { return &windowsBackend{} }
+func newPlatformBackend(PairingIO) Backend { return &windowsBackend{} }
 func (*windowsBackend) Capabilities() domain.Capabilities {
 	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Supported, Connect: domain.Unsupported, Disconnect: domain.Unsupported, GATT: domain.Supported}
 }

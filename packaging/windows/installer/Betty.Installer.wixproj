@@ -8,4 +8,7 @@
     <DriverDir Condition="'$(DriverDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\driver</DriverDir>
     <DefineConstants>Version=$(Version);PayloadDir=$(PayloadDir);DriverDir=$(DriverDir)</DefineConstants>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Package.Advanced.wxs" />
+  </ItemGroup>
 </Project>

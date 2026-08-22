@@ -2,9 +2,15 @@ package backend
 
 import (
 	"context"
+	"io"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
+
+type PairingIO struct {
+	In  io.Reader
+	Out io.Writer
+}
 
 type Backend interface {
 	Capabilities() domain.Capabilities
@@ -16,4 +22,4 @@ type Backend interface {
 	Disconnect(context.Context, domain.Device) error
 }
 
-func New() Backend { return newPlatformBackend() }
+func New(pairing PairingIO) Backend { return newPlatformBackend(pairing) }

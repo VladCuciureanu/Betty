@@ -44,12 +44,16 @@ const (
 	TypeHostResponse = "host_response"
 )
 const (
-	HostL2CAPOpen  = "l2cap.open"
-	HostL2CAPRead  = "l2cap.read"
-	HostL2CAPWrite = "l2cap.write"
-	HostL2CAPClose = "l2cap.close"
-	HostStorageGet = "storage.get"
-	HostStorageSet = "storage.set"
+	HostL2CAPOpen   = "l2cap.open"
+	HostL2CAPRead   = "l2cap.read"
+	HostL2CAPWrite  = "l2cap.write"
+	HostL2CAPClose  = "l2cap.close"
+	HostRFCOMMOpen  = "rfcomm.open"
+	HostRFCOMMRead  = "rfcomm.read"
+	HostRFCOMMWrite = "rfcomm.write"
+	HostRFCOMMClose = "rfcomm.close"
+	HostStorageGet  = "storage.get"
+	HostStorageSet  = "storage.set"
 )
 
 type Device struct {
@@ -121,6 +125,22 @@ type L2CAPReadParams struct {
 	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 type L2CAPWriteParams struct {
+	ChannelID string `json:"channel_id"`
+	Data      string `json:"data"`
+}
+type RFCOMMOpenParams struct {
+	DeviceID    string `json:"device_id"`
+	ServiceUUID string `json:"service_uuid"`
+}
+type RFCOMMChannelParams struct {
+	ChannelID string `json:"channel_id"`
+}
+type RFCOMMReadParams struct {
+	ChannelID string `json:"channel_id"`
+	MaxBytes  int    `json:"max_bytes"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+}
+type RFCOMMWriteParams struct {
 	ChannelID string `json:"channel_id"`
 	Data      string `json:"data"`
 }

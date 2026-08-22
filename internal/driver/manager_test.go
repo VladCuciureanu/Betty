@@ -16,6 +16,25 @@ type fakeHost struct {
 	written      []byte
 }
 
+type fakeRFCOMMHost struct {
+	openedDevice  string
+	openedService string
+	written       []byte
+}
+
+func (f *fakeRFCOMMHost) OpenRFCOMM(_ context.Context, device, service string) (string, error) {
+	f.openedDevice, f.openedService = device, service
+	return "rfcomm-1", nil
+}
+func (*fakeRFCOMMHost) ReadRFCOMM(context.Context, string, int) ([]byte, error) {
+	return []byte{0x3e, 0x3c}, nil
+}
+func (f *fakeRFCOMMHost) WriteRFCOMM(_ context.Context, _ string, data []byte) (int, error) {
+	f.written = append([]byte(nil), data...)
+	return len(data), nil
+}
+func (*fakeRFCOMMHost) CloseRFCOMM(context.Context, string) error { return nil }
+
 func (f *fakeHost) OpenL2CAP(_ context.Context, device string, _ uint16) (string, error) {
 	f.openedDevice = device
 	return "channel-1", nil
@@ -35,13 +54,13 @@ func TestHostL2CAPIsScopedToSelectedDevicesAndChannels(t *testing.T) {
 	m.SetHost(host)
 	manifest := protocol.Manifest{ID: "official/test", Permissions: []string{"l2cap"}}
 	allowed := map[string]bool{"device": true}
-	channels := map[string]bool{}
+	channels := map[string]string{}
 	params, _ := json.Marshal(protocol.L2CAPOpenParams{DeviceID: "device", PSM: 25})
 	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: params}, allowed, channels)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.openedDevice != "device" || !channels["channel-1"] {
+	if host.openedDevice != "device" || channels["channel-1"] != "l2cap" {
 		t.Fatalf("result=%s host=%#v channels=%v", result, host, channels)
 	}
 	write, _ := json.Marshal(protocol.L2CAPWriteParams{ChannelID: "channel-1", Data: "aabb"})
@@ -54,6 +73,37 @@ func TestHostL2CAPIsScopedToSelectedDevicesAndChannels(t *testing.T) {
 	foreign, _ := json.Marshal(protocol.L2CAPOpenParams{DeviceID: "other", PSM: 25})
 	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: foreign}, allowed, channels); err == nil {
 		t.Fatal("expected device scope error")
+	}
+}
+
+func TestHostRFCOMMIsPermissionAndDeviceScoped(t *testing.T) {
+	m := NewAt(t.TempDir())
+	host := &fakeRFCOMMHost{}
+	m.SetRFCOMMHost(host)
+	manifest := protocol.Manifest{ID: "official/sony-headphones", Permissions: []string{"rfcomm"}}
+	allowed := map[string]bool{"sony": true}
+	channels := map[string]string{}
+	params, _ := json.Marshal(protocol.RFCOMMOpenParams{DeviceID: "sony", ServiceUUID: "956c"})
+	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, allowed, channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.openedDevice != "sony" || host.openedService != "956c" || channels["rfcomm-1"] != "rfcomm" {
+		t.Fatalf("result=%s host=%#v channels=%v", result, host, channels)
+	}
+	write, _ := json.Marshal(protocol.RFCOMMWriteParams{ChannelID: "rfcomm-1", Data: "aabb"})
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMWrite, Params: write}, allowed, channels); err != nil {
+		t.Fatal(err)
+	}
+	if hex.EncodeToString(host.written) != "aabb" {
+		t.Fatalf("written=%x", host.written)
+	}
+	foreign, _ := json.Marshal(protocol.RFCOMMOpenParams{DeviceID: "other", ServiceUUID: "956c"})
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: foreign}, allowed, channels); err == nil {
+		t.Fatal("expected device scope error")
+	}
+	if _, err := m.handleHost(context.Background(), protocol.Manifest{ID: "official/denied"}, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, allowed, channels); err == nil {
+		t.Fatal("expected RFCOMM permission error")
 	}
 }
 
@@ -133,5 +183,33 @@ func TestBundledDriversAreDiscoveredButNotRemoved(t *testing.T) {
 	}
 	if err := m.storageSet(id, "keys/test", "secret"); err != nil {
 		t.Fatalf("bundled driver state should remain user-writable: %v", err)
+	}
+}
+
+func TestSystemBundledDriverIsDiscoveredAndExecutable(t *testing.T) {
+	m := NewAt(t.TempDir())
+	m.systemBundled = t.TempDir()
+	id := "official/airpods"
+	dir := filepath.Join(m.systemBundled, safeID(id))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(protocol.Manifest{Protocol: protocol.Version, ID: id, Name: "AirPods"})
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	driver := filepath.Join(dir, executableName())
+	if err := os.WriteFile(driver, []byte("driver"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	items, err := m.List()
+	if err != nil || len(items) != 1 || items[0].ID != id {
+		t.Fatalf("items=%#v err=%v", items, err)
+	}
+	if got := m.driverPath(id); got != driver {
+		t.Fatalf("driverPath=%q want=%q", got, driver)
+	}
+	if err := m.Remove(id); err == nil {
+		t.Fatal("expected system-bundled driver removal to be rejected")
 	}
 }

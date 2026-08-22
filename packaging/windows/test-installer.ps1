@@ -1,42 +1,68 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$Msi,
+    [Parameter(Mandatory = $true)][string]$BaseMsi,
+    [Parameter(Mandatory = $true)][string]$AdvancedMsi,
     [switch]$SkipDriver
 )
 
 $ErrorActionPreference = "Stop"
-$msiPath = (Resolve-Path $Msi).Path
+$baseMsiPath = (Resolve-Path $BaseMsi).Path
+$advancedMsiPath = (Resolve-Path $AdvancedMsi).Path
 $installDirectory = Join-Path $env:ProgramFiles "Betty"
-$installLog = Join-Path $env:RUNNER_TEMP "betty-msi-install.log"
-$uninstallLog = Join-Path $env:RUNNER_TEMP "betty-msi-uninstall.log"
+$advancedDirectory = Join-Path $env:ProgramFiles "Betty AirPods Advanced"
 $skipArgument = if ($SkipDriver) { "SKIPDRIVER=1" } else { "" }
 
-function Invoke-Msi([string]$Arguments, [string]$Log) {
-    $process = Start-Process msiexec.exe -ArgumentList "$Arguments /qn /norestart /l*v `"$Log`"" -Wait -PassThru
-    if ($process.ExitCode -notin @(0, 1641, 3010)) {
-        Get-Content $Log -Tail 100 -ErrorAction SilentlyContinue
-        throw "msiexec failed with exit code $($process.ExitCode)"
+function Invoke-Msi([string]$Arguments, [string]$LogName, [bool]$ExpectSuccess = $true) {
+    $log = Join-Path $env:RUNNER_TEMP $LogName
+    $process = Start-Process msiexec.exe -ArgumentList "$Arguments /qn /norestart /l*v `"$log`"" -Wait -PassThru
+    $succeeded = $process.ExitCode -in @(0, 1641, 3010)
+    if ($succeeded -ne $ExpectSuccess) {
+        Get-Content $log -Tail 100 -ErrorAction SilentlyContinue
+        throw "msiexec returned unexpected exit code $($process.ExitCode)"
     }
 }
 
-$installed = $false
+$baseInstalled = $false
+$advancedInstalled = $false
 try {
-    Invoke-Msi "/i `"$msiPath`" $skipArgument" $installLog
-    $installed = $true
+    Invoke-Msi "/i `"$baseMsiPath`"" "betty-base-install.log"
+    $baseInstalled = $true
     $bt = Join-Path $installDirectory "bt.exe"
-    if (-not (Test-Path $bt)) { throw "MSI did not install bt.exe" }
+    if (-not (Test-Path $bt)) { throw "Base MSI did not install bt.exe" }
     & $bt --version
     $drivers = & $bt driver list
-    if ($drivers -notmatch 'official/airpods') { throw "Bundled AirPods driver was not discovered" }
+    if ($drivers -match 'official/airpods') { throw "Base MSI unexpectedly bundled the AirPods driver" }
+
+    Invoke-Msi "/i `"$advancedMsiPath`" $skipArgument" "betty-advanced-install.log"
+    $advancedInstalled = $true
+    $drivers = & $bt driver list
+    if ($drivers -notmatch 'official/airpods') { throw "Advanced MSI AirPods driver was not discovered" }
     if (-not $SkipDriver) {
         $published = Get-ItemPropertyValue "HKLM:\SOFTWARE\Betty" "AirPodsDriverPublishedName"
-        if ($published -notmatch '^oem\d+\.inf$') { throw "MSI did not record the staged profile driver" }
+        if ($published -notmatch '^oem\d+\.inf$') { throw "Advanced MSI did not record the staged profile driver" }
     }
+
+    Invoke-Msi "/x `"$baseMsiPath`"" "betty-base-blocked-uninstall.log" $false
+    if (-not (Test-Path $bt)) { throw "Base MSI was removed while Advanced Support was installed" }
+
+    Invoke-Msi "/x `"$advancedMsiPath`" $skipArgument" "betty-advanced-uninstall.log"
+    $advancedInstalled = $false
+    if (Test-Path $advancedDirectory) { throw "Advanced MSI uninstall left its installation directory behind" }
+    if (Test-Path "HKLM:\SOFTWARE\Betty\AirPodsAdvanced") { throw "Advanced MSI uninstall left its marker behind" }
+    if (-not $SkipDriver) {
+        $published = Get-ItemPropertyValue "HKLM:\SOFTWARE\Betty" "AirPodsDriverPublishedName" -ErrorAction SilentlyContinue
+        if ($published) { throw "Advanced MSI uninstall left the profile driver registration behind" }
+    }
+
+    Invoke-Msi "/x `"$baseMsiPath`"" "betty-base-uninstall.log"
+    $baseInstalled = $false
 } finally {
-    if ($installed) {
-        Invoke-Msi "/x `"$msiPath`" $skipArgument" $uninstallLog
+    if ($advancedInstalled) {
+        Invoke-Msi "/x `"$advancedMsiPath`" $skipArgument" "betty-advanced-cleanup.log"
+    }
+    if ($baseInstalled) {
+        Invoke-Msi "/x `"$baseMsiPath`"" "betty-base-cleanup.log"
     }
 }
 
-if (Test-Path $installDirectory) { throw "MSI uninstall left the Betty installation directory behind" }
-if (-not $SkipDriver -and (Test-Path "HKLM:\SOFTWARE\Betty")) { throw "MSI uninstall left Betty machine state behind" }
+if (Test-Path $installDirectory) { throw "Base MSI uninstall left the Betty installation directory behind" }

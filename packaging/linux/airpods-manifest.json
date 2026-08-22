@@ -1,0 +1,12 @@
+{
+  "protocol": 1,
+  "id": "official/airpods",
+  "name": "AirPods",
+  "version": "bundled",
+  "permissions": [
+    "device-metadata",
+    "advertisements",
+    "l2cap",
+    "driver-storage"
+  ]
+}

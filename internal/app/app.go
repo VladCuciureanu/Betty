@@ -20,6 +20,7 @@ import (
 	"github.com/vladcuciureanu/betty/internal/l2cap"
 	"github.com/vladcuciureanu/betty/internal/output"
 	"github.com/vladcuciureanu/betty/internal/resolver"
+	"github.com/vladcuciureanu/betty/internal/rfcomm"
 )
 
 type application struct {
@@ -40,7 +41,6 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		fmt.Fprintln(stdout, helpText)
 		return 0
 	}
-	_ = stdin
 	opts, rest, err := parseGlobal(args, stderr)
 	renderer := output.Renderer{Out: stdout, Err: stderr, Mode: opts.mode, Verbose: opts.verbose}
 	if err != nil {
@@ -49,7 +49,8 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 	}
 	drivers := driver.New()
 	drivers.SetHost(l2cap.New())
-	a := application{backend: backend.New(), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers}
+	drivers.SetRFCOMMHost(rfcomm.New())
+	a := application{backend: backend.New(backend.PairingIO{In: stdin, Out: stderr}), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, opts.timeout)

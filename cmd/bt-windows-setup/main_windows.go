@@ -114,7 +114,10 @@ func uninstall(inf string) error {
 	} else if !errors.Is(err, registry.ErrNotExist) {
 		return err
 	}
-	_ = registry.DeleteKey(registry.LOCAL_MACHINE, stateKey)
+	if key, openErr := registry.OpenKey(registry.LOCAL_MACHINE, stateKey, registry.SET_VALUE|registry.WOW64_64KEY); openErr == nil {
+		_ = key.DeleteValue(publishedName)
+		key.Close()
+	}
 	return nil
 }
 

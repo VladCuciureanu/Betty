@@ -1,0 +1,64 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Betty AirPods Advanced Support"
+      Manufacturer="Betty"
+      Version="$(var.Version)"
+      UpgradeCode="{AD79B787-F86C-4EB5-BD4E-666114039F72}"
+      Scope="perMachine"
+      Compressed="yes">
+    <SummaryInformation Description="Optional exact battery and control transport for AirPods" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Betty AirPods Advanced Support is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="BETTYINSTALLED">
+      <RegistrySearch Id="BettyInstallSearch" Root="HKLM" Key="Software\Betty" Name="InstallDirectory" Type="raw" Bitness="always64" />
+    </Property>
+    <Launch Condition="Installed OR BETTYINSTALLED" Message="Install Betty before installing AirPods Advanced Support." />
+
+    <Feature Id="AdvancedFeature" Title="AirPods Advanced Support" Level="1">
+      <ComponentGroupRef Id="AdvancedComponents" />
+    </Feature>
+
+    <CustomAction Id="InstallProfileDriver" FileRef="WindowsSetupExe" ExeCommand="install &quot;kernel-driver\BettyAAP.inf&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="RollbackProfileDriverInstall" FileRef="WindowsSetupExe" ExeCommand="uninstall &quot;kernel-driver\BettyAAP.inf&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+    <CustomAction Id="UninstallProfileDriver" FileRef="WindowsSetupExe" ExeCommand="uninstall &quot;kernel-driver\BettyAAP.inf&quot;" Execute="deferred" Impersonate="no" Return="check" />
+    <CustomAction Id="RollbackProfileDriverUninstall" FileRef="WindowsSetupExe" ExeCommand="install &quot;kernel-driver\BettyAAP.inf&quot;" Execute="rollback" Impersonate="no" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="RollbackProfileDriverInstall" After="InstallFiles" Condition="NOT Installed AND NOT SKIPDRIVER" />
+      <Custom Action="InstallProfileDriver" After="RollbackProfileDriverInstall" Condition="NOT Installed AND NOT SKIPDRIVER" />
+      <Custom Action="RollbackProfileDriverUninstall" Before="UninstallProfileDriver" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT SKIPDRIVER" />
+      <Custom Action="UninstallProfileDriver" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE AND NOT SKIPDRIVER" />
+    </InstallExecuteSequence>
+  </Package>
+
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="BETTYFOLDER" Name="Betty">
+        <Directory Id="BUNDLEDDRIVERS" Name="drivers">
+          <Directory Id="AIRPODSDRIVER" Name="b2ZmaWNpYWwvYWlycG9kcw" />
+        </Directory>
+      </Directory>
+      <Directory Id="ADVANCEDFOLDER" Name="Betty AirPods Advanced">
+        <Directory Id="KERNELDRIVER" Name="kernel-driver" />
+      </Directory>
+    </StandardDirectory>
+    <ComponentGroup Id="AdvancedComponents">
+      <Component Directory="ADVANCEDFOLDER" Id="WindowsSetupExecutable" Guid="{D4946041-AE5E-44DD-9A42-B83A46DAD81B}">
+        <File Id="WindowsSetupExe" Source="$(var.PayloadDir)\bt-windows-setup.exe" KeyPath="yes" />
+      </Component>
+      <Component Directory="AIRPODSDRIVER" Id="AirPodsDriverBundle" Guid="{F511274F-251E-4FAE-B5A6-1E82B72EDB1A}">
+        <File Id="AirPodsDriverExe" Source="$(var.PayloadDir)\bt-driver-airpods.exe" Name="driver.exe" KeyPath="yes" />
+        <File Id="AirPodsDriverManifest" Source="$(var.PayloadDir)\airpods-manifest.json" Name="manifest.json" />
+      </Component>
+      <Component Directory="KERNELDRIVER" Id="KernelDriverPackage" Guid="{02ABFDD5-F5EA-450D-AFF4-E8F1D0DB0D25}">
+        <File Id="KernelDriverInf" Source="$(var.DriverDir)\BettyAAP.inf" KeyPath="yes" />
+        <File Id="KernelDriverSys" Source="$(var.DriverDir)\BettyAAP.sys" />
+        <File Id="KernelDriverCat" Source="$(var.DriverDir)\BettyAAP.cat" />
+      </Component>
+      <Component Directory="ADVANCEDFOLDER" Id="AdvancedMarker" Guid="{8A1C9B8F-E601-4057-A642-F99E3D59E711}">
+        <RegistryValue Root="HKLM" Key="Software\Betty\AirPodsAdvanced" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
