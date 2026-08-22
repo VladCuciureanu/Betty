@@ -3,7 +3,7 @@
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
     <InstallerPlatform>x64</InstallerPlatform>
-    <OutputName>betty-airpods-advanced-windows-x64</OutputName>
+    <OutputName>betty-apple-audio-advanced-windows-x64</OutputName>
     <PayloadDir Condition="'$(PayloadDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\payload</PayloadDir>
     <DriverDir Condition="'$(DriverDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\driver</DriverDir>
     <DefineConstants>Version=$(Version);PayloadDir=$(PayloadDir);DriverDir=$(DriverDir)</DefineConstants>

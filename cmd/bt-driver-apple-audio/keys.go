@@ -10,21 +10,24 @@ import (
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
 
-const keyringStorageKey = "airpods/keyring-v1"
+const (
+	keyringStorageKey       = "apple-audio/keyring-v1"
+	legacyKeyringStorageKey = "airpods/keyring-v1"
+)
 
-type airPodsKeys struct {
+type appleAudioKeys struct {
 	DeviceID string `json:"device_id,omitempty"`
 	ModelID  uint16 `json:"model_id,omitempty"`
 	IRK      string `json:"irk"`
 	ENC      string `json:"enc"`
 }
 
-type airPodsKeyring struct {
-	Version int           `json:"version"`
-	Keys    []airPodsKeys `json:"keys"`
+type appleAudioKeyring struct {
+	Version int              `json:"version"`
+	Keys    []appleAudioKeys `json:"keys"`
 }
 
-func (k *airPodsKeyring) Upsert(value airPodsKeys) {
+func (k *appleAudioKeyring) Upsert(value appleAudioKeys) {
 	for i := range k.Keys {
 		if k.Keys[i].DeviceID == value.DeviceID || (value.IRK != "" && k.Keys[i].IRK == value.IRK) {
 			k.Keys[i] = value
@@ -34,28 +37,41 @@ func (k *airPodsKeyring) Upsert(value airPodsKeys) {
 	k.Keys = append(k.Keys, value)
 }
 
-func loadKeyring(session *protocol.Session) (airPodsKeyring, error) {
+func loadKeyring(session *protocol.Session) (appleAudioKeyring, error) {
+	keyring, found, err := loadStoredKeyring(session, keyringStorageKey)
+	if err != nil || found {
+		return keyring, err
+	}
+	keyring, found, err = loadStoredKeyring(session, legacyKeyringStorageKey)
+	if err != nil || !found {
+		return keyring, err
+	}
+	_ = saveKeyring(session, keyring)
+	return keyring, nil
+}
+
+func loadStoredKeyring(session *protocol.Session, key string) (appleAudioKeyring, bool, error) {
 	var result struct {
 		Value string `json:"value"`
 		Found bool   `json:"found"`
 	}
-	if err := session.CallHost(protocol.HostStorageGet, protocol.StorageGetParams{Key: keyringStorageKey}, &result); err != nil {
-		return airPodsKeyring{Version: 1}, err
+	if err := session.CallHost(protocol.HostStorageGet, protocol.StorageGetParams{Key: key}, &result); err != nil {
+		return appleAudioKeyring{Version: 1}, false, err
 	}
 	if !result.Found {
-		return airPodsKeyring{Version: 1}, nil
+		return appleAudioKeyring{Version: 1}, false, nil
 	}
-	var keyring airPodsKeyring
+	var keyring appleAudioKeyring
 	if err := json.Unmarshal([]byte(result.Value), &keyring); err != nil {
-		return airPodsKeyring{}, err
+		return appleAudioKeyring{}, true, err
 	}
 	if keyring.Version != 1 {
-		return airPodsKeyring{}, fmt.Errorf("unsupported AirPods keyring version %d", keyring.Version)
+		return appleAudioKeyring{}, true, fmt.Errorf("unsupported Apple audio keyring version %d", keyring.Version)
 	}
-	return keyring, nil
+	return keyring, true, nil
 }
 
-func saveKeyring(session *protocol.Session, keyring airPodsKeyring) error {
+func saveKeyring(session *protocol.Session, keyring appleAudioKeyring) error {
 	keyring.Version = 1
 	raw, err := json.Marshal(keyring)
 	if err != nil {
@@ -64,7 +80,7 @@ func saveKeyring(session *protocol.Session, keyring airPodsKeyring) error {
 	return session.CallHost(protocol.HostStorageSet, protocol.StorageSetParams{Key: keyringStorageKey, Value: string(raw)}, nil)
 }
 
-func decryptAdvertisement(device protocol.Device, modelID uint16, keyring airPodsKeyring) (exactBattery, bool) {
+func decryptAdvertisement(device protocol.Device, modelID uint16, keyring appleAudioKeyring) (exactBattery, bool) {
 	for _, manufacturer := range device.ManufacturerData {
 		if manufacturer.CompanyID != 0x004c {
 			continue

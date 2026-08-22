@@ -13,7 +13,7 @@
     <Property Id="BETTYAIRPODSADVANCED">
       <RegistrySearch Id="AdvancedSupportSearch" Root="HKLM" Key="Software\Betty\AirPodsAdvanced" Name="Installed" Type="raw" Bitness="always64" />
     </Property>
-    <Launch Condition="NOT (Installed AND REMOVE~=&quot;ALL&quot; AND BETTYAIRPODSADVANCED) OR UPGRADINGPRODUCTCODE" Message="Remove Betty AirPods Advanced Support before uninstalling Betty." />
+    <Launch Condition="NOT (Installed AND REMOVE~=&quot;ALL&quot; AND BETTYAIRPODSADVANCED) OR UPGRADINGPRODUCTCODE" Message="Remove Betty Apple Audio Advanced Support before uninstalling Betty." />
 
     <Feature Id="MainFeature" Title="Betty" Level="1">
       <ComponentGroupRef Id="ProductComponents" />

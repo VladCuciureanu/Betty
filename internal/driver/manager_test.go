@@ -117,13 +117,33 @@ func TestHostPermissionsAndNamespacedStorage(t *testing.T) {
 	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostStorageSet, Params: params}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	value, found, err := m.storageGet(manifest.ID, "keys/airpods")
+	value, found, err := m.storageGet(manifest, "keys/airpods")
 	if err != nil || !found || value != "secret" {
 		t.Fatalf("value=%q found=%t err=%v", value, found, err)
 	}
 	denied := protocol.Manifest{ID: "official/denied"}
 	if _, err := m.handleHost(context.Background(), denied, protocol.Message{Method: protocol.HostStorageSet, Params: params}, nil, nil); err == nil {
 		t.Fatal("expected permission error")
+	}
+}
+
+func TestDriverStorageMigratesFromLegacyID(t *testing.T) {
+	m := NewAt(t.TempDir())
+	legacy := protocol.Manifest{ID: "official/airpods"}
+	current := protocol.Manifest{ID: "official/apple-audio", LegacyIDs: []string{legacy.ID}}
+	if err := m.storageSet(legacy, "airpods/keyring-v1", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	value, found, err := m.storageGet(current, "airpods/keyring-v1")
+	if err != nil || !found || value != "secret" {
+		t.Fatalf("value=%q found=%t err=%v", value, found, err)
+	}
+	if err := m.storageSet(current, "apple-audio/keyring-v1", "new"); err != nil {
+		t.Fatal(err)
+	}
+	values, err := m.readStorage(current.ID)
+	if err != nil || values["airpods/keyring-v1"] != "secret" || values["apple-audio/keyring-v1"] != "new" {
+		t.Fatalf("values=%#v err=%v", values, err)
 	}
 }
 
@@ -139,7 +159,7 @@ func TestExportImportDriverState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.storageSet(id, "airpods/keyring-v1", "secret"); err != nil {
+	if err := m.storageSet(protocol.Manifest{ID: id}, "airpods/keyring-v1", "secret"); err != nil {
 		t.Fatal(err)
 	}
 	export := filepath.Join(t.TempDir(), "state.json")
@@ -150,13 +170,13 @@ func TestExportImportDriverState(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode=%o", info.Mode().Perm())
 	}
-	if err := m.storageSet(id, "airpods/keyring-v1", "changed"); err != nil {
+	if err := m.storageSet(protocol.Manifest{ID: id}, "airpods/keyring-v1", "changed"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.ImportState(id, export); err != nil {
 		t.Fatal(err)
 	}
-	value, found, err := m.storageGet(id, "airpods/keyring-v1")
+	value, found, err := m.storageGet(protocol.Manifest{ID: id}, "airpods/keyring-v1")
 	if err != nil || !found || value != "secret" {
 		t.Fatalf("value=%q found=%t err=%v", value, found, err)
 	}
@@ -181,7 +201,7 @@ func TestBundledDriversAreDiscoveredButNotRemoved(t *testing.T) {
 	if err := m.Remove(id); err == nil {
 		t.Fatal("expected bundled driver removal to be rejected")
 	}
-	if err := m.storageSet(id, "keys/test", "secret"); err != nil {
+	if err := m.storageSet(protocol.Manifest{ID: id}, "keys/test", "secret"); err != nil {
 		t.Fatalf("bundled driver state should remain user-writable: %v", err)
 	}
 }

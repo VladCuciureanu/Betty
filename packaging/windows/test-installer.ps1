@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $baseMsiPath = (Resolve-Path $BaseMsi).Path
 $advancedMsiPath = (Resolve-Path $AdvancedMsi).Path
 $installDirectory = Join-Path $env:ProgramFiles "Betty"
-$advancedDirectory = Join-Path $env:ProgramFiles "Betty AirPods Advanced"
+$advancedDirectory = Join-Path $env:ProgramFiles "Betty Apple Audio Advanced"
 $skipArgument = if ($SkipDriver) { "SKIPDRIVER=1" } else { "" }
 
 function Invoke-Msi([string]$Arguments, [string]$LogName, [bool]$ExpectSuccess = $true) {
@@ -31,12 +31,12 @@ try {
     if (-not (Test-Path $bt)) { throw "Base MSI did not install bt.exe" }
     & $bt --version
     $drivers = & $bt driver list
-    if ($drivers -match 'official/airpods') { throw "Base MSI unexpectedly bundled the AirPods driver" }
+    if ($drivers -match 'official/apple-audio') { throw "Base MSI unexpectedly bundled the Apple Audio driver" }
 
     Invoke-Msi "/i `"$advancedMsiPath`" $skipArgument" "betty-advanced-install.log"
     $advancedInstalled = $true
     $drivers = & $bt driver list
-    if ($drivers -notmatch 'official/airpods') { throw "Advanced MSI AirPods driver was not discovered" }
+    if ($drivers -notmatch 'official/apple-audio') { throw "Advanced MSI Apple Audio driver was not discovered" }
     if (-not $SkipDriver) {
         $published = Get-ItemPropertyValue "HKLM:\SOFTWARE\Betty" "AirPodsDriverPublishedName"
         if ($published -notmatch '^oem\d+\.inf$') { throw "Advanced MSI did not record the staged profile driver" }

@@ -51,9 +51,9 @@ func (*darwinHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16) (
 	case r := <-done:
 		if r.code != 0 || r.id <= 0 {
 			// Apple's public IOBluetooth API reaches the paired device but rejects
-			// the reserved Apple Accessory Protocol channel used by AirPods.
+			// the reserved Apple Accessory Protocol channel used by AirPods and Beats.
 			if psm == 0x1001 && uint32(r.code) == ioReturnError {
-				return "", domain.NewError(domain.CodeUnsupported, "macOS does not permit third-party apps to open the AirPods control channel (PSM 0x1001)")
+				return "", domain.NewError(domain.CodeUnsupported, "macOS does not permit third-party apps to open the Apple audio control channel (PSM 0x1001)")
 			}
 			return "", nativeError("open", r.code)
 		}

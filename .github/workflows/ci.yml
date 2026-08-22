@@ -29,6 +29,7 @@ jobs:
           suffix=""
           if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
           go build -trimpath -ldflags="-s -w" -o "dist/bt${suffix}" ./cmd/bt
+          go build -trimpath -ldflags="-s -w" -o "dist/bt-driver-apple-audio${suffix}" ./cmd/bt-driver-apple-audio
           go build -trimpath -ldflags="-s -w" -o "dist/bt-driver-sony${suffix}" ./cmd/bt-driver-sony
           ls -lh "dist/bt${suffix}"
       - name: Build and inspect Linux packages
@@ -37,9 +38,9 @@ jobs:
         run: |
           ./packaging/linux/build-deb.sh 0.0.0 dist-deb
           dpkg-deb --info dist-deb/betty_0.0.0_amd64.deb
-          dpkg-deb --info dist-deb/betty-airpods_0.0.0_amd64.deb
+          dpkg-deb --info dist-deb/betty-apple-audio_0.0.0_amd64.deb
           dpkg-deb --info dist-deb/betty-sony_0.0.0_amd64.deb
-          if dpkg-deb --fsys-tarfile dist-deb/betty_0.0.0_amd64.deb | tar -tf - | grep -Eqi 'airpods|sony'; then
+          if dpkg-deb --fsys-tarfile dist-deb/betty_0.0.0_amd64.deb | tar -tf - | grep -Eqi 'airpods|apple.audio|sony'; then
             echo "base package contains vendor-specific files" >&2
             exit 1
           fi

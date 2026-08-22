@@ -85,13 +85,13 @@ Platform limitations must be reported as `unsupported`; Betty must never report 
 - Preserve the rule that the base Betty executable contains no proprietary device parser or model table.
 - Consider built-in or sandboxed providers only if they preserve the same CLI capability grammar.
 
-## AirPods support
+## Apple Audio support
 
 ### Battery readings
 
-- Validate exact AAP battery reads against real AirPods models on Linux and Windows.
+- Validate exact AAP battery reads against real AirPods and Beats models on Linux and Windows.
 - Compare left, right, case, charging, and headset values against each operating system where a trustworthy reference is available.
-- Record which AirPods models expose which components and under what lid, charging, worn, or connection states.
+- Record which Apple Audio models expose headset versus left/right/case components and under what lid, charging, worn, or connection states.
 - Add AAP stream fixtures for fragmented packets, unrelated notifications, missing components, malformed lengths, invalid statuses, key responses, and timeouts.
 - Validate acquisition and persistence of the IRK and advertisement-encryption key.
 - Validate encrypted BLE advertisement decoding after reconnects, address rotation, reboot, and state transfer.
@@ -100,9 +100,9 @@ Platform limitations must be reported as `unsupported`; Betty must never report 
 
 ### Device matching
 
-- Do not treat matching AirPods names as proof of endpoint identity.
+- Do not treat matching AirPods or Beats names as proof of endpoint identity.
 - Use protocol-acquired keys or an authenticated AAP session as stronger evidence when possible.
-- Test behavior with multiple nearby AirPods sets and multiple saved AirPods devices.
+- Test behavior with multiple nearby Apple Audio devices and multiple saved devices.
 - Expose uncertainty rather than attaching battery values to an ambiguous Classic device.
 
 ### Noise control and other features
@@ -132,19 +132,19 @@ Platform limitations must be reported as `unsupported`; Betty must never report 
 - Decide and document idempotent behavior for already-paired, already-connected, and already-disconnected devices.
 - Test systems with multiple adapters even though v1 intentionally uses the default adapter.
 
-### Linux AirPods transport
+### Linux Apple Audio transport
 
 - Hardware-test the native `AF_BLUETOOTH`/L2CAP channel to PSM `0x1001`.
 - Confirm the minimum required capability on supported distributions and kernels.
-- Verify that only the optional AirPods executable receives `CAP_NET_RAW`; never grant it to `bt`.
+- Verify the actual process that opens L2CAP has only the minimum required capability; never grant broad privileges to ordinary `bt` commands.
 - Produce actionable diagnostics when the filesystem cannot store capabilities or the capability was stripped during copying/upgrading.
 - Test channel cleanup on timeout, process termination, Bluetooth reset, and unexpected AirPods disconnection.
 
 ### Linux packaging
 
 - Build and install the Debian packages on native Ubuntu and Debian runners.
-- Verify that `betty` contains no AirPods files.
-- Verify `betty-airpods` dependency/version matching, driver discovery, exact file capabilities, upgrades, and clean uninstall.
+- Verify that `betty` contains no Apple Audio files.
+- Verify `betty-apple-audio` dependency/version matching, replacement of `betty-airpods`, driver discovery, exact file capabilities, upgrades, and clean uninstall.
 - Preserve per-user keys during package removal and document how users can remove them explicitly.
 - Add RPM packages for Fedora-family systems.
 - Consider a portable tarball and an Arch `PKGBUILD` after the primary packages are stable.
@@ -186,10 +186,10 @@ Platform limitations must be reported as `unsupported`; Betty must never report 
 - Keep generic OS profile connect and disconnect explicitly unsupported unless a reliable public API is found.
 - Validate BLE scanning and GATT using real hardware.
 
-### AirPods profile driver
+### Apple Audio profile driver
 
 - Build the KMDF project with the pinned WDK on native Windows.
-- Validate binding only to the intended AirPods AAP SDP service.
+- Validate binding only to the intended Apple AAP SDP service for both AirPods and Beats hardware IDs.
 - Test connect, disconnect, send, bounded receive, cancellation, Bluetooth reset, surprise removal, sleep, and upgrade behavior.
 - Fuzz and validate every userspace-to-kernel input length and state transition.
 - Complete security review of the IOCTL surface, access control, concurrency, and teardown.
@@ -201,9 +201,9 @@ Platform limitations must be reported as `unsupported`; Betty must never report 
 
 - Build both MSIs natively:
   - `betty-windows-x64.msi`, containing only the generic CLI;
-  - `betty-airpods-advanced-windows-x64.msi`, containing optional AirPods support.
+  - `betty-apple-audio-advanced-windows-x64.msi`, containing optional AirPods and Beats support.
 - Test install, upgrade, rollback, repair, and uninstall on clean Windows 10 and Windows 11 machines.
-- Verify that the base MSI never discovers or contains the AirPods driver.
+- Verify that the base MSI never discovers or contains the Apple Audio driver.
 - Verify that Advanced Support requires Betty and that Betty cannot be removed underneath it.
 - Verify that Advanced Support removes its published OEM INF, kernel files, helper, registry state, and userspace driver without deleting Betty or per-user keys.
 - Sign the executables and both MSI packages separately from Microsoft kernel signing.
@@ -236,8 +236,8 @@ Platform limitations must be reported as `unsupported`; Betty must never report 
 ### Formula design
 
 - Make `betty-bluetooth` build `cmd/bt` from source with Go as a build dependency.
-- Do not compile or install the AirPods executable from the base formula.
-- Add a separate `betty-airpods` formula in the personal tap.
+- Do not compile or install the Apple Audio executable from the base formula.
+- Add a separate `betty-apple-audio` formula in the personal tap.
 - Make independently installed formulae share a Homebrew-safe driver discovery location such as the active prefix's `lib/betty/drivers` directory.
 - Do not require `sudo`, silently add Linux capabilities, or mutate another formula's Cellar directory.
 - Decide whether Linuxbrew AirPods support is passive-only by default with an explicit capability setup step for exact AAP access.

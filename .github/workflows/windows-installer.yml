@@ -38,7 +38,7 @@ jobs:
         shell: pwsh
         run: |
           $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
-          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-airpods-advanced-windows-x64.msi -Recurse).FullName
+          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-apple-audio-advanced-windows-x64.msi -Recurse).FullName
           ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced -SkipDriver
       - uses: actions/upload-artifact@v4
         with:

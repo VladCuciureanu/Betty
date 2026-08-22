@@ -21,8 +21,8 @@ import (
 
 // Windows does not expose arbitrary Bluetooth Classic L2CAP channels to a
 // desktop process. This host speaks the small DeviceIoControl ABI exposed by
-// the optional AirPods Bluetooth profile driver proposed by LibrePods. Battery
-// parsing and AAP remain entirely in Betty's portable AirPods driver.
+// the optional Apple Audio Bluetooth profile driver. Battery parsing and AAP
+// remain entirely in Betty's portable Apple Audio driver.
 var airPodsInterfaceGUID = guid{0xb377a1a0, 0x8cb0, 0x4a5c, [8]byte{0x9b, 0xa2, 0x53, 0xbd, 0xcc, 0x4c, 0x5e, 0x21}}
 
 const (
@@ -94,7 +94,7 @@ func (h *windowsHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16
 		return "", err
 	}
 	if len(paths) == 0 {
-		return "", domain.NewError(domain.CodeUnsupported, "the Windows AirPods Bluetooth profile driver is not installed or not bound to this device")
+		return "", domain.NewError(domain.CodeUnsupported, "the Windows Apple Audio Bluetooth profile driver is not installed or not bound to this device")
 	}
 	var lastErr error
 	for _, path := range paths {
@@ -125,7 +125,7 @@ func (h *windowsHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16
 		}
 		_ = closeWindowsHandle(handle)
 	}
-	return "", fmt.Errorf("connect Windows AirPods L2CAP PSM 0x%04x: %w", psm, lastErr)
+	return "", fmt.Errorf("connect Windows Apple Audio L2CAP PSM 0x%04x: %w", psm, lastErr)
 }
 
 func (h *windowsHost) ReadL2CAP(ctx context.Context, channelID string, max int) ([]byte, error) {
@@ -151,9 +151,9 @@ func (h *windowsHost) ReadL2CAP(ctx context.Context, channelID string, max int) 
 	channel.mu.Unlock()
 	if err != nil {
 		if errors.Is(err, syscall.Errno(121)) || errors.Is(err, syscall.Errno(258)) || errors.Is(err, syscall.Errno(1460)) {
-			return nil, domain.NewError(domain.CodeTimeout, "timed out waiting for AirPods data")
+			return nil, domain.NewError(domain.CodeTimeout, "timed out waiting for Apple audio data")
 		}
-		return nil, fmt.Errorf("receive Windows AirPods L2CAP data: %w", err)
+		return nil, fmt.Errorf("receive Windows Apple Audio L2CAP data: %w", err)
 	}
 	return output[:n], nil
 }
@@ -170,7 +170,7 @@ func (h *windowsHost) WriteL2CAP(ctx context.Context, channelID string, data []b
 	_, err = ioctl(channel.handle, ioctlSend, data, nil)
 	channel.mu.Unlock()
 	if err != nil {
-		return 0, fmt.Errorf("send Windows AirPods L2CAP data: %w", err)
+		return 0, fmt.Errorf("send Windows Apple Audio L2CAP data: %w", err)
 	}
 	return len(data), nil
 }

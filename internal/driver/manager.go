@@ -197,6 +197,11 @@ func (m *Manager) List() ([]protocol.Manifest, error) {
 	}
 	out := make([]protocol.Manifest, 0, len(byID))
 	for _, item := range byID {
+		for _, legacyID := range item.LegacyIDs {
+			delete(byID, legacyID)
+		}
+	}
+	for _, item := range byID {
 		out = append(out, item)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -503,7 +508,7 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 		if err := json.Unmarshal(message.Params, &p); err != nil {
 			return nil, err
 		}
-		value, found, err := m.storageGet(driver.ID, p.Key)
+		value, found, err := m.storageGet(driver, p.Key)
 		if err != nil {
 			return nil, err
 		}
@@ -513,7 +518,7 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 		if err := json.Unmarshal(message.Params, &p); err != nil {
 			return nil, err
 		}
-		if err := m.storageSet(driver.ID, p.Key, p.Value); err != nil {
+		if err := m.storageSet(driver, p.Key, p.Value); err != nil {
 			return nil, err
 		}
 		return marshal(map[string]bool{"stored": true})
@@ -530,30 +535,53 @@ func hasPermission(driver protocol.Manifest, want string) bool {
 	return false
 }
 
-func (m *Manager) storageGet(driverID, key string) (string, bool, error) {
+func (m *Manager) storageGet(driver protocol.Manifest, key string) (string, bool, error) {
 	if err := validateStorageKey(key); err != nil {
 		return "", false, err
 	}
-	values, err := m.readStorage(driverID)
+	values, err := m.readStorage(driver.ID)
 	if err != nil {
 		return "", false, err
 	}
 	value, ok := values[key]
+	if !ok {
+		for _, legacyID := range driver.LegacyIDs {
+			legacyValues, legacyErr := m.readStorage(legacyID)
+			if legacyErr != nil {
+				return "", false, legacyErr
+			}
+			if value, ok = legacyValues[key]; ok {
+				break
+			}
+		}
+	}
 	return value, ok, nil
 }
-func (m *Manager) storageSet(driverID, key, value string) error {
+func (m *Manager) storageSet(driver protocol.Manifest, key, value string) error {
 	if err := validateStorageKey(key); err != nil {
 		return err
 	}
 	if len(value) > 65536 {
 		return domain.NewError(domain.CodeUsage, "stored value exceeds 64 KiB")
 	}
-	values, err := m.readStorage(driverID)
+	values, err := m.readStorage(driver.ID)
 	if err != nil {
 		return err
 	}
+	if len(values) == 0 {
+		for _, legacyID := range driver.LegacyIDs {
+			legacyValues, legacyErr := m.readStorage(legacyID)
+			if legacyErr != nil {
+				return legacyErr
+			}
+			if len(legacyValues) > 0 {
+				values = legacyValues
+				break
+			}
+		}
+	}
 	values[key] = value
-	return m.writeStorage(driverID, values)
+	return m.writeStorage(driver.ID, values)
 }
 func (m *Manager) writeStorage(driverID string, values map[string]string) error {
 	bytes, err := json.Marshal(values)
@@ -620,6 +648,11 @@ func validateManifest(m protocol.Manifest) error {
 	}
 	if !regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$`).MatchString(m.ID) {
 		return domain.NewError(domain.CodeUsage, "invalid driver ID")
+	}
+	for _, legacyID := range m.LegacyIDs {
+		if !regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$`).MatchString(legacyID) || legacyID == m.ID {
+			return domain.NewError(domain.CodeUsage, "invalid legacy driver ID")
+		}
 	}
 	return nil
 }

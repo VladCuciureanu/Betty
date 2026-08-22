@@ -22,20 +22,20 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 base="$work/betty"
-advanced="$work/betty-airpods"
+advanced="$work/betty-apple-audio"
 sony="$work/betty-sony"
-driver_dir="$advanced/usr/lib/betty/drivers/b2ZmaWNpYWwvYWlycG9kcw"
+driver_dir="$advanced/usr/lib/betty/drivers/b2ZmaWNpYWwvYXBwbGUtYXVkaW8"
 sony_driver_dir="$sony/usr/lib/betty/drivers/b2ZmaWNpYWwvc29ueS1oZWFkcGhvbmVz"
 mkdir -p "$output" "$base/DEBIAN" "$base/usr/bin" "$advanced/DEBIAN" "$driver_dir" "$sony/DEBIAN" "$sony_driver_dir"
 
 (
   cd "$root"
   GOOS=linux GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=v$version" -o "$base/usr/bin/bt" ./cmd/bt
-  GOOS=linux GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=v$version" -o "$driver_dir/driver" ./cmd/bt-driver-airpods
+  GOOS=linux GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=v$version" -o "$driver_dir/driver" ./cmd/bt-driver-apple-audio
   GOOS=linux GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=v$version" -o "$sony_driver_dir/driver" ./cmd/bt-driver-sony
 )
 
-install -m 0644 "$root/packaging/linux/airpods-manifest.json" "$driver_dir/manifest.json"
+install -m 0644 "$root/packaging/linux/apple-audio-manifest.json" "$driver_dir/manifest.json"
 sed -i "s/\"version\": \"bundled\"/\"version\": \"v$version\"/" "$driver_dir/manifest.json"
 install -m 0644 "$root/packaging/linux/sony-manifest.json" "$sony_driver_dir/manifest.json"
 sed -i "s/\"version\": \"bundled\"/\"version\": \"v$version\"/" "$sony_driver_dir/manifest.json"
@@ -53,18 +53,21 @@ Description: Small cross-platform Bluetooth command-line interface
 EOF
 
 cat >"$advanced/DEBIAN/control" <<EOF
-Package: betty-airpods
+Package: betty-apple-audio
 Version: $version
 Section: utils
 Priority: optional
 Architecture: $architecture
 Depends: betty (= $version), libcap2-bin
 Maintainer: Betty contributors
-Description: Optional AirPods support for Betty
+Replaces: betty-airpods
+Conflicts: betty-airpods
+Provides: betty-airpods
+Description: Optional Apple and Beats audio support for Betty
  Adds passive battery decoding and privileged Classic L2CAP transport for exact
- component battery readings. The base Betty package contains no AirPods code.
+ component battery readings. The base Betty package contains no Apple audio code.
 EOF
-install -m 0755 "$root/packaging/linux/betty-airpods.postinst" "$advanced/DEBIAN/postinst"
+install -m 0755 "$root/packaging/linux/betty-apple-audio.postinst" "$advanced/DEBIAN/postinst"
 
 cat >"$sony/DEBIAN/control" <<EOF
 Package: betty-sony
@@ -80,6 +83,6 @@ Description: Optional Sony headphones support for Betty
 EOF
 
 dpkg-deb --root-owner-group --build "$base" "$output/betty_${version}_${architecture}.deb"
-dpkg-deb --root-owner-group --build "$advanced" "$output/betty-airpods_${version}_${architecture}.deb"
+dpkg-deb --root-owner-group --build "$advanced" "$output/betty-apple-audio_${version}_${architecture}.deb"
 dpkg-deb --root-owner-group --build "$sony" "$output/betty-sony_${version}_${architecture}.deb"
-printf '%s\n' "$output/betty_${version}_${architecture}.deb" "$output/betty-airpods_${version}_${architecture}.deb" "$output/betty-sony_${version}_${architecture}.deb"
+printf '%s\n' "$output/betty_${version}_${architecture}.deb" "$output/betty-apple-audio_${version}_${architecture}.deb" "$output/betty-sony_${version}_${architecture}.deb"

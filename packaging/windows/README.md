@@ -3,17 +3,17 @@
 `build.ps1` produces two independent Windows release artifacts:
 
 - `betty-windows-x64.msi`, the device-generic Betty CLI;
-- `betty-airpods-advanced-windows-x64.msi`, optional AirPods Advanced Support.
+- `betty-apple-audio-advanced-windows-x64.msi`, optional AirPods and Beats Advanced Support.
 
-The normal package contains only `bt.exe` and a system `PATH` entry. It has no AirPods parser, model data, setup helper, or kernel payload.
+The normal package contains only `bt.exe` and a system `PATH` entry. It has no Apple Audio parser, model data, setup helper, or kernel payload.
 
 The optional Advanced Support package contains:
 
-- the AirPods executable driver in Betty's read-only bundled-driver layout;
+- the Apple Audio executable driver in Betty's read-only bundled-driver layout;
 - `BettyAAP.sys`, its INF, and signed catalog;
 - a small elevated setup helper that stages/binds the driver during install and unbinds/removes it during uninstall.
 
-The KMDF driver is a narrow bridge. It binds only to the AirPods AAP SDP service UUID, opens the requested encrypted/authenticated Classic L2CAP channel, and exposes connect, disconnect, send, and bounded receive operations through a Betty-owned device-interface GUID. All AAP parsing and feature behavior remains in the optional Go driver.
+The KMDF driver is a narrow bridge. It binds only to the Apple AAP SDP service UUID, opens the requested encrypted/authenticated Classic L2CAP channel, and exposes connect, disconnect, send, and bounded receive operations through a Betty-owned device-interface GUID. All AAP parsing and feature behavior remains in the optional Go driver.
 
 ## Build requirements
 
@@ -29,7 +29,7 @@ Run:
 ./packaging/windows/build.ps1 -Version 1.0.0
 ```
 
-Use `-BaseOnly` to build only `betty-windows-x64.msi`; this path does not compile or require the AirPods userspace driver, setup helper, WDK project, or kernel package.
+Use `-BaseOnly` to build only `betty-windows-x64.msi`; this path does not compile or require the Apple Audio userspace driver, setup helper, WDK project, or kernel package.
 
 Release signing credentials are described in the root README. Windows 10/11 requires Microsoft Hardware Dev Center signing for new kernel drivers. Prepare the submission with:
 
@@ -53,4 +53,4 @@ Both installations are per-machine and elevated. The normal MSI installs only Be
 
 Advanced Support uninstall runs while the INF and setup helper still exist. It calls `DiUninstallDriverW`, removes the recorded package with `SetupUninstallOEMInfW`, removes only its own application files and machine state, and leaves Betty installed. The inverse rollback action reinstalls the package if MSI removal fails later. The normal Betty uninstall is blocked until Advanced Support is removed, after which it removes `bt.exe`, its `PATH` entry, and its remaining machine state.
 
-Per-user state is outside MSI ownership and is preserved. This prevents one account uninstalling the application from silently destroying another account's exported or acquired AirPods keys.
+Per-user state is outside MSI ownership and is preserved. This prevents one account uninstalling the application from silently destroying another account's exported or acquired Apple Audio keys.

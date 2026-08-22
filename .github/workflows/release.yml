@@ -14,15 +14,15 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: bt-linux-amd64
-            driver: bt-driver-airpods-linux-amd64
+            driver: bt-driver-apple-audio-linux-amd64
             sony: bt-driver-sony-linux-amd64
           - os: macos-latest
             artifact: bt-macos-arm64
-            driver: bt-driver-airpods-macos-arm64
+            driver: bt-driver-apple-audio-macos-arm64
             sony: bt-driver-sony-macos-arm64
           - os: windows-latest
             artifact: bt-windows-amd64.exe
-            driver: bt-driver-airpods-windows-amd64.exe
+            driver: bt-driver-apple-audio-windows-amd64.exe
             sony: bt-driver-sony-windows-amd64.exe
     runs-on: ${{ matrix.os }}
     steps:
@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.artifact }}" ./cmd/bt
-          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.driver }}" ./cmd/bt-driver-airpods
+          go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.driver }}" ./cmd/bt-driver-apple-audio
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.sony }}" ./cmd/bt-driver-sony
           if [ "$RUNNER_OS" = "Linux" ]; then
             ./packaging/linux/build-deb.sh "${GITHUB_REF_NAME}" dist-deb
@@ -80,7 +80,7 @@ jobs:
         shell: pwsh
         run: |
           $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
-          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-airpods-advanced-windows-x64.msi -Recurse).FullName
+          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-apple-audio-advanced-windows-x64.msi -Recurse).FullName
           ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced
       - uses: actions/upload-artifact@v4
         with:

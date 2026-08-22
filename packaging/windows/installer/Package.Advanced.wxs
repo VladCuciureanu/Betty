@@ -1,21 +1,21 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-      Name="Betty AirPods Advanced Support"
+      Name="Betty Apple Audio Advanced Support"
       Manufacturer="Betty"
       Version="$(var.Version)"
       UpgradeCode="{AD79B787-F86C-4EB5-BD4E-666114039F72}"
       Scope="perMachine"
       Compressed="yes">
-    <SummaryInformation Description="Optional exact battery and control transport for AirPods" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Betty AirPods Advanced Support is already installed." />
+    <SummaryInformation Description="Optional exact battery and control transport for AirPods and Beats" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Betty Apple Audio Advanced Support is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
     <Property Id="BETTYINSTALLED">
       <RegistrySearch Id="BettyInstallSearch" Root="HKLM" Key="Software\Betty" Name="InstallDirectory" Type="raw" Bitness="always64" />
     </Property>
-    <Launch Condition="Installed OR BETTYINSTALLED" Message="Install Betty before installing AirPods Advanced Support." />
+    <Launch Condition="Installed OR BETTYINSTALLED" Message="Install Betty before installing Apple Audio Advanced Support." />
 
-    <Feature Id="AdvancedFeature" Title="AirPods Advanced Support" Level="1">
+    <Feature Id="AdvancedFeature" Title="Apple Audio Advanced Support" Level="1">
       <ComponentGroupRef Id="AdvancedComponents" />
     </Feature>
 
@@ -36,22 +36,22 @@
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="BETTYFOLDER" Name="Betty">
         <Directory Id="BUNDLEDDRIVERS" Name="drivers">
-          <Directory Id="AIRPODSDRIVER" Name="b2ZmaWNpYWwvYWlycG9kcw" />
+          <Directory Id="AIRPODSDRIVER" Name="b2ZmaWNpYWwvYXBwbGUtYXVkaW8" />
         </Directory>
       </Directory>
-      <Directory Id="ADVANCEDFOLDER" Name="Betty AirPods Advanced">
+      <Directory Id="ADVANCEDFOLDER" Name="Betty Apple Audio Advanced">
         <Directory Id="KERNELDRIVER" Name="kernel-driver" />
       </Directory>
     </StandardDirectory>
     <ComponentGroup Id="AdvancedComponents">
-      <Component Directory="ADVANCEDFOLDER" Id="WindowsSetupExecutable" Guid="{D4946041-AE5E-44DD-9A42-B83A46DAD81B}">
+      <Component Directory="ADVANCEDFOLDER" Id="WindowsSetupExecutable" Guid="{B21EA119-4B15-4276-9D4C-27063C1FFE44}">
         <File Id="WindowsSetupExe" Source="$(var.PayloadDir)\bt-windows-setup.exe" KeyPath="yes" />
       </Component>
-      <Component Directory="AIRPODSDRIVER" Id="AirPodsDriverBundle" Guid="{F511274F-251E-4FAE-B5A6-1E82B72EDB1A}">
-        <File Id="AirPodsDriverExe" Source="$(var.PayloadDir)\bt-driver-airpods.exe" Name="driver.exe" KeyPath="yes" />
-        <File Id="AirPodsDriverManifest" Source="$(var.PayloadDir)\airpods-manifest.json" Name="manifest.json" />
+      <Component Directory="AIRPODSDRIVER" Id="AirPodsDriverBundle" Guid="{8A632767-466E-4F36-9570-6856D7CE3506}">
+        <File Id="AirPodsDriverExe" Source="$(var.PayloadDir)\bt-driver-apple-audio.exe" Name="driver.exe" KeyPath="yes" />
+        <File Id="AirPodsDriverManifest" Source="$(var.PayloadDir)\apple-audio-manifest.json" Name="manifest.json" />
       </Component>
-      <Component Directory="KERNELDRIVER" Id="KernelDriverPackage" Guid="{02ABFDD5-F5EA-450D-AFF4-E8F1D0DB0D25}">
+      <Component Directory="KERNELDRIVER" Id="KernelDriverPackage" Guid="{025FE9F1-B849-4C50-A825-2565F1EC4FA0}">
         <File Id="KernelDriverInf" Source="$(var.DriverDir)\BettyAAP.inf" KeyPath="yes" />
         <File Id="KernelDriverSys" Source="$(var.DriverDir)\BettyAAP.sys" />
         <File Id="KernelDriverCat" Source="$(var.DriverDir)\BettyAAP.cat" />

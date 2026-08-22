@@ -21,10 +21,10 @@ import (
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
 
-func systemAirPodsKeys(device protocol.Device) (airPodsKeys, error) {
+func systemAppleAudioKeys(device protocol.Device) (appleAudioKeys, error) {
 	address := classicAddress(device)
 	if address == "" {
-		return airPodsKeys{}, fmt.Errorf("device has no Classic Bluetooth address")
+		return appleAudioKeys{}, fmt.Errorf("device has no Classic Bluetooth address")
 	}
 	account := strings.ToUpper(strings.ReplaceAll(address, "-", ":"))
 	cAccount := C.CString(account)
@@ -33,22 +33,22 @@ func systemAirPodsKeys(device protocol.Device) (airPodsKeys, error) {
 	var length C.size_t
 	status := int(C.betty_airpods_system_keys(cAccount, &data, &length))
 	if status != 0 {
-		return airPodsKeys{}, fmt.Errorf("read MobileBluetooth Keychain item for %s (OSStatus %d)", account, status)
+		return appleAudioKeys{}, fmt.Errorf("read MobileBluetooth Keychain item for %s (OSStatus %d)", account, status)
 	}
 	defer C.free(data)
 	values, err := parseMobileBluetoothPlist(C.GoBytes(data, C.int(length)))
 	if err != nil {
-		return airPodsKeys{}, err
+		return appleAudioKeys{}, err
 	}
 	irk, err := normalizeSystemKey(values["MagicAccIRK"])
 	if err != nil {
-		return airPodsKeys{}, fmt.Errorf("invalid MagicAccIRK: %w", err)
+		return appleAudioKeys{}, fmt.Errorf("invalid MagicAccIRK: %w", err)
 	}
 	enc, err := normalizeSystemKey(values["MagicAccEncKey"])
 	if err != nil {
-		return airPodsKeys{}, fmt.Errorf("invalid MagicAccEncKey: %w", err)
+		return appleAudioKeys{}, fmt.Errorf("invalid MagicAccEncKey: %w", err)
 	}
-	return airPodsKeys{DeviceID: device.ID, IRK: irk, ENC: enc}, nil
+	return appleAudioKeys{DeviceID: device.ID, IRK: irk, ENC: enc}, nil
 }
 
 func classicAddress(device protocol.Device) string {

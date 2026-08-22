@@ -34,7 +34,7 @@ type batteryComponent struct {
 	Status   string `json:"status"`
 }
 
-func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *airPodsKeys, error) {
+func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *appleAudioKeys, error) {
 	var opened struct {
 		ChannelID string `json:"channel_id"`
 	}
@@ -48,7 +48,7 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 	notificationsRequested := false
 	keysRequested := false
 	var battery *exactBattery
-	var acquiredKeys *airPodsKeys
+	var acquiredKeys *appleAudioKeys
 	for attempts := 0; attempts < 12; attempts++ {
 		var read struct {
 			Data string `json:"data"`
@@ -124,15 +124,15 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 	if battery != nil {
 		return *battery, acquiredKeys, nil
 	}
-	return exactBattery{}, nil, fmt.Errorf("AirPods did not report battery state")
+	return exactBattery{}, nil, fmt.Errorf("Apple audio device did not report battery state")
 }
 
-func parsePrivateKeys(packet []byte) (airPodsKeys, error) {
+func parsePrivateKeys(packet []byte) (appleAudioKeys, error) {
 	if !startsWith(packet, aapPrivateKeysHeader) || len(packet) < 7 {
-		return airPodsKeys{}, fmt.Errorf("not an AAP private-keys packet")
+		return appleAudioKeys{}, fmt.Errorf("not an AAP private-keys packet")
 	}
 	count, offset := int(packet[6]), 7
-	var keys airPodsKeys
+	var keys appleAudioKeys
 	for i := 0; i < count; i++ {
 		if offset+4 > len(packet) {
 			return keys, fmt.Errorf("truncated AAP private key")

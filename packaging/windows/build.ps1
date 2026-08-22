@@ -30,9 +30,9 @@ try {
     go test ./...
     go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $payload "bt.exe") ./cmd/bt
     if (-not $BaseOnly) {
-        go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $payload "bt-driver-airpods.exe") ./cmd/bt-driver-airpods
+        go build -trimpath -ldflags "-s -w -X main.version=$Version" -o (Join-Path $payload "bt-driver-apple-audio.exe") ./cmd/bt-driver-apple-audio
         go build -trimpath -ldflags "-s -w" -o (Join-Path $payload "bt-windows-setup.exe") ./cmd/bt-windows-setup
-        Copy-Item (Join-Path $PSScriptRoot "airpods-manifest.json") (Join-Path $payload "airpods-manifest.json") -Force
+        Copy-Item (Join-Path $PSScriptRoot "apple-audio-manifest.json") (Join-Path $payload "apple-audio-manifest.json") -Force
     }
 } finally {
     Pop-Location
@@ -100,7 +100,7 @@ function Find-WindowsKitTool([string]$Name) {
 $script:SignTool = Find-WindowsKitTool "signtool.exe"
 $executables = @((Join-Path $payload "bt.exe"))
 if (-not $BaseOnly) {
-    $executables += (Join-Path $payload "bt-driver-airpods.exe"), (Join-Path $payload "bt-windows-setup.exe")
+    $executables += (Join-Path $payload "bt-driver-apple-audio.exe"), (Join-Path $payload "bt-windows-setup.exe")
 }
 Invoke-Sign $executables
 

@@ -46,6 +46,6 @@ KmdfLibraryVersion=1.15
 
 [Strings]
 Betty="Betty"
-DiskName="Betty AirPods Driver Installation Media"
-BettyAAP.DeviceDesc="Betty AirPods AAP Transport"
-BettyAAP.ServiceDesc="Betty AirPods Bluetooth Profile Driver"
+DiskName="Betty Apple Audio Driver Installation Media"
+BettyAAP.DeviceDesc="Betty Apple Audio AAP Transport"
+BettyAAP.ServiceDesc="Betty Apple Audio Bluetooth Profile Driver"

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-driver=/usr/lib/betty/drivers/b2ZmaWNpYWwvYWlycG9kcw/driver
+driver=/usr/lib/betty/drivers/b2ZmaWNpYWwvYXBwbGUtYXVkaW8/driver
 if [ -x "$driver" ]; then
   setcap cap_net_raw+ep "$driver"
 fi
