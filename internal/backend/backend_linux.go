@@ -82,12 +82,15 @@ func (b *linuxBackend) Pair(ctx context.Context, d domain.Device) error {
 	if err != nil {
 		return err
 	}
-	cleanup, err := b.registerPairingAgent()
+	cleanup, agent, err := b.registerPairingAgent()
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 	if err := translateDBus(b.conn.Object(bluez, path).CallWithContext(ctx, "org.bluez.Device1.Pair", 0).Err); err != nil {
+		if agent.needsInteraction() {
+			return domain.NewError(domain.CodeInteraction, "pairing requires interactive input")
+		}
 		return err
 	}
 	return b.waitProperty(ctx, path, "Paired", true)

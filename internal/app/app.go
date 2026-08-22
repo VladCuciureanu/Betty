@@ -8,7 +8,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -50,11 +52,18 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 	drivers := driver.New()
 	drivers.SetHost(l2cap.New())
 	drivers.SetRFCOMMHost(rfcomm.New())
-	a := application{backend: backend.New(backend.PairingIO{In: stdin, Out: stderr}), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers}
+	pairingInput := stdin
+	if opts.nonInteractive {
+		pairingInput = nil
+	}
+	a := application{backend: backend.New(backend.PairingIO{In: pairingInput, Out: stderr}), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, opts.timeout)
-	defer cancel()
+	if !isWatchCommand(rest) {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.timeout)
+		defer cancel()
+	}
 	err = a.run(ctx, rest)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -67,20 +76,29 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 }
 
 type globalOptions struct {
-	mode    output.Mode
-	verbose bool
-	timeout time.Duration
+	mode           output.Mode
+	verbose        bool
+	timeout        time.Duration
+	nonInteractive bool
 }
 
 func parseGlobal(args []string, stderr io.Writer) (globalOptions, []string, error) {
 	o := globalOptions{timeout: 10 * time.Second}
 	fs := flag.NewFlagSet("bt", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	// Rendering is centralized below, including parse failures. Letting flag
+	// write here would corrupt the JSON error stream with human text.
+	fs.SetOutput(io.Discard)
 	jsonOut := fs.Bool("json", false, "print JSON")
 	quiet := fs.Bool("quiet", false, "suppress successful output")
 	fs.BoolVar(&o.verbose, "verbose", false, "print diagnostics")
+	fs.BoolVar(&o.nonInteractive, "non-interactive", false, "fail instead of prompting")
 	fs.DurationVar(&o.timeout, "timeout", o.timeout, "operation timeout")
 	if err := fs.Parse(args); err != nil {
+		if *jsonOut {
+			o.mode = output.JSON
+		} else if *quiet {
+			o.mode = output.Quiet
+		}
 		return o, nil, domain.NewError(domain.CodeUsage, "%v", err)
 	}
 	if *jsonOut && *quiet {
@@ -115,6 +133,17 @@ func (a application) run(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.render.Data(devices)
+	case "inspect":
+		if len(args) != 2 {
+			return domain.NewError(domain.CodeUsage, "usage: bt inspect <device>")
+		}
+		return a.device(ctx, args[1:])
+	case "get":
+		return a.get(ctx, args[1:])
+	case "set":
+		return a.set(ctx, args[1:])
+	case "watch":
+		return a.watch(ctx, args[1:])
 	case "pair", "unpair", "connect", "disconnect":
 		return a.mutate(ctx, args[0], args[1:])
 	case "gatt":
@@ -126,6 +155,10 @@ func (a application) run(ctx context.Context, args []string) error {
 	default:
 		return a.device(ctx, args)
 	}
+}
+
+func isWatchCommand(args []string) bool {
+	return len(args) > 0 && (args[0] == "watch" || (args[0] == "gatt" && len(args) > 2 && args[2] == "watch"))
 }
 
 func (a application) scan(ctx context.Context) ([]domain.Device, error) {
@@ -170,17 +203,40 @@ func merge(dst, src []domain.Device) []domain.Device {
 			continue
 		}
 		d := &dst[found]
-		d.Endpoints = append(d.Endpoints, candidate.Endpoints...)
+		for _, endpoint := range candidate.Endpoints {
+			if !hasEndpoint(d.Endpoints, endpoint) {
+				d.Endpoints = append(d.Endpoints, endpoint)
+			}
+		}
 		if candidate.RSSI != nil {
 			d.RSSI = candidate.RSSI
 		}
-		if len(candidate.Services) > 0 {
-			d.Services = candidate.Services
+		for _, service := range candidate.Services {
+			if !contains(d.Services, service) {
+				d.Services = append(d.Services, service)
+			}
+		}
+		if len(candidate.ManufacturerData) > 0 {
+			d.ManufacturerData = candidate.ManufacturerData
+		}
+		if len(candidate.ServiceData) > 0 {
+			d.ServiceData = candidate.ServiceData
+		}
+		if candidate.LastSeenAt != nil {
+			d.LastSeenAt = candidate.LastSeenAt
 		}
 		d.Paired = d.Paired || candidate.Paired
 		d.Connected = d.Connected || candidate.Connected
 	}
 	return dst
+}
+func hasEndpoint(endpoints []domain.Endpoint, candidate domain.Endpoint) bool {
+	for _, endpoint := range endpoints {
+		if endpoint.Transport == candidate.Transport && ((endpoint.Address != "" && strings.EqualFold(endpoint.Address, candidate.Address)) || (endpoint.ID != "" && endpoint.ID == candidate.ID)) {
+			return true
+		}
+	}
+	return false
 }
 func sameEndpoint(a, b domain.Device) bool {
 	if a.ID == b.ID {
@@ -255,38 +311,11 @@ func (a application) device(ctx context.Context, args []string) error {
 		return a.render.Data(d)
 	}
 	if len(args) == 2 && args[1] == "battery" {
-		if a.drivers != nil {
-			devices = a.drivers.InspectFor(ctx, devices, "battery")
-			d, err = resolver.Resolve(devices, args[0])
-			if err != nil {
-				return err
-			}
+		propertyDevice, property, readErr := a.readProperty(ctx, d.ID, "battery")
+		if readErr != nil {
+			return readErr
 		}
-		if property, ok := d.Properties["battery"]; ok {
-			if a.render.Mode == output.Human && property.Display != "" {
-				return a.render.Data(property.Display)
-			}
-			var value any
-			if err := json.Unmarshal(property.Value, &value); err != nil {
-				return err
-			}
-			return a.render.Data(map[string]any{"device": d, "property": "battery", "value": value, "unit": property.Unit, "estimated": property.Estimated, "resolution": property.Resolution})
-		}
-		address, err := bleAddress(d)
-		if err != nil {
-			return err
-		}
-		value, err := a.ble.Read(ctx, address, "2a19")
-		if err != nil {
-			return err
-		}
-		if len(value) != 1 {
-			return fmt.Errorf("invalid Battery Level value")
-		}
-		if a.render.Mode == output.Human {
-			return a.render.Data(fmt.Sprintf("%d%%", value[0]))
-		}
-		return a.render.Data(map[string]any{"device": d, "property": "battery", "value": value[0], "unit": "%"})
+		return a.renderProperty(propertyDevice, "battery", property)
 	}
 	if len(args) == 2 {
 		switch args[1] {
@@ -297,6 +326,266 @@ func (a application) device(ctx context.Context, args []string) error {
 		}
 	}
 	return domain.NewError(domain.CodeUsage, "unknown device command")
+}
+
+func (a application) get(ctx context.Context, args []string) error {
+	if len(args) != 2 {
+		return domain.NewError(domain.CodeUsage, "usage: bt get <device> <property>")
+	}
+	d, property, err := a.readProperty(ctx, args[0], args[1])
+	if err != nil {
+		return err
+	}
+	return a.renderProperty(d, args[1], property)
+}
+
+func (a application) readProperty(ctx context.Context, query, name string) (domain.Device, domain.Property, error) {
+	devices, err := a.inventory(ctx, true)
+	if err != nil {
+		return domain.Device{}, domain.Property{}, err
+	}
+	d, err := resolver.Resolve(devices, query)
+	if err != nil {
+		return domain.Device{}, domain.Property{}, err
+	}
+	if a.drivers != nil {
+		devices, _, err = a.drivers.Property(ctx, devices, "get", d.ID, name, nil)
+		if err != nil {
+			return domain.Device{}, domain.Property{}, err
+		}
+		d, err = resolver.Resolve(devices, d.ID)
+		if err != nil {
+			return domain.Device{}, domain.Property{}, err
+		}
+	}
+	if property, ok := d.Properties[name]; ok {
+		return d, property, nil
+	}
+	if name == "battery" {
+		address, addressErr := bleAddress(d)
+		if addressErr != nil {
+			return domain.Device{}, domain.Property{}, addressErr
+		}
+		value, readErr := a.ble.Read(ctx, address, "2a19")
+		if readErr != nil {
+			return domain.Device{}, domain.Property{}, readErr
+		}
+		if len(value) != 1 {
+			return domain.Device{}, domain.Property{}, fmt.Errorf("invalid Battery Level value")
+		}
+		raw, _ := json.Marshal(int(value[0]))
+		return d, domain.Property{Value: raw, Unit: "%", Display: fmt.Sprintf("%d%%", value[0])}, nil
+	}
+	if informationName := deviceInformationName(name); informationName != "" {
+		address, addressErr := bleAddress(d)
+		if addressErr != nil {
+			return domain.Device{}, domain.Property{}, addressErr
+		}
+		information, informationErr := a.ble.DeviceInformation(ctx, address)
+		if informationErr != nil {
+			return domain.Device{}, domain.Property{}, informationErr
+		}
+		if value, ok := information[informationName]; ok {
+			raw, _ := json.Marshal(value)
+			return d, domain.Property{Value: raw, Display: value}, nil
+		}
+	}
+	if capability, ok := d.Capabilities[name]; ok && capability.Status != "available" {
+		return domain.Device{}, domain.Property{}, domain.NewError(domain.CodeUnsupported, "%s is %s: %s", name, capability.Status, capability.Reason)
+	}
+	if requiresDeviceDriver(name) && !a.hasInstalledDrivers() {
+		return domain.Device{}, domain.Property{}, domain.NewError(domain.CodeDriverRequired, "property %q requires an optional device driver", name)
+	}
+	return domain.Device{}, domain.Property{}, domain.NewError(domain.CodeUnsupported, "%s does not expose property %q", d.Name, name)
+}
+
+func deviceInformationName(property string) string {
+	switch property {
+	case "manufacturer", "model", "serial_number", "hardware_revision", "software_revision":
+		return property
+	case "firmware_version", "firmware_revision":
+		return "firmware_revision"
+	default:
+		return ""
+	}
+}
+
+func (a application) renderProperty(d domain.Device, name string, property domain.Property) error {
+	return a.renderPropertyEvent(d, name, property, "")
+}
+
+func (a application) renderPropertyEvent(d domain.Device, name string, property domain.Property, event string) error {
+	if a.render.Mode == output.Human && property.Display != "" {
+		return a.render.Data(property.Display)
+	}
+	var value any
+	if err := json.Unmarshal(property.Value, &value); err != nil {
+		return err
+	}
+	result := map[string]any{"device_id": d.ID, "property": name, "value": value, "unit": property.Unit, "estimated": property.Estimated, "resolution": property.Resolution}
+	if event != "" {
+		result["event"] = event
+	}
+	return a.render.Data(result)
+}
+
+func (a application) set(ctx context.Context, args []string) error {
+	if len(args) != 3 {
+		return domain.NewError(domain.CodeUsage, "usage: bt set <device> <property> <value>")
+	}
+	devices, err := a.inventory(ctx, true)
+	if err != nil {
+		return err
+	}
+	d, err := resolver.Resolve(devices, args[0])
+	if err != nil {
+		return err
+	}
+	capability, ok := d.Capabilities[args[1]]
+	if !ok {
+		if requiresDeviceDriver(args[1]) && !a.hasInstalledDrivers() {
+			return domain.NewError(domain.CodeDriverRequired, "property %q requires an optional device driver", args[1])
+		}
+		return domain.NewError(domain.CodeUnsupported, "%s does not expose property %q", d.Name, args[1])
+	}
+	if capability.Status != "available" || !capability.Writable {
+		return domain.NewError(domain.CodeUnsupported, "%s is not writable: %s", args[1], capability.Reason)
+	}
+	if len(capability.Values) > 0 && !contains(capability.Values, args[2]) {
+		return domain.NewError(domain.CodeUsage, "invalid %s value %q; accepted values: %s", args[1], args[2], strings.Join(capability.Values, ", "))
+	}
+	value, err := propertyInput(capability, args[1], args[2])
+	if err != nil {
+		return err
+	}
+	if a.drivers == nil {
+		return domain.NewError(domain.CodeDriverRequired, "property %q requires an optional device driver", args[1])
+	}
+	devices, handled, err := a.drivers.Property(ctx, devices, "set", d.ID, args[1], value)
+	if err != nil {
+		return err
+	}
+	if !handled {
+		return domain.NewError(domain.CodeUnsupported, "no installed driver can set %s", args[1])
+	}
+	d, err = resolver.Resolve(devices, d.ID)
+	if err != nil {
+		return err
+	}
+	property, ok := d.Properties[args[1]]
+	if !ok {
+		return domain.NewError(domain.CodeUnsupported, "driver did not verify %s after writing", args[1])
+	}
+	return a.renderProperty(d, args[1], property)
+}
+
+func propertyInput(capability domain.DeviceCapability, name, input string) (json.RawMessage, error) {
+	var value any = input
+	switch capability.Kind {
+	case "integer":
+		parsed, err := strconv.ParseInt(input, 10, 64)
+		if err != nil {
+			return nil, domain.NewError(domain.CodeUsage, "%s requires an integer", name)
+		}
+		value = parsed
+		if err := validateRange(capability, name, float64(parsed)); err != nil {
+			return nil, err
+		}
+	case "number":
+		parsed, err := strconv.ParseFloat(input, 64)
+		if err != nil {
+			return nil, domain.NewError(domain.CodeUsage, "%s requires a number", name)
+		}
+		value = parsed
+		if err := validateRange(capability, name, parsed); err != nil {
+			return nil, err
+		}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func validateRange(capability domain.DeviceCapability, name string, value float64) error {
+	if capability.Minimum != nil && value < *capability.Minimum {
+		return domain.NewError(domain.CodeUsage, "%s must be at least %v", name, *capability.Minimum)
+	}
+	if capability.Maximum != nil && value > *capability.Maximum {
+		return domain.NewError(domain.CodeUsage, "%s must be at most %v", name, *capability.Maximum)
+	}
+	if capability.Step != nil && *capability.Step > 0 {
+		base := 0.0
+		if capability.Minimum != nil {
+			base = *capability.Minimum
+		}
+		remainder := math.Mod(value-base, *capability.Step)
+		if math.Abs(remainder) > 1e-9 && math.Abs(remainder-*capability.Step) > 1e-9 {
+			return domain.NewError(domain.CodeUsage, "%s must use increments of %v", name, *capability.Step)
+		}
+	}
+	return nil
+}
+
+func (a application) hasInstalledDrivers() bool {
+	if a.drivers == nil {
+		return false
+	}
+	items, err := a.drivers.List()
+	return err == nil && len(items) > 0
+}
+
+func requiresDeviceDriver(name string) bool {
+	if strings.Contains(name, ".") {
+		return true
+	}
+	switch name {
+	case "noise_control", "ambient_level", "wear_detection", "microphone_mute", "codec", "equalizer", "dsee":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a application) watch(ctx context.Context, args []string) error {
+	if len(args) != 2 {
+		return domain.NewError(domain.CodeUsage, "usage: bt watch <device> <property>")
+	}
+	var previous string
+	event := "snapshot"
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		operationCtx, cancel := context.WithTimeout(ctx, a.timeout)
+		d, property, err := a.readProperty(operationCtx, args[0], args[1])
+		cancel()
+		if err != nil {
+			return err
+		}
+		current := string(property.Value)
+		if current != previous {
+			if err := a.renderPropertyEvent(d, args[1], property, event); err != nil {
+				return err
+			}
+			previous = current
+			event = "changed"
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func contains(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 func (a application) driverCommand(ctx context.Context, args []string) error {
@@ -427,11 +716,16 @@ func min(a, b time.Duration) time.Duration {
 const helpText = `Betty (bt) — a small cross-platform Bluetooth CLI
 
 Usage:
-  bt [--json|--quiet] [--timeout 10s] <command>
+  bt [--json|--quiet] [--non-interactive] [--timeout 10s] <command>
 
 Commands:
   scan                         discover nearby devices
   list                         list devices known to the OS
+  inspect <device>             inspect device state and capabilities
+  get <device> <property>      read a normalized device property
+  set <device> <property> <value>
+                               change a normalized device property
+  watch <device> <property>    watch one normalized property until cancelled
   pair|unpair <device>         change pairing state
   connect|disconnect <device>  change OS-managed connection state
   driver install <executable>  install an optional device driver

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
+	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
 type fakeHost struct {
@@ -231,5 +232,21 @@ func TestSystemBundledDriverIsDiscoveredAndExecutable(t *testing.T) {
 	}
 	if err := m.Remove(id); err == nil {
 		t.Fatal("expected system-bundled driver removal to be rejected")
+	}
+}
+
+func TestDriverErrorCodesAreRestrictedToBettyCategories(t *testing.T) {
+	if got := driverErrorCode(string(domain.CodeDisconnected)); got != domain.CodeDisconnected {
+		t.Fatalf("known code=%q", got)
+	}
+	if got := driverErrorCode("vendor_surprise"); got != domain.CodeInternal {
+		t.Fatalf("unknown code=%q", got)
+	}
+}
+
+func TestOfficialPathDriverNamesAreStable(t *testing.T) {
+	drivers := officialPathDrivers()
+	if drivers["official/apple-audio"] == "" || drivers["official/sony-headphones"] == "" {
+		t.Fatalf("drivers=%v", drivers)
 	}
 }

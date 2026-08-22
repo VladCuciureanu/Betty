@@ -47,7 +47,7 @@ func (s *Session) CallHost(method string, params, result any) error {
 		return fmt.Errorf("unexpected host response %q for %q", response.ID, id)
 	}
 	if response.Error != "" {
-		return fmt.Errorf("host: %s", response.Error)
+		return &RemoteError{Code: response.ErrorCode, Message: "host: " + response.Error, Details: response.Details}
 	}
 	if result == nil || len(response.Result) == 0 {
 		return nil

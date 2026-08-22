@@ -1,0 +1,20 @@
+class BettyAppleAudio < Formula
+  desc "Optional AirPods and Beats support for Betty"
+  homepage "https://github.com/vladcuciureanu/betty"
+  url "https://github.com/vladcuciureanu/betty/releases/download/v@@VERSION@@/betty-@@VERSION@@.tar.gz"
+  sha256 "@@SHA256@@"
+  license "MIT"
+
+  depends_on "betty-bluetooth"
+  depends_on "go" => :build
+  depends_on xcode: :build
+
+  def install
+    system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=v#{version}", output: bin/"bt-driver-apple-audio"), "./cmd/bt-driver-apple-audio"
+  end
+
+  test do
+    manifest = shell_output("#{bin}/bt-driver-apple-audio --manifest")
+    assert_match '"id":"official/apple-audio"', manifest
+  end
+end

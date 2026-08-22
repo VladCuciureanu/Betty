@@ -9,4 +9,6 @@ int betty_device_paired(int index);
 int betty_pair(const char *address);
 int betty_connect(const char *address);
 int betty_disconnect(const char *address);
+int betty_is_connected(const char *address);
+int betty_is_paired(const char *address);
 #endif

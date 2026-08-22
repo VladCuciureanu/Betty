@@ -5,7 +5,11 @@ on:
     tags: ['v*']
 
 permissions:
+  actions: read
+  artifact-metadata: write
+  attestations: write
   contents: write
+  id-token: write
 
 jobs:
   build:
@@ -48,7 +52,7 @@ jobs:
             ${{ matrix.sony }}
             dist-deb/*.deb
 
-  windows-msi:
+  windows-base-msi:
     runs-on: windows-2025-vs2026
     steps:
       - uses: actions/checkout@v4
@@ -56,13 +60,43 @@ jobs:
         with:
           go-version: '1.24.x'
       - uses: microsoft/setup-msbuild@v2
+      - name: Build and sign base Windows MSI
+        shell: pwsh
+        env:
+          BETTY_SIGNING_PFX_BASE64: ${{ secrets.BETTY_SIGNING_PFX_BASE64 }}
+          BETTY_SIGNING_PFX_PASSWORD: ${{ secrets.BETTY_SIGNING_PFX_PASSWORD }}
+        run: ./packaging/windows/build.ps1 -Version "${env:GITHUB_REF_NAME}" -RequireSigning -BaseOnly
+      - name: Smoke-test signed base MSI install and clean uninstall
+        shell: pwsh
+        run: |
+          $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
+          ./packaging/windows/test-installer.ps1 -BaseMsi $base -BaseOnly
+      - uses: actions/upload-artifact@v4
+        with:
+          name: betty-windows-base-msi
+          path: packaging/windows/artifacts/msi/**/betty-windows-x64.msi
+
+  windows-advanced-msi:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+      - uses: microsoft/setup-msbuild@v2
+      - name: Check optional Advanced Support availability
+        shell: pwsh
+        env:
+          DRIVER_URL: ${{ secrets.BETTY_MICROSOFT_SIGNED_DRIVER_URL }}
+        run: |
+          "BETTY_BUILD_ADVANCED=$([int][bool]$env:DRIVER_URL)" | Out-File $env:GITHUB_ENV -Append
       - name: Fetch Microsoft-signed profile driver
+        if: env.BETTY_BUILD_ADVANCED == '1'
         shell: pwsh
         env:
           BETTY_MICROSOFT_SIGNED_DRIVER_URL: ${{ secrets.BETTY_MICROSOFT_SIGNED_DRIVER_URL }}
           BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN: ${{ secrets.BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN }}
         run: |
-          if (-not $env:BETTY_MICROSOFT_SIGNED_DRIVER_URL) { throw 'Microsoft-signed driver URL is required' }
           $headers = @{}
           if ($env:BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN) { $headers.Authorization = "Bearer $env:BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN" }
           Invoke-WebRequest $env:BETTY_MICROSOFT_SIGNED_DRIVER_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\betty-driver.zip"
@@ -70,31 +104,59 @@ jobs:
           $inf = Get-ChildItem "$env:RUNNER_TEMP\betty-driver" -Filter BettyAAP.inf -Recurse | Select-Object -First 1
           if (-not $inf) { throw 'Downloaded package does not contain BettyAAP.inf' }
           "BETTY_MICROSOFT_SIGNED_DRIVER_DIR=$($inf.DirectoryName)" | Out-File $env:GITHUB_ENV -Append
-      - name: Build and sign Windows MSI
+      - name: Build and sign Advanced Support MSI
+        if: env.BETTY_BUILD_ADVANCED == '1'
         shell: pwsh
         env:
           BETTY_SIGNING_PFX_BASE64: ${{ secrets.BETTY_SIGNING_PFX_BASE64 }}
           BETTY_SIGNING_PFX_PASSWORD: ${{ secrets.BETTY_SIGNING_PFX_PASSWORD }}
         run: ./packaging/windows/build.ps1 -Version "${env:GITHUB_REF_NAME}" -MicrosoftSignedDriverDir $env:BETTY_MICROSOFT_SIGNED_DRIVER_DIR -RequireSigning -RequireMicrosoftDriverSignature
-      - name: Smoke-test signed MSI install and clean uninstall
+      - name: Smoke-test Advanced Support install and clean uninstall
+        if: env.BETTY_BUILD_ADVANCED == '1'
         shell: pwsh
         run: |
           $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
           $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-apple-audio-advanced-windows-x64.msi -Recurse).FullName
           ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced
       - uses: actions/upload-artifact@v4
+        if: env.BETTY_BUILD_ADVANCED == '1'
         with:
-          name: betty-windows-msi
-          path: packaging/windows/artifacts/msi/**/*.msi
+          name: betty-windows-advanced-msi
+          path: packaging/windows/artifacts/msi/**/betty-apple-audio-advanced-windows-x64.msi
 
   publish:
-    needs: [build, windows-msi]
+    needs: [build, windows-base-msi, windows-advanced-msi]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Create immutable source archive
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          git archive --format=tar.gz --prefix="betty-${version}/" -o "dist/betty-${version}.tar.gz" "$GITHUB_SHA"
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0.24.0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/betty.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Generate release checksums
+        working-directory: dist
+        run: find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+      - name: Attest release provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*
+            dist/**/*
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*
+            dist/**/*

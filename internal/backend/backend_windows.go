@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
@@ -44,7 +45,7 @@ func (*windowsBackend) Capabilities() domain.Capabilities {
 }
 func (b *windowsBackend) Scan(context.Context) ([]domain.Device, error) { return b.enumerate(true) }
 func (b *windowsBackend) List(context.Context) ([]domain.Device, error) { return b.enumerate(false) }
-func (*windowsBackend) Pair(_ context.Context, d domain.Device) error {
+func (b *windowsBackend) Pair(ctx context.Context, d domain.Device) error {
 	info, err := windowsInfo(d)
 	if err != nil {
 		return err
@@ -53,9 +54,9 @@ func (*windowsBackend) Pair(_ context.Context, d domain.Device) error {
 	if result != 0 {
 		return windowsError("pair", result, callErr)
 	}
-	return nil
+	return b.waitPaired(ctx, info.Address, true)
 }
-func (*windowsBackend) Unpair(_ context.Context, d domain.Device) error {
+func (b *windowsBackend) Unpair(ctx context.Context, d domain.Device) error {
 	info, err := windowsInfo(d)
 	if err != nil {
 		return err
@@ -64,7 +65,34 @@ func (*windowsBackend) Unpair(_ context.Context, d domain.Device) error {
 	if result != 0 {
 		return windowsError("unpair", result, callErr)
 	}
-	return nil
+	return b.waitPaired(ctx, info.Address, false)
+}
+
+func (b *windowsBackend) waitPaired(ctx context.Context, address uint64, desired bool) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		devices, err := b.enumerate(false)
+		if err != nil {
+			return err
+		}
+		paired := false
+		formatted := formatWindowsAddress(address)
+		for _, device := range devices {
+			if device.ID == "windows:"+formatted {
+				paired = device.Paired
+				break
+			}
+		}
+		if paired == desired {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 func (*windowsBackend) Connect(context.Context, domain.Device) error {
 	return domain.NewError(domain.CodeUnsupported, "Windows does not expose a reliable generic API for connecting every saved device profile; connect it from Windows Settings")
@@ -136,5 +164,11 @@ func bool32(v bool) int32 {
 	return 0
 }
 func windowsError(op string, code uintptr, err error) error {
-	return fmt.Errorf("Windows Bluetooth %s failed (code %d): %v", op, code, err)
+	if errno, ok := err.(syscall.Errno); ok && errno == syscall.ERROR_ACCESS_DENIED {
+		return domain.NewError(domain.CodePermission, "Windows Bluetooth %s was denied (code %d)", op, code)
+	}
+	if op == "pair" {
+		return domain.NewError(domain.CodeAuthentication, "Windows Bluetooth pairing failed (code %d): %v", code, err)
+	}
+	return domain.NewError(domain.CodeUnavailable, "Windows Bluetooth %s failed (code %d): %v", op, code, err)
 }

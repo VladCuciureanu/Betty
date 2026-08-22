@@ -17,6 +17,18 @@ const (
 	sonyDataMDR = byte(0x0c)
 )
 
+func sonyNoiseLayoutForModel(model string) (sonyNoiseLayout, bool) {
+	model = strings.ToUpper(strings.TrimSpace(model))
+	switch {
+	case strings.HasPrefix(model, "WH-CH720N"):
+		return sonyNoiseStandard, true
+	case strings.HasPrefix(model, "ULT WEAR") || strings.HasPrefix(model, "WH-ULT900N"):
+		return sonyNoiseReservedByte, true
+	default:
+		return sonyNoiseStandard, false
+	}
+}
+
 type sonyProtocol int
 
 const (
@@ -36,6 +48,19 @@ type sonyBattery struct {
 	Right   *batteryComponent `json:"right,omitempty"`
 	Case    *batteryComponent `json:"case,omitempty"`
 }
+
+type sonyNoiseState struct {
+	Mode         string `json:"mode"`
+	AmbientLevel *int   `json:"ambient_level,omitempty"`
+	VoiceFocus   bool   `json:"voice_focus"`
+}
+
+type sonyNoiseLayout int
+
+const (
+	sonyNoiseStandard sonyNoiseLayout = iota
+	sonyNoiseReservedByte
+)
 
 func (b sonyBattery) display() string {
 	var values []string
@@ -279,10 +304,8 @@ func readSonyBattery(host *protocol.Session, deviceID string, version sonyProtoc
 		return sonyBattery{}, err
 	}
 	defer session.close()
-	if reply, err := session.query([]byte{0x00, 0x00}, 0x01, 0x00); err != nil {
-		return sonyBattery{}, fmt.Errorf("initialize Sony v2 session: %w", err)
-	} else if len(reply) < 2 {
-		return sonyBattery{}, fmt.Errorf("initialize Sony v2 session: truncated reply")
+	if err := initializeSonySession(session); err != nil {
+		return sonyBattery{}, err
 	}
 	if reply, err := session.query([]byte{0x22, 0x00}, 0x23, 0x00); err == nil {
 		return parseSonyBattery(0x00, reply)
@@ -304,6 +327,119 @@ func readSonyBattery(host *protocol.Session, deviceID string, version sonyProtoc
 		return sonyBattery{}, fmt.Errorf("Sony device did not report battery state")
 	}
 	return battery, nil
+}
+
+func initializeSonySession(session *sonySession) error {
+	reply, err := session.query([]byte{0x00, 0x00}, 0x01, 0x00)
+	if err != nil {
+		return fmt.Errorf("initialize Sony v2 session: %w", err)
+	}
+	if len(reply) < 2 {
+		return fmt.Errorf("initialize Sony v2 session: truncated reply")
+	}
+	return nil
+}
+
+// readSonyNoiseStateV2 reads the second-generation Ambient Sound Control state.
+// It remains behind a planned capability until each model layout is verified on
+// Betty hardware; keeping the packet engine separate lets that validation use
+// the same implementation that will later serve get/set.
+func readSonyNoiseStateV2(session *sonySession, layout sonyNoiseLayout) (sonyNoiseState, error) {
+	reply, err := session.query([]byte{0x66, 0x17}, 0x67, 0x17)
+	if err != nil {
+		return sonyNoiseState{}, err
+	}
+	return parseSonyNoiseStateV2(reply, layout)
+}
+
+func parseSonyNoiseStateV2(payload []byte, layout sonyNoiseLayout) (sonyNoiseState, error) {
+	if len(payload) < 7 || payload[0] != 0x67 || payload[1] != 0x17 || payload[2] != 0x01 {
+		return sonyNoiseState{}, fmt.Errorf("invalid Sony v2 ambient-sound response")
+	}
+	for _, value := range []byte{payload[3], payload[4]} {
+		if value > 1 {
+			return sonyNoiseState{}, fmt.Errorf("invalid Sony v2 ambient-sound flags")
+		}
+	}
+	state := sonyNoiseState{Mode: "off"}
+	if payload[3] == 1 {
+		state.Mode = "anc"
+		if payload[4] == 1 {
+			state.Mode = "ambient"
+		}
+	}
+	voiceIndex, levelIndex := 5, 6
+	if layout == sonyNoiseReservedByte {
+		voiceIndex, levelIndex = 6, -1
+	}
+	if payload[voiceIndex] > 1 || (levelIndex >= 0 && payload[levelIndex] > 20) {
+		return sonyNoiseState{}, fmt.Errorf("invalid Sony v2 ambient-sound values")
+	}
+	state.VoiceFocus = payload[voiceIndex] == 1
+	if levelIndex >= 0 {
+		level := int(payload[levelIndex])
+		if level < 1 && state.Mode == "ambient" {
+			return sonyNoiseState{}, fmt.Errorf("invalid Sony v2 ambient level")
+		}
+		if level >= 1 {
+			state.AmbientLevel = &level
+		}
+	}
+	return state, nil
+}
+
+func encodeSonyNoiseStateV2(state sonyNoiseState, layout sonyNoiseLayout) ([]byte, error) {
+	enabled, ambient := byte(1), byte(0)
+	switch state.Mode {
+	case "off":
+		enabled = 0
+	case "anc":
+	case "ambient":
+		ambient = 1
+	default:
+		return nil, fmt.Errorf("invalid Sony noise-control mode %q", state.Mode)
+	}
+	level := byte(1)
+	if state.AmbientLevel != nil {
+		if *state.AmbientLevel < 1 || *state.AmbientLevel > 20 {
+			return nil, fmt.Errorf("Sony ambient level must be between 1 and 20")
+		}
+		level = byte(*state.AmbientLevel)
+	}
+	voice := byte(0)
+	if state.VoiceFocus {
+		voice = 1
+	}
+	payload := []byte{0x68, 0x17, 0x01, enabled, ambient, voice, level}
+	if layout == sonyNoiseReservedByte {
+		payload = []byte{0x68, 0x17, 0x01, enabled, ambient, 0x02, voice, 0x00}
+	}
+	return payload, nil
+}
+
+func writeAndVerifySonyNoiseStateV2(session *sonySession, desired sonyNoiseState, layout sonyNoiseLayout) (sonyNoiseState, error) {
+	payload, err := encodeSonyNoiseStateV2(desired, layout)
+	if err != nil {
+		return sonyNoiseState{}, err
+	}
+	if err := session.send(sonyDataMDR, payload); err != nil {
+		return sonyNoiseState{}, err
+	}
+	actual, err := readSonyNoiseStateV2(session, layout)
+	if err != nil {
+		return sonyNoiseState{}, fmt.Errorf("verify Sony noise-control write: %w", err)
+	}
+	if actual.Mode != desired.Mode || actual.VoiceFocus != desired.VoiceFocus || !sameAmbientLevel(actual.AmbientLevel, desired.AmbientLevel, desired.Mode) {
+		return actual, fmt.Errorf("Sony device did not apply the requested noise-control state")
+	}
+	return actual, nil
+}
+
+func sameAmbientLevel(actual, desired *int, mode string) bool {
+	if mode != "ambient" || desired == nil {
+		return true
+	}
+	return actual != nil && *actual == *desired
 }
 
 func parseSonyBattery(subtype byte, payload []byte) (sonyBattery, error) {

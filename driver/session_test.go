@@ -2,6 +2,7 @@ package driver
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"testing"
 )
@@ -40,5 +41,27 @@ func TestSessionHostCall(t *testing.T) {
 	}
 	if result.Value != "stored" {
 		t.Fatalf("result=%#v", result)
+	}
+}
+
+func TestSessionPreservesStructuredHostError(t *testing.T) {
+	host, child := net.Pipe()
+	defer host.Close()
+	defer child.Close()
+	session := NewSession(child, child)
+	hostEncoder, hostDecoder := json.NewEncoder(host), json.NewDecoder(host)
+	done := make(chan error, 1)
+	go func() { done <- session.CallHost(HostL2CAPOpen, L2CAPOpenParams{DeviceID: "device", PSM: 25}, nil) }()
+	var call Message
+	if err := hostDecoder.Decode(&call); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostEncoder.Encode(Message{Protocol: Version, Type: TypeHostResponse, ID: call.ID, Error: "gone", ErrorCode: "device_disconnected", Details: map[string]string{"device_id": "device"}}); err != nil {
+		t.Fatal(err)
+	}
+	err := <-done
+	var remote *RemoteError
+	if !errors.As(err, &remote) || remote.Code != "device_disconnected" || remote.Details == nil {
+		t.Fatalf("err=%#v", err)
 	}
 }

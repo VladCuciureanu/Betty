@@ -27,6 +27,11 @@ sony="$work/betty-sony"
 driver_dir="$advanced/usr/lib/betty/drivers/b2ZmaWNpYWwvYXBwbGUtYXVkaW8"
 sony_driver_dir="$sony/usr/lib/betty/drivers/b2ZmaWNpYWwvc29ueS1oZWFkcGhvbmVz"
 mkdir -p "$output" "$base/DEBIAN" "$base/usr/bin" "$advanced/DEBIAN" "$driver_dir" "$sony/DEBIAN" "$sony_driver_dir"
+mkdir -p "$base/usr/share/doc/betty" "$advanced/usr/share/doc/betty-apple-audio" "$sony/usr/share/doc/betty-sony"
+
+for package_doc in "$base/usr/share/doc/betty" "$advanced/usr/share/doc/betty-apple-audio" "$sony/usr/share/doc/betty-sony"; do
+  install -m 0644 "$root/LICENSE" "$package_doc/copyright"
+done
 
 (
   cd "$root"
@@ -58,17 +63,15 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: $architecture
-Depends: betty (= $version), libcap2-bin
+Depends: betty (= $version)
 Maintainer: Betty contributors
 Replaces: betty-airpods
 Conflicts: betty-airpods
 Provides: betty-airpods
 Description: Optional Apple and Beats audio support for Betty
- Adds passive battery decoding and privileged Classic L2CAP transport for exact
+ Adds passive battery decoding and Classic L2CAP transport for exact
  component battery readings. The base Betty package contains no Apple audio code.
 EOF
-install -m 0755 "$root/packaging/linux/betty-apple-audio.postinst" "$advanced/DEBIAN/postinst"
-
 cat >"$sony/DEBIAN/control" <<EOF
 Package: betty-sony
 Version: $version

@@ -5,6 +5,7 @@ package backend
 import (
 	"bufio"
 	"bytes"
+	"io"
 	"strings"
 	"testing"
 
@@ -26,6 +27,13 @@ func TestPairingAgentRejectsInvalidPasskey(t *testing.T) {
 	agent := pairingAgent{in: bufioReader("1234567\n"), out: &bytes.Buffer{}}
 	if _, err := agent.RequestPasskey(dbus.ObjectPath("/org/bluez/hci0/dev_AA")); err == nil || err.Name != "org.bluez.Error.Rejected" {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestNonInteractivePairingAgentReportsRequiredInteraction(t *testing.T) {
+	agent := &pairingAgent{out: io.Discard}
+	if _, err := agent.prompt("PIN: "); err == nil || !agent.needsInteraction() {
+		t.Fatalf("err=%v required=%t", err, agent.needsInteraction())
 	}
 }
 

@@ -14,12 +14,15 @@ type Manifest struct {
 	Permissions []string `json:"permissions,omitempty"`
 }
 type Request struct {
-	Protocol int      `json:"protocol"`
-	Type     string   `json:"type,omitempty"`
-	ID       string   `json:"id,omitempty"`
-	Method   string   `json:"method"`
-	Purpose  string   `json:"purpose,omitempty"`
-	Devices  []Device `json:"devices"`
+	Protocol int             `json:"protocol"`
+	Type     string          `json:"type,omitempty"`
+	ID       string          `json:"id,omitempty"`
+	Method   string          `json:"method"`
+	Purpose  string          `json:"purpose,omitempty"`
+	DeviceID string          `json:"device_id,omitempty"`
+	Property string          `json:"property,omitempty"`
+	Value    json.RawMessage `json:"value,omitempty"`
+	Devices  []Device        `json:"devices"`
 }
 type Response struct {
 	Protocol    int                   `json:"protocol"`
@@ -27,16 +30,28 @@ type Response struct {
 	ID          string                `json:"id,omitempty"`
 	Enrichments map[string]Enrichment `json:"enrichments,omitempty"`
 	Error       string                `json:"error,omitempty"`
+	ErrorCode   string                `json:"error_code,omitempty"`
+	Details     any                   `json:"details,omitempty"`
 }
 type Message struct {
-	Protocol int             `json:"protocol"`
-	Type     string          `json:"type"`
-	ID       string          `json:"id"`
-	Method   string          `json:"method,omitempty"`
-	Params   json.RawMessage `json:"params,omitempty"`
-	Result   json.RawMessage `json:"result,omitempty"`
-	Error    string          `json:"error,omitempty"`
+	Protocol  int             `json:"protocol"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	Method    string          `json:"method,omitempty"`
+	Params    json.RawMessage `json:"params,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	ErrorCode string          `json:"error_code,omitempty"`
+	Details   any             `json:"details,omitempty"`
 }
+
+type RemoteError struct {
+	Code    string
+	Message string
+	Details any
+}
+
+func (e *RemoteError) Error() string { return e.Message }
 
 const (
 	TypeRequest      = "request"
@@ -101,9 +116,13 @@ type Property struct {
 // clients must not offer reads or writes until a driver reports "available".
 type Capability struct {
 	Status   string   `json:"status"`
+	Kind     string   `json:"type,omitempty"`
 	Readable bool     `json:"readable,omitempty"`
 	Writable bool     `json:"writable,omitempty"`
 	Values   []string `json:"values,omitempty"`
+	Minimum  *float64 `json:"minimum,omitempty"`
+	Maximum  *float64 `json:"maximum,omitempty"`
+	Step     *float64 `json:"step,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
 }
 type Enrichment struct {

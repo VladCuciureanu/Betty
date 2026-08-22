@@ -246,6 +246,7 @@ func (b *TinyGo) Watch(ctx context.Context, address, uuid string, emit func([]by
 	}); err != nil {
 		return err
 	}
+	defer stopNotifications(c)
 	select {
 	case <-ctx.Done():
 		return nil

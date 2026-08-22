@@ -21,31 +21,37 @@ const (
 )
 
 type pairingAgent struct {
-	in  *bufio.Reader
-	out io.Writer
-	mu  sync.Mutex
+	in                  *bufio.Reader
+	out                 io.Writer
+	mu                  sync.Mutex
+	interactionRequired bool
 }
 
-func (b *linuxBackend) registerPairingAgent() (func(), error) {
+func (b *linuxBackend) registerPairingAgent() (func(), *pairingAgent, error) {
 	if b.initErr != nil {
-		return nil, domain.NewError(domain.CodeUnavailable, "cannot connect to system D-Bus: %v", b.initErr)
+		return nil, nil, domain.NewError(domain.CodeUnavailable, "cannot connect to system D-Bus: %v", b.initErr)
 	}
-	if b.pairing.In == nil || b.pairing.Out == nil {
-		return nil, domain.NewError(domain.CodeAuthentication, "pairing requires an interactive terminal")
+	agent := &pairingAgent{out: b.pairing.Out}
+	capability := "NoInputNoOutput"
+	if b.pairing.In != nil {
+		agent.in = bufio.NewReader(b.pairing.In)
+		capability = "KeyboardDisplay"
 	}
-	agent := &pairingAgent{in: bufio.NewReader(b.pairing.In), out: b.pairing.Out}
+	if agent.out == nil {
+		agent.out = io.Discard
+	}
 	if err := b.conn.Export(agent, agentPath, agentInterface); err != nil {
-		return nil, fmt.Errorf("export BlueZ pairing agent: %w", err)
+		return nil, nil, fmt.Errorf("export BlueZ pairing agent: %w", err)
 	}
 	manager := b.conn.Object(bluez, "/org/bluez")
-	if err := translateDBus(manager.Call("org.bluez.AgentManager1.RegisterAgent", 0, agentPath, "KeyboardDisplay").Err); err != nil {
+	if err := translateDBus(manager.Call("org.bluez.AgentManager1.RegisterAgent", 0, agentPath, capability).Err); err != nil {
 		_ = b.conn.Export(nil, agentPath, agentInterface)
-		return nil, err
+		return nil, nil, err
 	}
 	return func() {
 		_ = manager.Call("org.bluez.AgentManager1.UnregisterAgent", 0, agentPath).Err
 		_ = b.conn.Export(nil, agentPath, agentInterface)
-	}, nil
+	}, agent, nil
 }
 
 func (*pairingAgent) Release() *dbus.Error { return nil }
@@ -111,6 +117,10 @@ func (a *pairingAgent) confirm(message string) *dbus.Error {
 func (a *pairingAgent) prompt(message string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.in == nil {
+		a.interactionRequired = true
+		return "", errors.New("pairing requires interactive input")
+	}
 	if _, err := fmt.Fprint(a.out, message); err != nil {
 		return "", err
 	}
@@ -120,6 +130,12 @@ func (a *pairingAgent) prompt(message string) (string, error) {
 		err = nil
 	}
 	return value, err
+}
+
+func (a *pairingAgent) needsInteraction() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.interactionRequired
 }
 
 func (a *pairingAgent) notice(format string, values ...any) {

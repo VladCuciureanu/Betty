@@ -19,7 +19,15 @@ var (
 	aapBatteryHeader        = mustHex("040004000400")
 	aapRequestPrivateKeys   = mustHex("0400040030000500")
 	aapPrivateKeysHeader    = mustHex("040004003100")
+	aapNoiseControlHeader   = mustHex("0400040009000d")
 )
+
+var aapNoiseControlValues = map[string]byte{
+	"off":          0x01,
+	"anc":          0x02,
+	"transparency": 0x03,
+	"adaptive":     0x04,
+}
 
 type exactBattery struct {
 	Headset *batteryComponent `json:"headset,omitempty"`
@@ -125,6 +133,94 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 		return *battery, acquiredKeys, nil
 	}
 	return exactBattery{}, nil, fmt.Errorf("Apple audio device did not report battery state")
+}
+
+// readAAPNoiseControl obtains the current state from the device notification
+// stream. A write is successful only after the device reports the requested
+// state back; completion of the L2CAP write itself is not treated as success.
+func readAAPNoiseControl(session *protocol.Session, deviceID string, requested *string) (string, error) {
+	var opened struct {
+		ChannelID string `json:"channel_id"`
+	}
+	if err := session.CallHost(protocol.HostL2CAPOpen, protocol.L2CAPOpenParams{DeviceID: deviceID, PSM: airPodsPSM}, &opened); err != nil {
+		return "", err
+	}
+	defer session.CallHost(protocol.HostL2CAPClose, protocol.L2CAPChannelParams{ChannelID: opened.ChannelID}, nil)
+	if err := writeAAP(session, opened.ChannelID, aapHandshake); err != nil {
+		return "", err
+	}
+	notificationsRequested := false
+	controlWritten := false
+	for attempts := 0; attempts < 16; attempts++ {
+		var read struct {
+			Data string `json:"data"`
+		}
+		if err := session.CallHost(protocol.HostL2CAPRead, protocol.L2CAPReadParams{ChannelID: opened.ChannelID, MaxBytes: 4096, TimeoutMS: 1500}, &read); err != nil {
+			return "", err
+		}
+		packet, err := hex.DecodeString(read.Data)
+		if err != nil {
+			return "", fmt.Errorf("host returned invalid L2CAP data: %w", err)
+		}
+		switch {
+		case startsWith(packet, aapHandshakeACK):
+			if err := writeAAP(session, opened.ChannelID, aapSetSpecificFeatures); err != nil {
+				return "", err
+			}
+		case startsWith(packet, aapFeaturesACK):
+			if err := writeAAP(session, opened.ChannelID, aapRequestNotifications); err != nil {
+				return "", err
+			}
+			notificationsRequested = true
+			if requested != nil {
+				packet, err := encodeAAPNoiseControl(*requested)
+				if err != nil {
+					return "", err
+				}
+				if err := writeAAP(session, opened.ChannelID, packet); err != nil {
+					return "", err
+				}
+				controlWritten = true
+			}
+		default:
+			if mode, ok := parseAAPNoiseControl(packet); ok {
+				if requested == nil || mode == *requested {
+					return mode, nil
+				}
+				if controlWritten {
+					return "", fmt.Errorf("Apple audio device reported noise_control %q after requesting %q", mode, *requested)
+				}
+			}
+			if !notificationsRequested {
+				if err := writeAAP(session, opened.ChannelID, aapRequestNotifications); err != nil {
+					return "", err
+				}
+				notificationsRequested = true
+			}
+		}
+	}
+	return "", fmt.Errorf("Apple audio device did not report noise-control state")
+}
+
+func encodeAAPNoiseControl(mode string) ([]byte, error) {
+	value, ok := aapNoiseControlValues[mode]
+	if !ok {
+		return nil, fmt.Errorf("noise_control requires off, anc, transparency, or adaptive")
+	}
+	packet := append([]byte{}, aapNoiseControlHeader...)
+	return append(packet, value, 0x00, 0x00, 0x00), nil
+}
+
+func parseAAPNoiseControl(packet []byte) (string, bool) {
+	if len(packet) != 11 || !startsWith(packet, aapNoiseControlHeader) || packet[8] != 0 || packet[9] != 0 || packet[10] != 0 {
+		return "", false
+	}
+	for mode, value := range aapNoiseControlValues {
+		if packet[7] == value {
+			return mode, true
+		}
+	}
+	return "", false
 }
 
 func parsePrivateKeys(packet []byte) (appleAudioKeys, error) {

@@ -2,10 +2,18 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
+
+func TestSonyCapabilitiesUseGenericPropertyTypes(t *testing.T) {
+	capabilities := sonyCapabilities(protocolV2)
+	if capabilities["battery"].Kind != "battery" || capabilities["noise_control"].Kind != "enum" || capabilities["sony.speak_to_chat"].Kind != "boolean" {
+		t.Fatalf("capabilities=%#v", capabilities)
+	}
+}
 
 func TestSonyFrameRoundTripAndFragmentation(t *testing.T) {
 	payload := []byte{0x23, 0x00, 89, 1, 0x3c, 0x3d, 0x3e}
@@ -47,6 +55,92 @@ func TestParseSonyBattery(t *testing.T) {
 	}
 }
 
+func TestSonyV2NoiseControlFixtures(t *testing.T) {
+	standard, err := parseSonyNoiseStateV2([]byte{0x67, 0x17, 0x01, 0x01, 0x01, 0x00, 0x0c}, sonyNoiseStandard)
+	if err != nil || standard.Mode != "ambient" || standard.AmbientLevel == nil || *standard.AmbientLevel != 12 || standard.VoiceFocus {
+		t.Fatalf("standard=%+v err=%v", standard, err)
+	}
+	reserved, err := parseSonyNoiseStateV2([]byte{0x67, 0x17, 0x01, 0x01, 0x01, 0x01, 0x01}, sonyNoiseReservedByte)
+	if err != nil || reserved.Mode != "ambient" || reserved.AmbientLevel != nil || !reserved.VoiceFocus {
+		t.Fatalf("reserved=%+v err=%v", reserved, err)
+	}
+	off, err := parseSonyNoiseStateV2([]byte{0x67, 0x17, 0x01, 0x00, 0x00, 0x00, 0x01}, sonyNoiseStandard)
+	if err != nil || off.Mode != "off" || off.AmbientLevel == nil || *off.AmbientLevel != 1 {
+		t.Fatalf("off=%+v err=%v", off, err)
+	}
+}
+
+func TestSonyV2NoiseControlWriteFixtures(t *testing.T) {
+	level := 12
+	standard, err := encodeSonyNoiseStateV2(sonyNoiseState{Mode: "ambient", AmbientLevel: &level, VoiceFocus: true}, sonyNoiseStandard)
+	if err != nil || !bytes.Equal(standard, []byte{0x68, 0x17, 0x01, 0x01, 0x01, 0x01, 0x0c}) {
+		t.Fatalf("standard=%x err=%v", standard, err)
+	}
+	reserved, err := encodeSonyNoiseStateV2(sonyNoiseState{Mode: "anc"}, sonyNoiseReservedByte)
+	if err != nil || !bytes.Equal(reserved, []byte{0x68, 0x17, 0x01, 0x01, 0x00, 0x02, 0x00, 0x00}) {
+		t.Fatalf("reserved=%x err=%v", reserved, err)
+	}
+	if _, err := encodeSonyNoiseStateV2(sonyNoiseState{Mode: "unknown"}, sonyNoiseStandard); err == nil {
+		t.Fatal("expected invalid mode error")
+	}
+}
+
+func TestSonyV2NoiseControlRejectsMalformedState(t *testing.T) {
+	fixtures := [][]byte{
+		{0x67, 0x17},
+		{0x67, 0x17, 0x01, 0x02, 0, 0, 1},
+		{0x67, 0x17, 0x01, 1, 1, 0, 0},
+		{0x67, 0x17, 0x01, 1, 1, 0, 21},
+	}
+	for _, fixture := range fixtures {
+		if _, err := parseSonyNoiseStateV2(fixture, sonyNoiseStandard); err == nil {
+			t.Fatalf("accepted malformed payload %x", fixture)
+		}
+	}
+}
+
+func TestSonyNoiseLayoutsAreModelScoped(t *testing.T) {
+	if layout, ok := sonyNoiseLayoutForModel("WH-CH720N"); !ok || layout != sonyNoiseStandard {
+		t.Fatalf("CH720N layout=%d ok=%t", layout, ok)
+	}
+	if layout, ok := sonyNoiseLayoutForModel("ULT WEAR"); !ok || layout != sonyNoiseReservedByte {
+		t.Fatalf("ULT layout=%d ok=%t", layout, ok)
+	}
+	if _, ok := sonyNoiseLayoutForModel("WH-1000XM5"); ok {
+		t.Fatal("unverified model received a control layout")
+	}
+}
+
+func TestSonyControlValidationGate(t *testing.T) {
+	t.Setenv("BETTY_VALIDATE_SONY_CONTROLS", "")
+	if sonyCapabilitiesFor("WH-CH720N", protocolV2)["noise_control"].Status != "planned" {
+		t.Fatal("controls must remain planned by default")
+	}
+	t.Setenv("BETTY_VALIDATE_SONY_CONTROLS", "1")
+	capabilities := sonyCapabilitiesFor("WH-CH720N", protocolV2)
+	if capabilities["noise_control"].Status != "available" || capabilities["ambient_level"].Status != "available" {
+		t.Fatalf("capabilities=%#v", capabilities)
+	}
+	ult := sonyCapabilitiesFor("ULT WEAR", protocolV2)
+	if ult["noise_control"].Status != "available" || ult["ambient_level"].Status != "planned" {
+		t.Fatalf("ULT capabilities=%#v", ult)
+	}
+}
+
+func TestApplySonyControlInput(t *testing.T) {
+	level := 4
+	state := sonyNoiseState{Mode: "anc", AmbientLevel: &level}
+	if err := applySonyControlInput(&state, "noise_control", json.RawMessage(`"ambient"`), sonyNoiseStandard); err != nil || state.Mode != "ambient" {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	if err := applySonyControlInput(&state, "ambient_level", json.RawMessage(`12`), sonyNoiseStandard); err != nil || state.AmbientLevel == nil || *state.AmbientLevel != 12 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	if err := applySonyControlInput(&state, "ambient_level", json.RawMessage(`12`), sonyNoiseReservedByte); err == nil {
+		t.Fatal("ULT layout accepted unsupported ambient level")
+	}
+}
+
 func TestIdentifySonyByProtocolAndName(t *testing.T) {
 	model, version, ok := identify(protocol.Device{Name: "Headphones", Services: []string{"956C7B26-D49A-4BA8-B03F-B17D393CB6E2"}})
 	if !ok || model != "Headphones" || version != protocolV2 {
@@ -62,5 +156,12 @@ func TestUnknownDeviceIsIgnored(t *testing.T) {
 	response := inspect(nil, []protocol.Device{{ID: "other", Name: "Keyboard"}}, "scan")
 	if len(response.Enrichments) != 0 {
 		t.Fatalf("enrichments=%#v", response.Enrichments)
+	}
+}
+
+func TestSonyBatteryGetReportsDisconnectedDevice(t *testing.T) {
+	response := getBattery(nil, []protocol.Device{{ID: "sony", Name: "WH-1000XM5"}}, "sony")
+	if response.ErrorCode != "device_disconnected" {
+		t.Fatalf("response=%+v", response)
 	}
 }

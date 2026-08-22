@@ -62,23 +62,66 @@ func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpo
 		if err != nil {
 			continue
 		}
-		for i := range devices {
-			enrichment, ok := response.Enrichments[devices[i].ID]
-			if !ok {
-				continue
+		devices = applyEnrichments(devices, response.Enrichments)
+	}
+	return devices
+}
+
+// Property asks installed drivers to perform a generic property operation.
+// Drivers that do not own the selected device return no enrichment.
+func (m *Manager) Property(ctx context.Context, devices []domain.Device, method, deviceID, property string, value json.RawMessage) ([]domain.Device, bool, error) {
+	installed, err := m.List()
+	if err != nil {
+		return devices, false, err
+	}
+	handled := false
+	var operationErr error
+	for _, item := range installed {
+		response, callErr := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: method, DeviceID: deviceID, Property: property, Value: value, Devices: wireDevices(devices)})
+		if callErr != nil {
+			operationErr = callErr
+			continue
+		}
+		if _, ok := response.Enrichments[deviceID]; ok {
+			handled = true
+		}
+		devices = applyEnrichments(devices, response.Enrichments)
+	}
+	if !handled && operationErr != nil {
+		return devices, false, operationErr
+	}
+	return devices, handled, nil
+}
+
+func applyEnrichments(devices []domain.Device, enrichments map[string]protocol.Enrichment) []domain.Device {
+	for i := range devices {
+		enrichment, ok := enrichments[devices[i].ID]
+		if !ok {
+			continue
+		}
+		if enrichment.Identification != nil {
+			devices[i].Identification = &domain.Identification{Vendor: enrichment.Identification.Vendor, Family: enrichment.Identification.Family, Model: enrichment.Identification.Model, Confidence: enrichment.Identification.Confidence}
+			if len(devices[i].Endpoints) > 0 && devices[i].Name == devices[i].Endpoints[0].Address && enrichment.Identification.Model != "" {
+				devices[i].Name = enrichment.Identification.Model
 			}
-			if enrichment.Identification != nil {
-				devices[i].Identification = &domain.Identification{Vendor: enrichment.Identification.Vendor, Family: enrichment.Identification.Family, Model: enrichment.Identification.Model, Confidence: enrichment.Identification.Confidence}
-				if len(devices[i].Endpoints) > 0 && devices[i].Name == devices[i].Endpoints[0].Address && enrichment.Identification.Model != "" {
-					devices[i].Name = enrichment.Identification.Model
-				}
-			}
+		}
+		if enrichment.PossibleMatches != nil {
 			devices[i].PossibleMatches = enrichment.PossibleMatches
-			if len(enrichment.Properties) > 0 {
-				devices[i].Properties = domainProperties(enrichment.Properties)
+		}
+		if len(enrichment.Properties) > 0 {
+			if devices[i].Properties == nil {
+				devices[i].Properties = map[string]domain.Property{}
 			}
-			if len(enrichment.Capabilities) > 0 {
-				devices[i].Capabilities = domainCapabilities(enrichment.Capabilities)
+			for name, property := range domainProperties(enrichment.Properties) {
+				devices[i].Properties[name] = property
+			}
+		}
+		if len(enrichment.Capabilities) > 0 {
+			if devices[i].Capabilities == nil {
+				devices[i].Capabilities = map[string]domain.DeviceCapability{}
+			}
+			for name, capability := range domainCapabilities(enrichment.Capabilities) {
+				devices[i].Capabilities[name] = capability
 			}
 		}
 	}
@@ -87,7 +130,7 @@ func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpo
 func domainCapabilities(capabilities map[string]protocol.Capability) map[string]domain.DeviceCapability {
 	out := map[string]domain.DeviceCapability{}
 	for name, capability := range capabilities {
-		out[name] = domain.DeviceCapability{Status: capability.Status, Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Reason: capability.Reason}
+		out[name] = domain.DeviceCapability{Status: capability.Status, Kind: capability.Kind, Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason}
 	}
 	return out
 }
@@ -169,6 +212,11 @@ func (m *Manager) Remove(id string) error {
 			return domain.NewError(domain.CodeUnsupported, "driver %q is bundled with Betty and is removed by the application installer", id)
 		}
 	}
+	if executable, ok := officialPathDrivers()[id]; ok {
+		if _, err := exec.LookPath(executable); err == nil {
+			return domain.NewError(domain.CodeUnsupported, "driver %q is managed by the system package manager", id)
+		}
+	}
 	return domain.NewError(domain.CodeNotFound, "driver %q is not installed", id)
 }
 func (m *Manager) List() ([]protocol.Manifest, error) {
@@ -192,6 +240,20 @@ func (m *Manager) List() ([]protocol.Manifest, error) {
 			var item protocol.Manifest
 			if json.Unmarshal(bytes, &item) == nil {
 				byID[item.ID] = item
+			}
+		}
+	}
+	for id, executable := range officialPathDrivers() {
+		path, err := exec.LookPath(executable)
+		if err != nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		item, err := readManifest(ctx, path)
+		cancel()
+		if err == nil && item.ID == id && validateManifest(item) == nil {
+			if _, exists := byID[id]; !exists {
+				byID[id] = item
 			}
 		}
 	}
@@ -323,7 +385,10 @@ func (m *Manager) call(ctx context.Context, item protocol.Manifest, request prot
 			result, hostErr := m.handleHost(ctx, item, header, allowedDevices, channels)
 			reply := protocol.Message{Protocol: protocol.Version, Type: protocol.TypeHostResponse, ID: header.ID, Result: result}
 			if hostErr != nil {
-				reply.Error = hostErr.Error()
+				hostDomainError := domain.AsError(hostErr)
+				reply.Error = hostDomainError.Message
+				reply.ErrorCode = string(hostDomainError.Code)
+				reply.Details = hostDomainError.Details
 			}
 			if err := encoder.Encode(reply); err != nil {
 				return response, err
@@ -344,9 +409,28 @@ func (m *Manager) call(ctx context.Context, item protocol.Manifest, request prot
 		return response, fmt.Errorf("driver %s returned protocol %d", item.ID, response.Protocol)
 	}
 	if response.Error != "" {
-		return response, fmt.Errorf("driver %s: %s", item.ID, response.Error)
+		code := domain.CodeInternal
+		if response.ErrorCode != "" {
+			code = driverErrorCode(response.ErrorCode)
+		}
+		err := domain.NewError(code, "driver %s: %s", item.ID, response.Error)
+		err.Details = response.Details
+		return response, err
 	}
 	return response, nil
+}
+
+func driverErrorCode(value string) domain.ErrorCode {
+	code := domain.ErrorCode(value)
+	switch code {
+	case domain.CodeUsage, domain.CodeNotFound, domain.CodeAmbiguous, domain.CodeUnsupported,
+		domain.CodePermission, domain.CodeUnavailable, domain.CodeAuthentication,
+		domain.CodeInteraction, domain.CodeDisconnected, domain.CodeDriverRequired,
+		domain.CodeTimeout, domain.CodeInternal:
+		return code
+	default:
+		return domain.CodeInternal
+	}
 }
 
 func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, message protocol.Message, allowedDevices map[string]bool, channels map[string]string) (json.RawMessage, error) {
@@ -684,7 +768,23 @@ func (m *Manager) driverPath(id string) string {
 			return path
 		}
 	}
+	if executable, ok := officialPathDrivers()[id]; ok {
+		if path, err := exec.LookPath(executable); err == nil {
+			return path
+		}
+	}
 	return filepath.Join(m.bundled, safeID(id), executableName())
+}
+
+func officialPathDrivers() map[string]string {
+	suffix := ""
+	if runtime.GOOS == "windows" {
+		suffix = ".exe"
+	}
+	return map[string]string{
+		"official/apple-audio":     "bt-driver-apple-audio" + suffix,
+		"official/sony-headphones": "bt-driver-sony" + suffix,
+	}
 }
 
 func (m *Manager) bundledRoots() []string {

@@ -15,22 +15,26 @@ const (
 	CodePermission     ErrorCode = "permission_denied"
 	CodeUnavailable    ErrorCode = "bluetooth_unavailable"
 	CodeAuthentication ErrorCode = "authentication_failed"
+	CodeInteraction    ErrorCode = "interaction_required"
+	CodeDisconnected   ErrorCode = "device_disconnected"
+	CodeDriverRequired ErrorCode = "driver_required"
 	CodeTimeout        ErrorCode = "timeout"
 	CodeInternal       ErrorCode = "internal"
 )
 
 type Error struct {
-	Code    ErrorCode `json:"code"`
-	Message string    `json:"message"`
-	Details any       `json:"details,omitempty"`
-	Cause   error     `json:"-"`
+	Code      ErrorCode `json:"code"`
+	Message   string    `json:"message"`
+	Retryable bool      `json:"retryable"`
+	Details   any       `json:"details,omitempty"`
+	Cause     error     `json:"-"`
 }
 
 func (e *Error) Error() string { return e.Message }
 func (e *Error) Unwrap() error { return e.Cause }
 
 func NewError(code ErrorCode, format string, args ...any) *Error {
-	return &Error{Code: code, Message: fmt.Sprintf(format, args...)}
+	return &Error{Code: code, Message: fmt.Sprintf(format, args...), Retryable: retryable(code)}
 }
 
 func AsError(err error) *Error {
@@ -41,6 +45,15 @@ func AsError(err error) *Error {
 	return &Error{Code: CodeInternal, Message: err.Error(), Cause: err}
 }
 
+func retryable(code ErrorCode) bool {
+	switch code {
+	case CodeUnavailable, CodeDisconnected, CodeTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
 func ExitCode(err error) int {
 	switch AsError(err).Code {
 	case CodeUsage:
@@ -49,13 +62,13 @@ func ExitCode(err error) int {
 		return 3
 	case CodeAmbiguous:
 		return 4
-	case CodeUnsupported:
+	case CodeUnsupported, CodeDriverRequired:
 		return 5
 	case CodePermission:
 		return 6
-	case CodeUnavailable:
+	case CodeUnavailable, CodeDisconnected:
 		return 7
-	case CodeAuthentication:
+	case CodeAuthentication, CodeInteraction:
 		return 8
 	case CodeTimeout:
 		return 9

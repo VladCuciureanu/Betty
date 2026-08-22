@@ -2,6 +2,8 @@
 
 Betty is a small cross-platform CLI for finding and controlling Bluetooth devices.
 
+Betty is open-source software licensed under the [MIT License](LICENSE).
+
 ```console
 bt scan
 bt pair keyboard
@@ -25,6 +27,13 @@ For a small local release build:
 go build -trimpath -ldflags="-s -w" -o bt ./cmd/bt
 ```
 
+Homebrew release packaging is split into `betty-bluetooth`,
+`betty-apple-audio`, and `betty-sony`; see
+[packaging/homebrew/README.md](packaging/homebrew/README.md). Optional official
+driver executables installed on `PATH` are discovered by their exact names and
+verified manifest IDs, so uninstalling their formula removes the feature without
+copying vendor code into the base Betty installation.
+
 ## Commands
 
 ```text
@@ -34,6 +43,10 @@ bt pair <device>
 bt unpair <device>
 bt connect <device>
 bt disconnect <device>
+bt inspect <device>
+bt get <device> <property>
+bt set <device> <property> <value>
+bt watch <device> <property>
 bt <device>
 bt <device> battery
 
@@ -44,7 +57,7 @@ bt gatt <device> write <characteristic-uuid> <hex> [--without-response]
 bt gatt <device> watch <characteristic-uuid>
 ```
 
-Global flags must precede the command: `--json`, `--quiet`, `--verbose`, and `--timeout=10s`.
+Global flags must precede the command: `--json`, `--quiet`, `--verbose`, `--non-interactive`, and `--timeout=10s`. Non-interactive pairing still allows operating-system confirmation UI and Linux Just Works pairing, but returns `interaction_required` if Betty itself would need a PIN, passkey, or confirmation response. Property watches use the timeout for each read but continue until interrupted. Their JSON stream begins with a `snapshot` event and emits `changed` events only when the value changes.
 
 Device matching tries stable ID, exact name, case-insensitive name, then an unambiguous partial name. Stable IDs are opaque and local to the operating system.
 
@@ -65,13 +78,13 @@ go build -o bt-driver-sony ./cmd/bt-driver-sony
 bt driver install ./bt-driver-sony
 ```
 
-The Sony driver detects the protocol through its SDP service UUID, validates Sony frame lengths and checksums, and can read exact v2 headset or left/right/case battery reports through native Linux, macOS, or Windows RFCOMM. Windows uses the public Winsock Bluetooth API and resolves the Sony service channel through SDP, so it needs neither a kernel driver nor a native helper DLL. Noise control, ambient level, EQ, DSEE, and speak-to-chat are represented as planned capabilities until Betty's generic capability command grammar and hardware write validation are complete.
+The Sony driver detects the protocol through its SDP service UUID, validates Sony frame lengths and checksums, and can read exact v2 headset or left/right/case battery reports through native Linux, macOS, or Windows RFCOMM. Windows uses the public Winsock Bluetooth API and resolves the Sony service channel through SDP, so it needs neither a kernel driver nor a native helper DLL. The model-scoped v2 noise-control engine supports WH-CH720N's level layout and ULT Wear's reserved-byte layout, including current-state reads and write/read-back verification. These controls remain planned by default until Betty hardware validation is recorded; maintainers can opt into the same public `get`/`set` grammar with `BETTY_VALIDATE_SONY_CONTROLS=1`. Other XM/WF layouts are deliberately excluded rather than inferred. EQ, DSEE, and speak-to-chat remain planned.
 
 The Apple Audio driver contains the platform-neutral Apple Accessory Protocol implementation. It performs the AAP handshake, enables notifications, and parses exact component battery reports when Betty can provide an L2CAP connection to PSM `0x1001`. It recognizes only known AirPods and Beats model IDs in Apple Continuity advertisements, reports estimated 10% battery buckets as a passive fallback, and exposes unverified endpoint relationships through `possible_matches`. Unknown Apple Continuity models are left unclaimed instead of being mislabeled as AirPods.
 
-Drivers use a versioned duplex JSON protocol over stdin/stdout; they do not add their own CLI grammar. During a session, a permitted driver can request `l2cap.open/read/write/close` and namespaced `storage.get/set` operations from Betty. Access is limited to device IDs supplied to that driver and channel IDs opened by that session. Persistent values are isolated per driver and written with user-only permissions.
+Drivers use a versioned duplex JSON protocol over stdin/stdout; they do not add their own CLI grammar. Betty routes generic `inspect`, `get`, and `set` requests to them and merges typed properties and capabilities into the device model. During a session, a permitted driver can request `l2cap.open/read/write/close` and namespaced `storage.get/set` operations from Betty. Access is limited to device IDs supplied to that driver and channel IDs opened by that session. Persistent values are isolated per driver and written with user-only permissions.
 
-The driver binary and AAP implementation are cross-platform; transport availability is separate. Linux uses a native `AF_BLUETOOTH`/L2CAP socket and may require `CAP_NET_RAW`. macOS rejects the reserved Apple Audio PSM for third-party processes, but can obtain advertisement keys from its System keychain with user authorization. Windows uses the same AAP implementation through an optional Bluetooth profile driver: Betty discovers its device interface and sends the same L2CAP byte stream through a narrow `DeviceIoControl` transport.
+The driver binary and AAP implementation are cross-platform; transport availability is separate. Linux uses a native connection-oriented `AF_BLUETOOTH`/L2CAP `SOCK_SEQPACKET` socket and requires no raw-socket capability. macOS rejects the reserved Apple Audio PSM for third-party processes, but can obtain advertisement keys from its System keychain with user authorization. Windows uses the same AAP implementation through an optional Bluetooth profile driver: Betty discovers its device interface and sends the same L2CAP byte stream through a narrow `DeviceIoControl` transport.
 
 Windows does not offer arbitrary Classic L2CAP channels to ordinary desktop applications. Exact active battery reads therefore require a signed profile driver bound to the AAP SDP service. Betty's normal Windows MSI contains no Apple Audio code or kernel driver. Users who want AirPods or Beats support can explicitly install the separate Advanced Support MSI, which contains Betty's independently authored KMDF profile driver and the optional userspace driver. Without the kernel interface, the userspace driver can still return passive estimates or use imported advertisement keys. The design and protocol were cross-checked against the [LibrePods Windows investigation](https://github.com/librepods-org/librepods/pull/716), but its kernel source and interface GUID are not bundled or copied.
 
@@ -86,7 +99,7 @@ Exports contain private device keys and are created with user-only permissions (
 
 The AAP packet flow and battery layout follow the reverse-engineered [LibrePods protocol documentation](https://github.com/librepods-org/librepods/blob/main/docs/AAP%20Definitions.md). Private-key provisioning, Beats model identifiers, and encrypted advertisement behavior were cross-checked against [MagicPodsCore](https://github.com/steam3d/MagicPodsCore). Powerbeats Pro 2 transport and heart-rate behavior were cross-checked against [BeatsBar](https://github.com/mahdi-salmanzade/BeatsBar). Betty's implementation is written independently in Go behind its generic driver protocol; no third-party implementation is linked or copied into Betty.
 
-The current executable-driver prototype should be treated as trusted native code. Sandboxing and cryptographic endpoint verification remain future driver-host work. The Apple Audio driver advertises planned capabilities only for models that support them. Noise control is deliberately unavailable until AAP reads/writes and hardware behavior are implemented and tested. Powerbeats Pro 2 also advertises planned standard-GATT heart-rate support.
+The current executable-driver prototype should be treated as trusted native code. Sandboxing and cryptographic endpoint verification remain future driver-host work. The Apple Audio driver includes strict AAP noise-control state parsing and write/read-back verification for off, ANC, transparency, and model-scoped adaptive mode. It remains planned by default until Betty hardware validation is recorded; maintainers can opt in with `BETTY_VALIDATE_APPLE_AUDIO_CONTROLS=1`. Powerbeats Pro 2 also advertises planned standard-GATT heart-rate support.
 
 ## Platform behavior
 
@@ -98,7 +111,7 @@ The current executable-driver prototype should be treated as trusted native code
 | Unpair | Supported | Not exposed by a supported public API | Supported |
 | Generic OS profile connect/disconnect | Supported | Supported | Not reliably exposed for every profile |
 | Apple/Beats exact battery | AAP or encrypted BLE | Encrypted BLE using authorized System-keychain keys | AAP with optional profile driver, or encrypted BLE after key import |
-| Apple/Beats ANC control | Planned over existing AAP transport | Blocked by macOS for PSM `0x1001` | Transport ready with optional profile driver; commands planned |
+| Apple/Beats ANC control | Implemented behind hardware-validation gate over AAP | Blocked by macOS for PSM `0x1001` | Implemented behind hardware-validation gate; requires optional profile driver |
 
 Unsupported operations fail with a stable `unsupported` error instead of reporting false success. Linux needs a running BlueZ service and permission to use its system D-Bus API. Bluetooth permissions must be granted to the terminal application on macOS.
 
@@ -112,7 +125,15 @@ JSON results use a versioned envelope:
 {"schema_version":1,"data":[]}
 ```
 
-Errors use the same envelope with a structured `error`. Exit codes are `2` usage, `3` not found, `4` ambiguous, `5` unsupported, `6` permission, `7` unavailable, `8` authentication, and `9` timeout. Other failures return `1`.
+Errors use the same envelope with a structured `error` containing `code`, `message`, `retryable`, and optional `details`. JSON successes are written to stdout and JSON failures to stderr. Exit codes are `2` usage, `3` not found, `4` ambiguous, `5` unsupported or missing driver, `6` permission, `7` unavailable or disconnected, `8` authentication or required interaction, and `9` timeout. Other failures return `1`.
+
+Property reads and writes use this schema-version-1 data shape:
+
+```json
+{"schema_version":1,"data":{"device_id":"opaque-id","property":"noise_control","value":"anc","unit":"","estimated":false,"resolution":0}}
+```
+
+Watch output is newline-delimited envelopes with the same fields plus `"event":"snapshot"` or `"event":"changed"`. Clients must ignore unknown fields.
 
 ## Development
 
@@ -154,10 +175,31 @@ Remove Advanced Support first. Its uninstaller unbinds the profile driver, delet
 
 Hardware tests are intentionally separate from the default suite. Real releases require validation with a Classic device and a generic BLE peripheral on all three operating systems. Native L2CAP can be probed with `BETTY_HARDWARE_CLASSIC_ID=macos:<address> go test -tags=hardware -run TestNativeChannelLifecycle -v ./internal/l2cap`. Sony RFCOMM lifecycle can be probed on any supported OS with `BETTY_HARDWARE_CLASSIC_ID=<platform>:<address> BETTY_HARDWARE_RFCOMM_UUID=96cc203e506846adb32de316f5e069ba go test -tags=hardware -run TestNativeRFCOMMChannelLifecycle -v ./internal/rfcomm`. AirPods are expected to return the explicit macOS unsupported error for PSM `0x1001`.
 
+Verified results belong in [COMPATIBILITY.md](COMPATIBILITY.md); blank entries are deliberately not support claims.
+
 Set `BETTY_BINARY` to the built executable and opt in with disposable hardware:
 
 ```console
 BETTY_HARDWARE_BLE=sensor BETTY_HARDWARE_CLASSIC=keyboard go test -tags=hardware ./hardware
+```
+
+Sony maintainers can validate same-state noise-control and ambient-level writes
+without leaving the feature enabled for ordinary users:
+
+```console
+PATH="$PWD/dist:$PATH" BETTY_BINARY="$PWD/dist/bt" \
+BETTY_HARDWARE_SONY='sony device id' BETTY_VALIDATE_SONY_CONTROLS=1 \
+go test -tags=hardware -run TestSonyControlReadWriteReadback -v ./hardware
+```
+
+Apple Audio maintainers can perform the equivalent non-destructive same-state
+check on Linux or on Windows with Advanced Support installed:
+
+```console
+PATH="$PWD/dist:$PATH" BETTY_BINARY="$PWD/dist/bt" \
+BETTY_HARDWARE_APPLE_AUDIO='AirPods or Beats device id' \
+BETTY_VALIDATE_APPLE_AUDIO_CONTROLS=1 \
+go test -tags=hardware -run TestAppleAudioControlReadWriteReadback -v ./hardware
 ```
 
 The Classic lifecycle test pairs, connects, disconnects, and unpairs the selected device. Do not point it at hardware whose pairing state must be preserved.

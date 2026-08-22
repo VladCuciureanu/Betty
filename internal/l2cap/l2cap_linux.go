@@ -32,7 +32,7 @@ func (h *linuxHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16) 
 	fd, err := unix.Socket(unix.AF_BLUETOOTH, unix.SOCK_SEQPACKET|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, unix.BTPROTO_L2CAP)
 	if err != nil {
 		if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
-			return "", domain.NewError(domain.CodePermission, "opening a raw Bluetooth L2CAP socket requires CAP_NET_RAW")
+			return "", domain.NewError(domain.CodePermission, "opening a Bluetooth L2CAP connection was denied by the system security policy")
 		}
 		return "", fmt.Errorf("open Linux L2CAP socket: %w", err)
 	}

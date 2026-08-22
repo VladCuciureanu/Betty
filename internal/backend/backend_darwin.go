@@ -11,7 +11,7 @@ import "C"
 
 import (
 	"context"
-	"fmt"
+	"time"
 	"unsafe"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
@@ -44,39 +44,72 @@ func (*darwinBackend) devices() []domain.Device {
 	}
 	return out
 }
-func (*darwinBackend) Pair(_ context.Context, d domain.Device) error {
-	return darwinCall(d, "pair")
+func (*darwinBackend) Pair(ctx context.Context, d domain.Device) error {
+	return darwinCall(ctx, d, "pair")
 }
-func (*darwinBackend) Connect(_ context.Context, d domain.Device) error {
-	return darwinCall(d, "connect")
+func (*darwinBackend) Connect(ctx context.Context, d domain.Device) error {
+	return darwinCall(ctx, d, "connect")
 }
-func (*darwinBackend) Disconnect(_ context.Context, d domain.Device) error {
-	return darwinCall(d, "disconnect")
+func (*darwinBackend) Disconnect(ctx context.Context, d domain.Device) error {
+	return darwinCall(ctx, d, "disconnect")
 }
 func (*darwinBackend) Unpair(context.Context, domain.Device) error {
 	return domain.NewError(domain.CodeUnsupported, "macOS does not expose a supported public API for programmatic unpairing; remove the device in System Settings")
 }
 
-func darwinCall(d domain.Device, operation string) error {
+func darwinCall(ctx context.Context, d domain.Device, operation string) error {
 	address := classicAddress(d)
 	if address == "" {
 		return domain.NewError(domain.CodeUnsupported, "device has no macOS Classic endpoint")
 	}
-	c := C.CString(address)
-	defer C.free(unsafe.Pointer(c))
+	result := make(chan int, 1)
+	go func() {
+		c := C.CString(address)
+		defer C.free(unsafe.Pointer(c))
+		var code int
+		switch operation {
+		case "pair":
+			code = int(C.betty_pair(c))
+		case "connect":
+			code = int(C.betty_connect(c))
+		case "disconnect":
+			code = int(C.betty_disconnect(c))
+		}
+		result <- code
+	}()
 	var code int
-	switch operation {
-	case "pair":
-		code = int(C.betty_pair(c))
-	case "connect":
-		code = int(C.betty_connect(c))
-	case "disconnect":
-		code = int(C.betty_disconnect(c))
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case code = <-result:
 	}
 	if code == 0 {
-		return nil
+		c := C.CString(address)
+		defer C.free(unsafe.Pointer(c))
+		desired := true
+		state := func() bool { return C.betty_is_connected(c) != 0 }
+		if operation == "pair" {
+			state = func() bool { return C.betty_is_paired(c) != 0 }
+		} else if operation == "disconnect" {
+			desired = false
+		}
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			if state() == desired {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-ticker.C:
+			}
+		}
 	}
-	return fmt.Errorf("macOS Bluetooth operation failed (IOReturn %d)", code)
+	if operation == "pair" {
+		return domain.NewError(domain.CodeAuthentication, "macOS pairing failed (IOReturn %d)", code)
+	}
+	return domain.NewError(domain.CodeUnavailable, "macOS Bluetooth %s failed (IOReturn %d)", operation, code)
 }
 func classicAddress(d domain.Device) string {
 	for _, e := range d.Endpoints {

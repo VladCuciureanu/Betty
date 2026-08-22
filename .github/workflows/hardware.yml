@@ -13,9 +13,37 @@ jobs:
       matrix:
         os: [self-hosted-linux-bluetooth, self-hosted-macos-bluetooth, self-hosted-windows-bluetooth]
     runs-on: ${{ matrix.os }}
+    env:
+      BETTY_BINARY: ${{ github.workspace }}/dist/bt
+      BETTY_HARDWARE_BLE: ${{ vars.BETTY_HARDWARE_BLE }}
+      BETTY_HARDWARE_CLASSIC: ${{ vars.BETTY_HARDWARE_CLASSIC }}
+      BETTY_HARDWARE_READ_CHARACTERISTIC: ${{ vars.BETTY_HARDWARE_READ_CHARACTERISTIC }}
+      BETTY_HARDWARE_WRITE_CHARACTERISTIC: ${{ vars.BETTY_HARDWARE_WRITE_CHARACTERISTIC }}
+      BETTY_HARDWARE_WRITE_HEX: ${{ vars.BETTY_HARDWARE_WRITE_HEX }}
+      BETTY_HARDWARE_WATCH_CHARACTERISTIC: ${{ vars.BETTY_HARDWARE_WATCH_CHARACTERISTIC }}
+      BETTY_HARDWARE_SONY: ${{ vars.BETTY_HARDWARE_SONY }}
+      BETTY_VALIDATE_SONY_CONTROLS: ${{ vars.BETTY_VALIDATE_SONY_CONTROLS }}
+      BETTY_HARDWARE_APPLE_AUDIO: ${{ vars.BETTY_HARDWARE_APPLE_AUDIO }}
+      BETTY_VALIDATE_APPLE_AUDIO_CONTROLS: ${{ vars.BETTY_VALIDATE_APPLE_AUDIO_CONTROLS }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
-      - run: go test -tags=hardware ./...
+      - name: Build Betty natively
+        shell: bash
+        run: |
+          mkdir -p dist
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          go build -trimpath -o "dist/bt${suffix}" ./cmd/bt
+          go build -trimpath -o "dist/bt-driver-sony${suffix}" ./cmd/bt-driver-sony
+          go build -trimpath -o "dist/bt-driver-apple-audio${suffix}" ./cmd/bt-driver-apple-audio
+          echo "${GITHUB_WORKSPACE}/dist" >> "$GITHUB_PATH"
+          if [ -n "$suffix" ]; then echo "BETTY_BINARY=${GITHUB_WORKSPACE}/dist/bt.exe" >> "$GITHUB_ENV"; fi
+      - name: Require configured generic hardware
+        shell: bash
+        run: |
+          test -n "$BETTY_HARDWARE_BLE"
+          test -n "$BETTY_HARDWARE_CLASSIC"
+      - run: go test -tags=hardware -v ./...

@@ -14,6 +14,8 @@ int betty_device_paired(int i) { @autoreleasepool { if (i < 0 || i >= devices.co
 static IOBluetoothDevice *device(const char *address) { return [IOBluetoothDevice deviceWithAddressString:[NSString stringWithUTF8String:address]]; }
 int betty_connect(const char *address) { @autoreleasepool { return (int)[device(address) openConnection]; } }
 int betty_disconnect(const char *address) { @autoreleasepool { return (int)[device(address) closeConnection]; } }
+int betty_is_connected(const char *address) { @autoreleasepool { return [device(address) isConnected] ? 1 : 0; } }
+int betty_is_paired(const char *address) { @autoreleasepool { return [device(address) isPaired] ? 1 : 0; } }
 
 @interface BettyPairDelegate : NSObject <IOBluetoothDevicePairDelegate>
 @property BOOL finished;
@@ -25,7 +27,7 @@ int betty_disconnect(const char *address) { @autoreleasepool { return (int)[devi
 int betty_pair(const char *address) { @autoreleasepool {
   IOBluetoothDevicePair *pair = [IOBluetoothDevicePair pairWithDevice:device(address)];
   BettyPairDelegate *delegate = [BettyPairDelegate new]; pair.delegate = delegate;
-  IOReturn started = [pair start]; if (started != kIOReturnSuccess) return (int)started;
+  IOReturn started = [pair start]; if (started != kIOReturnSuccess) { [delegate release]; return (int)started; }
   while (!delegate.finished) { [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]]; }
-  return (int)delegate.result;
+  IOReturn result = delegate.result; [delegate release]; return (int)result;
 } }

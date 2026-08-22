@@ -92,6 +92,13 @@ func TestAppleAudioManifestMigratesAirPodsDriver(t *testing.T) {
 	}
 }
 
+func TestAppleAudioCapabilitiesUseGenericPropertyTypes(t *testing.T) {
+	capabilities := appleAudioCapabilities(appleAudioModels[0x1420])
+	if capabilities["battery"].Kind != "battery" || capabilities["noise_control"].Kind != "enum" {
+		t.Fatalf("capabilities=%#v", capabilities)
+	}
+}
+
 func TestParseExactBattery(t *testing.T) {
 	packet := mustHex("040004000400030401590201020158020108012a0101")
 	battery, err := parseExactBattery(packet)
@@ -115,6 +122,29 @@ func TestParseExactBattery(t *testing.T) {
 func TestParseExactBatteryRejectsMalformedPacket(t *testing.T) {
 	if _, err := parseExactBattery(mustHex("04000400040003040159")); err == nil {
 		t.Fatal("expected malformed packet error")
+	}
+}
+
+func TestAAPNoiseControlCodec(t *testing.T) {
+	for _, mode := range []string{"off", "anc", "transparency", "adaptive"} {
+		packet, err := encodeAAPNoiseControl(mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := parseAAPNoiseControl(packet); !ok || got != mode {
+			t.Fatalf("parseAAPNoiseControl(%x) = %q, %t", packet, got, ok)
+		}
+	}
+}
+
+func TestAAPNoiseControlCodecRejectsMalformedPackets(t *testing.T) {
+	for _, packet := range [][]byte{mustHex("0400040009000d02"), mustHex("0400040009000d02000001"), mustHex("0400040009000dff000000")} {
+		if mode, ok := parseAAPNoiseControl(packet); ok {
+			t.Fatalf("accepted malformed packet %x as %q", packet, mode)
+		}
+	}
+	if _, err := encodeAAPNoiseControl("spatial"); err == nil {
+		t.Fatal("accepted unsupported mode")
 	}
 }
 

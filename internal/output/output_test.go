@@ -23,16 +23,22 @@ func TestJSONEnvelope(t *testing.T) {
 	}
 }
 func TestJSONErrorEnvelope(t *testing.T) {
-	var out bytes.Buffer
-	r := Renderer{Out: &out, Err: &out, Mode: JSON}
+	var out, stderr bytes.Buffer
+	r := Renderer{Out: &out, Err: &stderr, Mode: JSON}
 	r.Failure(domain.NewError(domain.CodeNotFound, "gone"))
+	if out.Len() != 0 {
+		t.Fatalf("failure wrote stdout: %q", out.String())
+	}
 	var got struct {
 		Error domain.Error `json:"error"`
 	}
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+	if err := json.Unmarshal(stderr.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Error.Code != domain.CodeNotFound {
 		t.Fatalf("code = %q", got.Error.Code)
+	}
+	if got.Error.Retryable {
+		t.Fatal("not-found errors must not be retryable")
 	}
 }

@@ -1,13 +1,17 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$BaseMsi,
-    [Parameter(Mandatory = $true)][string]$AdvancedMsi,
+    [string]$AdvancedMsi,
+    [switch]$BaseOnly,
     [switch]$SkipDriver
 )
 
 $ErrorActionPreference = "Stop"
 $baseMsiPath = (Resolve-Path $BaseMsi).Path
-$advancedMsiPath = (Resolve-Path $AdvancedMsi).Path
+$advancedMsiPath = if ($BaseOnly) { $null } else {
+    if (-not $AdvancedMsi) { throw "AdvancedMsi is required unless BaseOnly is set" }
+    (Resolve-Path $AdvancedMsi).Path
+}
 $installDirectory = Join-Path $env:ProgramFiles "Betty"
 $advancedDirectory = Join-Path $env:ProgramFiles "Betty Apple Audio Advanced"
 $skipArgument = if ($SkipDriver) { "SKIPDRIVER=1" } else { "" }
@@ -32,6 +36,13 @@ try {
     & $bt --version
     $drivers = & $bt driver list
     if ($drivers -match 'official/apple-audio') { throw "Base MSI unexpectedly bundled the Apple Audio driver" }
+
+    if ($BaseOnly) {
+        Invoke-Msi "/x `"$baseMsiPath`"" "betty-base-uninstall.log"
+        $baseInstalled = $false
+        if (Test-Path $installDirectory) { throw "Base MSI uninstall left the Betty installation directory behind" }
+        return
+    }
 
     Invoke-Msi "/i `"$advancedMsiPath`" $skipArgument" "betty-advanced-install.log"
     $advancedInstalled = $true

@@ -60,9 +60,13 @@ type Property struct {
 }
 type DeviceCapability struct {
 	Status   string   `json:"status"`
+	Kind     string   `json:"type,omitempty"`
 	Readable bool     `json:"readable,omitempty"`
 	Writable bool     `json:"writable,omitempty"`
 	Values   []string `json:"values,omitempty"`
+	Minimum  *float64 `json:"minimum,omitempty"`
+	Maximum  *float64 `json:"maximum,omitempty"`
+	Step     *float64 `json:"step,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
 }
 

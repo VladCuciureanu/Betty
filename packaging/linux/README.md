@@ -12,8 +12,8 @@ This produces three packages:
 - `betty-apple-audio`, containing the optional AirPods and Beats driver;
 - `betty-sony`, containing the optional Sony v1/v2 headphones driver.
 
-The optional package depends on the matching Betty version and gives only its
-driver executable `CAP_NET_RAW`, which is required to open the Apple Audio Classic
-L2CAP channel. Betty itself is never run as root and receives no capability.
-Removing `betty-apple-audio` removes the capable executable. Per-user driver keys in
-the user's configuration directory are retained as user data.
+The optional packages depend on the matching Betty version. Classic L2CAP uses a
+connection-oriented `SOCK_SEQPACKET` socket, not a raw socket, so neither `bt` nor
+the optional driver receives `CAP_NET_RAW` or runs as root. Linux reserves that
+capability check for `SOCK_RAW` L2CAP sockets. Per-user driver keys in the user's
+configuration directory are retained as user data when a package is removed.
