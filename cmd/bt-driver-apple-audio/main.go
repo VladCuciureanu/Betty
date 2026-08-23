@@ -219,7 +219,7 @@ func appleAudioCapabilities(profile appleAudioProfile) map[string]protocol.Capab
 		if profile.Adaptive {
 			values = append(values, "adaptive")
 		}
-		capabilities["noise_control"] = protocol.Capability{Status: "planned", Kind: "enum", Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise-control messages are not implemented yet"}
+		capabilities["noise_control"] = protocol.Capability{Status: "planned", Kind: "enum", Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation"}
 	}
 	if profile.HeartRate {
 		capabilities["heart_rate"] = protocol.Capability{Status: "planned", Kind: "number", Readable: true, Reason: "Powerbeats Pro 2 exposes the standard BLE Heart Rate Service only while fitness-equipment pairing mode is active"}
