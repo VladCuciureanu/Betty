@@ -38,9 +38,8 @@ behind a compact interface without pretending the limitations do not exist.
 - Optional device drivers that do not bloat the base executable.
 - Explicit `unsupported`, permission, interaction, adapter, and timeout errors.
 
-Betty began as a dependable backend for the Toothpick Raycast extension, but it
-is intentionally useful as a standalone CLI and as a subprocess API for other
-tools.
+Betty is a standalone CLI with a stable subprocess API for local applications
+and scripts.
 
 ## Install
 
@@ -95,6 +94,11 @@ bt watch headphones battery
 
 Successful mutating commands are silent by default, which keeps scripts simple.
 
+On macOS, Betty also reads battery percentages published by the system HID
+stack for connected Bluetooth keyboards, mice, and trackpads. It uses native
+IOHID/IOKit APIs and correlates the reading by the exact endpoint address; it
+does not run `ioreg`, parse command output, or guess from a device name.
+
 ### Generic BLE and GATT
 
 ```console
@@ -132,6 +136,9 @@ JSON uses a versioned envelope:
 ```json
 {"schema_version":1,"data":{"device_id":"opaque-id","property":"noise_control","value":"anc","estimated":false,"resolution":0}}
 ```
+
+The stable value shapes and error behavior are documented in
+[the JSON API contract](docs/JSON_API.md).
 
 Watch output is newline-delimited JSON. It starts with a `snapshot` event and
 then emits `changed` events. Clients should ignore fields they do not recognize.

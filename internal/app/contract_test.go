@@ -10,6 +10,7 @@ import (
 
 	"github.com/vladcuciureanu/betty/internal/ble"
 	"github.com/vladcuciureanu/betty/internal/domain"
+	"github.com/vladcuciureanu/betty/internal/hidbattery"
 	"github.com/vladcuciureanu/betty/internal/output"
 )
 
@@ -31,6 +32,14 @@ type contractBLE struct {
 	battery []byte
 	info    map[string]string
 	err     error
+}
+
+type contractHIDBattery struct {
+	observations []hidbattery.Observation
+}
+
+func (b contractHIDBattery) Batteries(context.Context) ([]hidbattery.Observation, error) {
+	return b.observations, nil
 }
 
 func (b contractBLE) Scan(context.Context) ([]domain.Device, error)         { return b.devices, b.err }
@@ -97,5 +106,17 @@ func TestBackendErrorsKeepTheirStructuredCategory(t *testing.T) {
 	_, err := a.inventory(context.Background(), false)
 	if !errors.Is(err, want) || domain.AsError(err).Code != domain.CodePermission {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListIncludesCorrelatedHIDBattery(t *testing.T) {
+	device := domain.Device{ID: "macos:trackpad", Name: "Trackpad", Endpoints: []domain.Endpoint{{Address: "00-81-2a-f1-46-01"}}}
+	var out bytes.Buffer
+	a := application{backend: contractBackend{devices: []domain.Device{device}}, hid: contractHIDBattery{observations: []hidbattery.Observation{{Address: "00:81:2A:F1:46:01", Percentage: 90}}}, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, timeout: time.Second}
+	if err := a.run(context.Background(), []string{"list"}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"battery":{"value":90,"unit":"%","display":"90%"}`)) {
+		t.Fatalf("output=%s", out.Bytes())
 	}
 }

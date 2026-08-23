@@ -74,7 +74,7 @@ func TestSingleBeatsBatteryUsesHeadsetShape(t *testing.T) {
 		t.Fatalf("battery=%q", got)
 	}
 	battery := passiveBattery(ad)
-	if battery["headset"] == nil || len(battery) != 1 {
+	if battery.Headset == nil || battery.Headset.Level != 90 || battery.Left != nil || battery.Right != nil || battery.Case != nil {
 		t.Fatalf("battery=%#v", battery)
 	}
 }
@@ -83,6 +83,14 @@ func TestPowerbeatsPro2NameSelectsMostSpecificCapabilities(t *testing.T) {
 	capabilities := connectedAppleAudioCapabilities(protocol.Device{Name: "Powerbeats Pro 2"}, nil)
 	if _, ok := capabilities["heart_rate"]; !ok {
 		t.Fatalf("capabilities=%#v", capabilities)
+	}
+}
+
+func TestInspectIdentifiesSavedAppleAudioWithoutConnecting(t *testing.T) {
+	response := inspect(protocol.NewSession(strings.NewReader(""), io.Discard), []protocol.Device{{ID: "saved", Name: "AirPods Pro", Paired: true}}, "list")
+	identity := response.Enrichments["saved"].Identification
+	if identity == nil || identity.Vendor != "Apple" || identity.Family != "AirPods" || identity.Model != "AirPods Pro" || identity.Confidence != "name" {
+		t.Fatalf("identity=%#v", identity)
 	}
 }
 

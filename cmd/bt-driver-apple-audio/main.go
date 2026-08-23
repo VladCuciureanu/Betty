@@ -141,10 +141,14 @@ func inspectWithErrors(session *protocol.Session, devices []protocol.Device, pur
 	readErrors := map[string]error{}
 	keyring, _ := loadKeyring(session)
 	var ads []appleAudioAdvertisement
+	var appleAudioDevices []protocol.Device
 	var connected []protocol.Device
 	for _, device := range devices {
-		if device.Connected && isAppleAudioName(device.Name) {
-			connected = append(connected, device)
+		if isAppleAudioName(device.Name) {
+			appleAudioDevices = append(appleAudioDevices, device)
+			if device.Connected {
+				connected = append(connected, device)
+			}
 		}
 		if ad, ok := parseDevice(device); ok {
 			ads = append(ads, ad)
@@ -180,11 +184,16 @@ func inspectWithErrors(session *protocol.Session, devices []protocol.Device, pur
 		}
 		response.Enrichments[ad.device.ID] = e
 	}
-	for _, device := range connected {
+	for _, device := range appleAudioDevices {
 		enrichment := response.Enrichments[device.ID]
+		// A saved endpoint name can provide a conservative semantic identity.
+		// Nearby advertisements remain possible matches, not identity proof.
+		if profile, ok := connectedAppleAudioProfile(device, nil); ok {
+			enrichment.Identification = &protocol.Identification{Vendor: profile.Vendor, Family: profile.Family, Model: profile.Name, Confidence: "name"}
+		}
 		enrichment.Capabilities = connectedAppleAudioCapabilities(device, ads)
 		response.Enrichments[device.ID] = enrichment
-		if purpose != "battery" {
+		if purpose != "battery" || !device.Connected {
 			continue
 		}
 		if battery, keys, err := readAAP(session, device.ID, true); err == nil {
@@ -350,11 +359,17 @@ func isAppleAudioName(name string) bool {
 	return strings.Contains(name, "airpods") || strings.Contains(name, "beats") || strings.Contains(name, "powerbeats")
 }
 
-func passiveBattery(ad appleAudioAdvertisement) map[string]*int {
+func passiveBattery(ad appleAudioAdvertisement) protocol.BatteryValue {
+	component := func(level *int) *protocol.BatteryComponent {
+		if level == nil {
+			return nil
+		}
+		return &protocol.BatteryComponent{Level: *level}
+	}
 	if ad.profile.Dual {
-		battery := map[string]*int{"left": ad.left, "right": ad.right}
+		battery := protocol.BatteryValue{Left: component(ad.left), Right: component(ad.right)}
 		if ad.profile.Case {
-			battery["case"] = ad.caseBattery
+			battery.Case = component(ad.caseBattery)
 		}
 		return battery
 	}
@@ -362,7 +377,7 @@ func passiveBattery(ad appleAudioAdvertisement) map[string]*int {
 	if headset == nil {
 		headset = ad.right
 	}
-	return map[string]*int{"headset": headset}
+	return protocol.BatteryValue{Headset: component(headset)}
 }
 
 func connectedAppleAudioCapabilities(device protocol.Device, ads []appleAudioAdvertisement) map[string]protocol.Capability {

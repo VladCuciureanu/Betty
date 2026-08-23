@@ -111,6 +111,21 @@ type Property struct {
 	Resolution int             `json:"resolution,omitempty"`
 }
 
+// BatteryValue is the schema-version-1 object form of the standard battery
+// property. A single-component device may instead expose a JSON number.
+type BatteryValue struct {
+	Headset *BatteryComponent `json:"headset,omitempty"`
+	Left    *BatteryComponent `json:"left,omitempty"`
+	Right   *BatteryComponent `json:"right,omitempty"`
+	Case    *BatteryComponent `json:"case,omitempty"`
+}
+
+type BatteryComponent struct {
+	Level    int    `json:"level"`
+	Charging bool   `json:"charging,omitempty"`
+	Status   string `json:"status,omitempty"`
+}
+
 // Capability describes a named device feature independently of the transport
 // used to implement it. A planned capability is deliberately not available:
 // clients must not offer reads or writes until a driver reports "available".

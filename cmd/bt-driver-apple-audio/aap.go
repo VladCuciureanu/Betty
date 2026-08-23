@@ -29,18 +29,8 @@ var aapNoiseControlValues = map[string]byte{
 	"adaptive":     0x04,
 }
 
-type exactBattery struct {
-	Headset *batteryComponent `json:"headset,omitempty"`
-	Left    *batteryComponent `json:"left,omitempty"`
-	Right   *batteryComponent `json:"right,omitempty"`
-	Case    *batteryComponent `json:"case,omitempty"`
-}
-
-type batteryComponent struct {
-	Level    int    `json:"level"`
-	Charging bool   `json:"charging"`
-	Status   string `json:"status"`
-}
+type exactBattery = protocol.BatteryValue
+type batteryComponent = protocol.BatteryComponent
 
 func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *appleAudioKeys, error) {
 	var opened struct {

@@ -2,7 +2,7 @@
 
 Betty is a small, cross-platform Bluetooth device utility. It discovers and manages Bluetooth devices, exposes generic BLE/GATT operations, and provides a minimal property interface for optional device-protocol drivers.
 
-Betty is not an automation platform, UI framework, package marketplace, or background service. Applications such as Toothpick should own presentation, shortcuts, refresh policy, workflows, and installation guidance.
+Betty is not an automation platform, UI framework, package marketplace, or background service. Client applications should own presentation, shortcuts, refresh policy, workflows, and installation guidance.
 
 ## Version 1 release definition
 
@@ -211,4 +211,4 @@ These are outside Betty v1 unless a concrete Bluetooth-device use case demonstra
 - broad diagnostic or hardware-setup commands such as `bt doctor`;
 - proprietary controls without explicitly selected hardware and captured protocol evidence.
 
-Toothpick and other clients should remain responsible for presentation, workflows, polling decisions, shortcuts, and installation guidance. Betty should expose only Bluetooth device state and operations through its human and JSON interfaces.
+Clients should remain responsible for presentation, workflows, polling decisions, shortcuts, and installation guidance. Betty should expose only Bluetooth device state and operations through its human and JSON interfaces.

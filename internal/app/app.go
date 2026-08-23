@@ -19,6 +19,7 @@ import (
 	"github.com/vladcuciureanu/betty/internal/ble"
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/driver"
+	"github.com/vladcuciureanu/betty/internal/hidbattery"
 	"github.com/vladcuciureanu/betty/internal/l2cap"
 	"github.com/vladcuciureanu/betty/internal/output"
 	"github.com/vladcuciureanu/betty/internal/resolver"
@@ -32,6 +33,7 @@ type application struct {
 	timeout time.Duration
 	version string
 	drivers *driver.Manager
+	hid     hidbattery.Provider
 }
 
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version string) int {
@@ -56,7 +58,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 	if opts.nonInteractive {
 		pairingInput = nil
 	}
-	a := application{backend: backend.New(backend.PairingIO{In: pairingInput, Out: stderr}), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers}
+	a := application{backend: backend.New(backend.PairingIO{In: pairingInput, Out: stderr}), ble: ble.New(), render: renderer, timeout: opts.timeout, version: version, drivers: drivers, hid: hidbattery.New()}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if !isWatchCommand(rest) {
@@ -128,7 +130,7 @@ func (a application) run(ctx context.Context, args []string) error {
 		}
 		return a.render.Data(devices)
 	case "list":
-		devices, err := a.backend.List(ctx)
+		devices, err := a.inventory(ctx, false)
 		if err != nil {
 			return err
 		}
@@ -181,6 +183,7 @@ func (a application) scan(ctx context.Context) ([]domain.Device, error) {
 			all = merge(all, r.devices)
 		}
 	}
+	all = a.applyHIDBatteries(ctx, all)
 	if a.drivers != nil {
 		all = a.drivers.Inspect(ctx, all)
 	}
@@ -263,11 +266,30 @@ func scanBudget(ctx context.Context) time.Duration {
 }
 func (a application) inventory(ctx context.Context, discover bool) ([]domain.Device, error) {
 	if !discover {
-		return a.backend.List(ctx)
+		devices, err := a.backend.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		devices = a.applyHIDBatteries(ctx, devices)
+		if a.drivers != nil {
+			devices = a.drivers.InspectFor(ctx, devices, "list")
+		}
+		return devices, nil
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, min(4*time.Second, a.timeout/2))
 	defer cancel()
 	return a.scan(scanCtx)
+}
+
+func (a application) applyHIDBatteries(ctx context.Context, devices []domain.Device) []domain.Device {
+	if a.hid == nil {
+		return devices
+	}
+	observations, err := a.hid.Batteries(ctx)
+	if err != nil {
+		return devices
+	}
+	return hidbattery.Apply(devices, observations)
 }
 func (a application) mutate(ctx context.Context, action string, args []string) error {
 	if len(args) != 1 {
@@ -736,7 +758,7 @@ Commands:
   driver import-state <id> <file>
                                replace private driver state from an export
   <device>                     inspect a device
-  <device> battery             read the standard BLE battery level
+  <device> battery             read the available battery level
   gatt <device> services
   gatt <device> characteristics [service-uuid]
   gatt <device> read <characteristic-uuid>
