@@ -22,6 +22,8 @@ The KMDF driver is a narrow bridge. It binds only to the Apple AAP SDP service U
 - Windows Driver Kit 10.0.28000.2526 (restored through its pinned NuGet package)
 - Go 1.24
 - .NET SDK capable of building the pinned WiX Toolset 7.0.0 SDK
+  (the project owner has accepted the WiX v7 [Open Source Maintenance Fee EULA](https://docs.firegiant.com/wix/osmf/);
+  both `.wixproj` files set `AcceptEula` to `wix7`)
 
 Run:
 
