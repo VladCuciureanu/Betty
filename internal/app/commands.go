@@ -151,19 +151,30 @@ func (r gattWriteResult) WriteHuman(w io.Writer) error {
 	return err
 }
 
+type gattMTU struct {
+	DeviceID string `json:"device_id"`
+	MTU      int    `json:"mtu"`
+}
+
+func (r gattMTU) WriteHuman(w io.Writer) error {
+	_, err := fmt.Fprintf(w, "ATT MTU %d (%d-byte values per write without response)\n", r.MTU, r.MTU-3)
+	return err
+}
+
 func (a *application) gatt(ctx context.Context, args []string) error {
 	operation, rest := args[1], args[2:]
 	usage := map[string]string{
 		"services":        "gatt <device> services",
 		"characteristics": "gatt <device> characteristics [service-uuid]",
-		"read":            "gatt <device> read <characteristic-uuid>",
-		"write":           "gatt <device> write <characteristic-uuid> <hex> [--without-response]",
-		"watch":           "gatt <device> watch <characteristic-uuid>",
+		"read":            "gatt <device> read [service-uuid/]<characteristic-uuid>",
+		"write":           "gatt <device> write [service-uuid/]<characteristic-uuid> <hex> [--without-response]",
+		"watch":           "gatt <device> watch [service-uuid/]<characteristic-uuid>",
+		"mtu":             "gatt <device> mtu",
 	}
-	wantArgs := map[string][2]int{"services": {0, 0}, "characteristics": {0, 1}, "read": {1, 1}, "write": {2, 2}, "watch": {1, 1}}
+	wantArgs := map[string][2]int{"services": {0, 0}, "characteristics": {0, 1}, "read": {1, 1}, "write": {2, 2}, "watch": {1, 1}, "mtu": {0, 0}}
 	limits, ok := wantArgs[operation]
 	if !ok {
-		return domain.NewError(domain.CodeUsage, "unknown gatt operation %q; use services, characteristics, read, write, or watch", operation)
+		return domain.NewError(domain.CodeUsage, "unknown gatt operation %q; use services, characteristics, read, write, watch, or mtu", operation)
 	}
 	if len(rest) < limits[0] || len(rest) > limits[1] {
 		return domain.NewError(domain.CodeUsage, "usage: bt %s", usage[operation])
@@ -197,6 +208,12 @@ func (a *application) gatt(ctx context.Context, args []string) error {
 				return err
 			}
 			return a.render.Data(nonNil(characteristics))
+		case "mtu":
+			mtu, err := a.ble.MTU(ctx, address)
+			if err != nil {
+				return err
+			}
+			return a.render.Data(gattMTU{DeviceID: d.ID, MTU: mtu})
 		case "read":
 			data, err := a.ble.Read(ctx, address, rest[0])
 			if err != nil {

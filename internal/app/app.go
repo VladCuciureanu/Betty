@@ -166,9 +166,11 @@ const gattHelp = `Subcommands:
   bt gatt <device> read <characteristic>          read a value, printed as hex
   bt gatt <device> write <characteristic> <hex>   write a value [--without-response]
   bt gatt <device> watch <characteristic>         print notifications until interrupted
+  bt gatt <device> mtu                            show the ATT MTU the OS negotiated
 
-UUIDs may be 16-bit (2a19) or 128-bit. Writes use write-with-response
-unless --without-response is given.`
+UUIDs may be 16-bit (2a19) or 128-bit. A characteristic UUID that appears in
+several services is ambiguous: name the service too, as service/characteristic.
+Writes use write-with-response unless --without-response is given.`
 
 const driverHelp = `Subcommands:
   bt driver list                          list available drivers

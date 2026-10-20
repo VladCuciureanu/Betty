@@ -209,6 +209,28 @@ func (c *Conn) Subscribe(ctx context.Context, serviceUUID, characteristicUUID st
 	}, nil
 }
 
+// MTU reports the negotiated ATT MTU. tinygo reads it through a
+// characteristic, so the device must have one.
+func (c *Conn) MTU(ctx context.Context) (int, error) {
+	c.mu.Lock()
+	if err := c.discover(ctx); err != nil {
+		c.mu.Unlock()
+		return 0, err
+	}
+	chars := c.chars
+	c.mu.Unlock()
+	if len(chars) == 0 {
+		return 0, domain.NewError(domain.CodeUnsupported, "the device has no characteristic to read the MTU through")
+	}
+	var mtu uint16
+	err := run(ctx, func() error {
+		var err error
+		mtu, err = chars[0].characteristic.GetMTU()
+		return translate("read MTU", err, domain.CodeUnsupported)
+	})
+	return int(mtu), err
+}
+
 // run calls f and returns its error, or the context's error if the context
 // ends first. tinygo's GATT calls can't be interrupted, so f keeps running in
 // the background in that case.
