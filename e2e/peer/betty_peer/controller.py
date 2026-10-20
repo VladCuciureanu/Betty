@@ -64,6 +64,29 @@ _CLASSIC_COMMANDS = [
 ]
 
 
+# Classic setup and housekeeping commands that Linux sends and Bumble's
+# controller does not implement, answered as a basic real controller would.
+# Values are return parameters; None means plain success.
+_DEFAULT_REPLIES = {
+    "HCI_READ_VOICE_SETTING_COMMAND": {"voice_setting": 0x0060},
+    "HCI_READ_NUMBER_OF_SUPPORTED_IAC_COMMAND": {"num_support_iac": 1},
+    # The General Inquiry Access Code, little-endian.
+    "HCI_READ_CURRENT_IAC_LAP_COMMAND": {"num_support_iac": 1, "iac_lap": bytes([0x33, 0x8B, 0x9E])},
+    "HCI_READ_PAGE_SCAN_ACTIVITY_COMMAND": {"page_scan_interval": 0x0800, "page_scan_window": 0x0012},
+    "HCI_READ_PAGE_SCAN_TYPE_COMMAND": {"page_scan_type": 0},
+    "HCI_READ_STORED_LINK_KEY_COMMAND": {"max_num_keys": 0, "num_keys_read": 0},
+    "HCI_DELETE_STORED_LINK_KEY_COMMAND": {"num_keys_deleted": 0},
+    "HCI_READ_AUTHENTICATION_ENABLE_COMMAND": {"authentication_enable": 0},
+    "HCI_SET_EVENT_FILTER_COMMAND": None,
+    "HCI_WRITE_CONNECTION_ACCEPT_TIMEOUT_COMMAND": None,
+    "HCI_WRITE_PAGE_TIMEOUT_COMMAND": None,
+    "HCI_WRITE_DEFAULT_LINK_POLICY_SETTINGS_COMMAND": None,
+    "HCI_WRITE_PAGE_SCAN_ACTIVITY_COMMAND": None,
+    "HCI_WRITE_INQUIRY_SCAN_ACTIVITY_COMMAND": None,
+    "HCI_WRITE_LINK_POLICY_SETTINGS_COMMAND": None,
+}
+
+
 class InquiryController(Controller):
     class_of_device: int = 0
     extended_inquiry_response: bytes = b""
@@ -78,10 +101,28 @@ class InquiryController(Controller):
         }
 
     def on_hci_command(self, command):
+        if command.name in _DEFAULT_REPLIES:
+            fields = _DEFAULT_REPLIES[command.name]
+            if fields is None:
+                return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+            replies = getattr(hci, type(command).__name__.replace("_Command", "_ReturnParameters"))
+            return replies(status=hci.HCI_ErrorCode.SUCCESS, **fields)
         # Name the controller: the kernel and the scripted devices' hosts
         # talk to different controllers on the same link.
         print(f"betty_peer: controller {self.name} does not implement {command.name}", file=sys.stderr, flush=True)
         return super().on_hci_command(command)
+
+    def on_hci_set_connection_encryption_command(self, command):
+        # Bumble implements only LE encryption. Report Classic encryption as
+        # on, which is all the host checks; the link itself is virtual.
+        self._send_hci_command_status(hci.HCI_ErrorCode.SUCCESS, command.op_code)
+        self.send_hci_packet(
+            hci.HCI_Encryption_Change_Event(
+                status=hci.HCI_ErrorCode.SUCCESS,
+                connection_handle=command.connection_handle,
+                encryption_enabled=command.encryption_enable,
+            )
+        )
 
     def on_hci_write_class_of_device_command(self, command):
         self.class_of_device = command.class_of_device
