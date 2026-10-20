@@ -135,7 +135,7 @@ Beyond the "Fix first" items:
 - `handleHost` is 176 lines of near-identical L2CAP and RFCOMM branches, with permissions checked by hand-sliced string prefixes.
 - L2CAP and RFCOMM channels share one map keyed by a bare ID. Cleanup uses `context.Background()`, so it can block forever.
 - **Fixed.** ✓ Sony `get battery` reports `sonyCapabilities` instead of `sonyCapabilitiesFor`. With controls enabled, `noise_control` reverts to "planned". The bug predates the SDK port, which carried it over.
-- The Sony frame stream gives up at the first bad frame, and its ACK handling recurses.
+- **Fixed** (the stream resynchronizes on the next start byte and bounds an unterminated frame; receiving is one loop). The Sony frame stream gave up at the first bad frame, and its ACK handling recursed.
 - **Fixed.** The Apple driver duplicated its AAP handshake across two functions; both now use one session type. The driver is on the SDK. A noise-control write also waits for the device to report the requested mode instead of failing on the first report of the old one, and no longer reports success without writing when a device skips feature negotiation.
 - **Fixed.** The darwin build needs cgo: the stub for `systemAppleAudioKeys` should be tagged `!darwin || !cgo`.
 - The storage-key regex is recompiled on every call. The number of storage keys is unlimited. `ImportState` reads the whole file before checking its size.
