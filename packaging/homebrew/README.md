@@ -1,6 +1,6 @@
 # Homebrew tap packaging
 
-The public tap lives in `VladCuciureanu/homebrew-tap`. Betty keeps reviewed
+The public tap will live in `VladCuciureanu/homebrew-tap`, which has not been created yet. Betty keeps reviewed
 formula templates here so a release can update that repository without putting
 vendor drivers in the base formula.
 

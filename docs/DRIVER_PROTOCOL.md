@@ -179,7 +179,7 @@ When a driver misses its deadline, Betty kills it and reports `timeout`.
 | --- | --- | --- | --- |
 | `id` | string | all | Request ID to echo in the response. Treat as opaque. |
 | `method` | string | all | `inspect`, `get`, or `set`. |
-| `purpose` | string | `inspect` | `scan` or `list`. Drivers MUST treat unknown values as `scan`. |
+| `purpose` | string | `inspect` | `list` when `devices` holds only the devices the OS already knows, or `scan` when it also holds devices found by an active scan. Drivers MUST treat unknown values as `scan`. |
 | `device_id` | string | `get`, `set` | ID of the target device. |
 | `property` | string | `get`, `set` | Property name. |
 | `value` | any JSON | `set` | Value to write. |
@@ -404,10 +404,17 @@ JSON is treated as `internal`.
   Service and Device Information Service.
 - If a driver identifies a device whose name is only its address, Betty uses
   the driver's `model` as the device name.
-- `bt watch` repeats the whole `get`, including device discovery and every
-  driver's `inspect`, waiting 2 seconds between rounds, so updates arrive
-  every few seconds at best. The first failed read ends the watch. Drivers do
-  not need to implement subscriptions.
+- Betty first tries a command with the devices the OS already knows, with an
+  `inspect` of purpose `list`. Only when that is not enough does it scan and
+  repeat the `inspect`, now with purpose `scan`, and then the `get` or `set`.
+  It scans when the device is not among the known devices, when no driver
+  supplies the property, or when a `get` fails, so a driver that needs
+  advertisement data, which only a scan provides, receives it on the second
+  attempt. A failed `set` is never repeated.
+- `bt watch` resolves the device once, then repeats the `get` every 2 seconds
+  by default. A retryable error is reported as a warning and polling continues;
+  any other error ends the watch. Drivers do not need to implement
+  subscriptions.
 
 ## 11. Installation and discovery
 

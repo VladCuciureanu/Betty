@@ -5,46 +5,147 @@
 > 1.0, and `schema_version` may stay at `1` across those changes. Schema version
 > 1 freezes at 1.0.
 
-Betty's JSON output is a process API for any local client. It is not tailored
-to a particular UI. Every response uses a versioned envelope:
+With `--json`, Betty is a process API for any local client. Every line it prints
+is one JSON envelope:
 
 ```json
 {"schema_version":1,"data":{}}
 ```
 
-Failures use the same version and contain a stable `code`, a human-readable
-`message`, `retryable`, and optional `details`. Clients should branch on the
-code, display the message when useful, and ignore unknown fields.
+- **stdout** carries results: one envelope per command, or one per event for
+  streaming commands such as `watch`.
+- **stderr** carries everything else, also as envelopes: at most one `error`,
+  any number of `warning`s, and `debug` diagnostics with `--verbose`.
+- The exit status says whether the command succeeded; see the
+  [README](../README.md#built-for-automation).
 
-## Standard battery property
+Clients should ignore fields they don't recognize.
 
-`battery.value` is either an integer percentage for a single battery:
+## Errors
 
 ```json
-{"value":90,"unit":"%"}
+{"schema_version":1,"error":{"code":"device_ambiguous","message":"2 devices match \"keyboard\"; use a device ID or address","retryable":false,"details":{"query":"keyboard","matches":[{"id":"windows:AA:BB:CC:DD:EE:01","name":"Office Keyboard","paired":true,"connected":false},{"id":"windows:AA:BB:CC:DD:EE:02","name":"Travel Keyboard","paired":true,"connected":true}]}}}
 ```
 
-or an object for devices with independently reported components:
+| Field | Meaning |
+| --- | --- |
+| `code` | Stable error code; branch on it. |
+| `message` | Human-readable explanation; show it, but don't parse it. |
+| `retryable` | Whether trying again might succeed. True for `bluetooth_unavailable`, `device_disconnected`, and `timeout`. |
+| `details` | Optional structured context. For `device_ambiguous` it lists the matching devices. |
+
+Codes: `usage`, `device_not_found`, `device_ambiguous`, `unsupported`,
+`driver_required`, `permission_denied`, `bluetooth_unavailable`,
+`device_disconnected`, `authentication_failed`, `interaction_required`,
+`timeout`, `canceled`, and `internal`.
+
+## Warnings and diagnostics
+
+```json
+{"schema_version":1,"warning":{"message":"BLE scan failed: Bluetooth permission denied"}}
+{"schema_version":1,"debug":{"message":"\"Desk Speaker\" is not a known device; scanning"}}
+```
+
+A warning reports a problem that did not stop the command. The command's result
+is still valid but may be incomplete; for example, a scan whose BLE half failed
+lists only the devices the OS found.
+
+## Results
+
+### Devices: `scan`, `list`, `inspect`
+
+`scan` and `list` return an array of devices, which is empty rather than `null`
+when nothing is found. `inspect` returns one device.
 
 ```json
 {
-  "value": {
-    "left": {"level":89,"status":"discharging"},
-    "right":{"level":88,"charging":true,"status":"charging"},
-    "case":{"level":42}
-  },
-  "unit":"%"
+  "id": "windows:04:E4:B6:1F:F5:8D",
+  "name": "WH-1000XM5",
+  "paired": false,
+  "connected": false,
+  "rssi": -70,
+  "endpoints": [
+    {"id": "04:E4:B6:1F:F5:8D", "transport": "os", "address": "04:E4:B6:1F:F5:8D"},
+    {"id": "04:E4:B6:1F:F5:8D", "transport": "ble", "address": "04:E4:B6:1F:F5:8D"}
+  ],
+  "identification": {"vendor": "Sony", "family": "Headphones", "model": "WH-1000XM5", "confidence": "protocol"},
+  "properties": {"battery": {"value": 80, "unit": "%", "display": "80%"}},
+  "capabilities": {"noise_control": {"status": "planned", "type": "enum", "readable": true, "writable": true, "values": ["off", "anc", "ambient"], "reason": "..."}}
 }
 ```
 
-The allowed component keys in schema version 1 are `headset`, `left`, `right`,
-and `case`. Each component has an integer `level` from 0 through 100 and may
-include `charging` and a protocol-derived `status`.
+- `id` is opaque and platform-local. Don't parse it.
+- Each endpoint is one way of reaching the device: `os` (the operating
+  system's device record), `classic`, or `ble`. Entries that share a Bluetooth
+  address are merged into one device; names are never used to merge.
+- `identification`, `properties`, and `capabilities` come from drivers and
+  from standard sources. A capability whose `status` is not `available` must
+  not be offered to users.
+- Optional fields, such as `rssi`, `services`, `manufacturer_data`,
+  `service_data`, `information`, `possible_matches`, and `last_seen_at`, are
+  omitted when unknown.
 
-When `estimated` is true, the reading is approximate. `resolution` gives its
-step size in percentage points. Clients own presentation, including whether to
-render an approximation marker. `display` is only a terminal-friendly hint and
-is not the canonical value.
+### Properties: `get`, `set`, `watch`
 
-Unavailable components are omitted. Clients must not interpret omission as
-zero percent.
+```json
+{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":80,"unit":"%","estimated":false}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `value` | The canonical value, in the property's type. |
+| `unit` | Present when the value has a unit, such as `%`. |
+| `estimated` | Whether the value is approximate. |
+| `resolution` | For an estimate, its step size in the value's unit. |
+| `event` | `watch` only: `snapshot` for the first value, `changed` for each later one. |
+
+`set` returns the value read back from the device after writing, not the value
+requested.
+
+#### Standard battery value
+
+`battery.value` is either an integer percentage for a single battery, or an
+object for devices with independently reported components:
+
+```json
+{"left":{"level":89,"status":"discharging"},"right":{"level":88,"charging":true,"status":"charging"},"case":{"level":42}}
+```
+
+The component keys are `headset`, `left`, `right`, and `case`. Each has an
+integer `level` from 0 through 100 and may include `charging` and a
+protocol-specific `status`. Unavailable components are omitted; never treat an
+omitted component as 0%.
+
+### Pairing and connections: `pair`, `unpair`, `connect`, `disconnect`
+
+```json
+{"device_id":"windows:AA:BB:CC:DD:EE:FF","name":"Desk Speaker","action":"connect","changed":true,"paired":true,"connected":true}
+```
+
+`paired` and `connected` are the state after the command. `changed` is `false`
+when the device was already in the requested state and nothing was done.
+
+### GATT: `gatt`
+
+- `services` and `characteristics` return arrays.
+- `read` returns
+  `{"device_id":"...","characteristic":"2a19","value":"59"}`, where `value` is
+  hexadecimal.
+- `write` returns
+  `{"device_id":"...","characteristic":"...","bytes":1,"with_response":true}`.
+- `watch` prints one envelope per notification, with `"event":"notification"`
+  and the fields of `read`.
+
+### Drivers: `driver`
+
+- `list` returns an array of driver manifests.
+- `install` returns the installed driver's manifest.
+- `remove`, `export-state`, and `import-state` return
+  `{"id":"...","action":"remove"}`, plus `file` for the state operations.
+
+### Other
+
+- `capabilities` returns the platform's supported operations, each
+  `supported`, `unsupported`, or `permission-required`.
+- `version` returns `{"version":"..."}`.
+- `help` returns `{"help":"..."}`.

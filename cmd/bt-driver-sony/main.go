@@ -154,7 +154,7 @@ func getBattery(host *protocol.Session, device protocol.Device) (*protocol.Enric
 	raw, _ := json.Marshal(battery)
 	return &protocol.Enrichment{
 		Identification: sonyIdentification(device, model),
-		Capabilities:   sonyCapabilities(protocolVersion),
+		Capabilities:   sonyCapabilitiesFor(model, protocolVersion),
 		Properties:     map[string]protocol.Property{"battery": {Value: raw, Unit: "%", Display: battery.display()}},
 	}, nil
 }
@@ -236,7 +236,7 @@ func sonyCapabilities(protocolVersion sonyProtocol) map[string]protocol.Capabili
 	reason := "Sony control messages are not enabled until current-state reads and hardware-verified writes are implemented"
 	minimum, maximum, step := 1.0, 20.0, 1.0
 	capabilities := map[string]protocol.Capability{
-		"battery":       {Status: protocol.StatusAvailable, Kind: protocol.KindBattery, Readable: true},
+		"battery":       batteryCapability(protocolVersion),
 		"noise_control": {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: []string{"off", "anc", "ambient"}, Reason: reason},
 		"ambient_level": {Status: protocol.StatusPlanned, Kind: protocol.KindInteger, Readable: true, Writable: true, Minimum: &minimum, Maximum: &maximum, Step: &step, Reason: reason},
 		"equalizer":     {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Reason: reason},
@@ -246,6 +246,19 @@ func sonyCapabilities(protocolVersion sonyProtocol) map[string]protocol.Capabili
 		capabilities["sony.speak_to_chat"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindBoolean, Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
 	}
 	return capabilities
+}
+
+// batteryCapability is available only for protocol v2, the one protocol
+// whose battery messages are implemented.
+func batteryCapability(protocolVersion sonyProtocol) protocol.Capability {
+	battery := protocol.Capability{Status: protocol.StatusAvailable, Kind: protocol.KindBattery, Readable: true}
+	switch protocolVersion {
+	case protocolV1:
+		battery.Status, battery.Reason = protocol.StatusPlanned, "Sony protocol v1 battery messages are not verified"
+	case protocolUnknown:
+		battery.Status, battery.Reason = protocol.StatusPlanned, "the device does not advertise a Sony control protocol service"
+	}
+	return battery
 }
 
 func sonyCapabilitiesFor(model string, protocolVersion sonyProtocol) map[string]protocol.Capability {

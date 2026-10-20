@@ -1,57 +1,93 @@
+// Package resolver selects the one device a user's query names.
 package resolver
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
+// Resolve returns the device that query names. Query may be, in order of
+// precedence:
+//
+//  1. a device ID;
+//  2. a Bluetooth address of any of the device's endpoints, in any common
+//     notation;
+//  3. an exact name;
+//  4. a case-insensitive name;
+//  5. a case-insensitive substring of a name.
+//
+// The first step with a match decides. When that step matches more than one
+// device, Resolve reports device_ambiguous instead of choosing, unless every
+// other match is a known possible match of one paired or connected device.
 func Resolve(devices []domain.Device, query string) (domain.Device, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return domain.Device{}, domain.NewError(domain.CodeUsage, "device is required")
+		return domain.Device{}, domain.NewError(domain.CodeUsage, "a device is required")
 	}
-	for _, d := range devices {
-		if d.ID == query {
-			return d, nil
+	steps := []func(domain.Device) bool{
+		func(d domain.Device) bool { return d.ID == query },
+		func(d domain.Device) bool { return hasAddress(d, NormalizeAddress(query)) },
+		func(d domain.Device) bool { return d.Name == query },
+		func(d domain.Device) bool { return strings.EqualFold(d.Name, query) },
+		func(d domain.Device) bool { return strings.Contains(strings.ToLower(d.Name), strings.ToLower(query)) },
+	}
+	for _, matches := range steps {
+		var found []domain.Device
+		for _, d := range devices {
+			if matches(d) {
+				found = append(found, d)
+			}
 		}
-	}
-	for _, d := range devices {
-		if d.Name == query {
-			return d, nil
+		switch {
+		case len(found) == 1:
+			return found[0], nil
+		case len(found) > 1:
+			if preferred, ok := preferredRelated(found); ok {
+				return preferred, nil
+			}
+			return domain.Device{}, ambiguous(query, found)
 		}
-	}
-	var folded []domain.Device
-	for _, d := range devices {
-		if strings.EqualFold(d.Name, query) {
-			folded = append(folded, d)
-		}
-	}
-	if len(folded) == 1 {
-		return folded[0], nil
-	}
-	if len(folded) > 1 {
-		return ambiguous(query, folded)
-	}
-	q := strings.ToLower(query)
-	var partial []domain.Device
-	for _, d := range devices {
-		if strings.Contains(strings.ToLower(d.Name), q) {
-			partial = append(partial, d)
-		}
-	}
-	if len(partial) == 1 {
-		return partial[0], nil
-	}
-	if preferred, ok := preferredRelated(partial); ok {
-		return preferred, nil
-	}
-	if len(partial) > 1 {
-		return ambiguous(query, partial)
 	}
 	return domain.Device{}, domain.NewError(domain.CodeNotFound, "no device matches %q", query)
 }
 
+// NormalizeAddress returns a 48-bit Bluetooth address in upper-case,
+// colon-separated form, or "" when value is not one. It accepts colons,
+// hyphens, or no separators.
+func NormalizeAddress(value string) string {
+	hexDigits := strings.NewReplacer(":", "", "-", "").Replace(strings.TrimSpace(value))
+	if len(hexDigits) != 12 {
+		return ""
+	}
+	var b strings.Builder
+	for i, r := range strings.ToUpper(hexDigits) {
+		if !strings.ContainsRune("0123456789ABCDEF", r) {
+			return ""
+		}
+		if i > 0 && i%2 == 0 {
+			b.WriteByte(':')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func hasAddress(d domain.Device, address string) bool {
+	if address == "" {
+		return false
+	}
+	for _, endpoint := range d.Endpoints {
+		if NormalizeAddress(endpoint.Address) == address {
+			return true
+		}
+	}
+	return false
+}
+
+// preferredRelated returns the paired or connected match that every other
+// match names as a possible match of the same physical device.
 func preferredRelated(matches []domain.Device) (domain.Device, bool) {
 	for _, candidate := range matches {
 		if !candidate.Paired && !candidate.Connected {
@@ -59,17 +95,7 @@ func preferredRelated(matches []domain.Device) (domain.Device, bool) {
 		}
 		allRelated := true
 		for _, other := range matches {
-			if other.ID == candidate.ID {
-				continue
-			}
-			related := false
-			for _, id := range other.PossibleMatches {
-				if id == candidate.ID {
-					related = true
-					break
-				}
-			}
-			if !related {
+			if other.ID != candidate.ID && !slices.Contains(other.PossibleMatches, candidate.ID) {
 				allRelated = false
 				break
 			}
@@ -81,12 +107,12 @@ func preferredRelated(matches []domain.Device) (domain.Device, bool) {
 	return domain.Device{}, false
 }
 
-func ambiguous(query string, matches []domain.Device) (domain.Device, error) {
-	choices := make([]map[string]string, 0, len(matches))
+func ambiguous(query string, matches []domain.Device) error {
+	details := domain.AmbiguityDetails{Query: query}
 	for _, d := range matches {
-		choices = append(choices, map[string]string{"id": d.ID, "name": d.Name})
+		details.Matches = append(details.Matches, domain.Match{ID: d.ID, Name: d.Name, Paired: d.Paired, Connected: d.Connected})
 	}
-	e := domain.NewError(domain.CodeAmbiguous, "multiple devices match %q", query)
-	e.Details = map[string]any{"matches": choices}
-	return domain.Device{}, e
+	e := domain.NewError(domain.CodeAmbiguous, "%d devices match %q; use a device ID or address", len(matches), query)
+	e.Details = details
+	return e
 }

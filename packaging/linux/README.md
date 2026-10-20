@@ -10,7 +10,7 @@ This produces three packages:
 
 - `betty`, containing only the device-generic `bt` executable;
 - `betty-apple-audio`, containing the optional AirPods and Beats driver;
-- `betty-sony`, containing the optional Sony v1/v2 headphones driver.
+- `betty-sony`, containing the optional Sony headphones driver, which recognizes protocol v1 and v2 devices and reads battery from v2 devices.
 
 The optional packages depend on the matching Betty version. Classic L2CAP uses a
 connection-oriented `SOCK_SEQPACKET` socket, not a raw socket, so neither `bt` nor

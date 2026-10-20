@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -40,8 +41,8 @@ func TestGenericBLE(t *testing.T) {
 		if value == "" {
 			t.Fatal("BETTY_HARDWARE_WRITE_HEX is required with BETTY_HARDWARE_WRITE_CHARACTERISTIC")
 		}
-		runSilent(t, "gatt", device, "write", characteristic, value, "--with-response")
-		runSilent(t, "gatt", device, "write", characteristic, value, "--without-response")
+		runMutation(t, "gatt", device, "write", characteristic, value, "--with-response")
+		runMutation(t, "gatt", device, "write", characteristic, value, "--without-response")
 	}
 }
 
@@ -50,23 +51,23 @@ func TestClassicLifecycle(t *testing.T) {
 	if device == "" {
 		t.Skip("set BETTY_HARDWARE_CLASSIC to a disposable test device")
 	}
-	runSilent(t, "pair", device)
+	runMutation(t, "pair", device)
 	t.Cleanup(func() { _ = command("--json", "unpair", device).Run() })
 	assertDevicePaired(t, device, true)
 	if runtime.GOOS == "windows" {
 		runError(t, domain.CodeUnsupported, "connect", device)
 		runError(t, domain.CodeUnsupported, "disconnect", device)
 	} else {
-		runSilent(t, "connect", device)
+		runMutation(t, "connect", device)
 		assertDeviceState(t, device, true, true)
-		runSilent(t, "disconnect", device)
+		runMutation(t, "disconnect", device)
 		assertDeviceState(t, device, true, false)
 	}
 	if runtime.GOOS == "darwin" {
 		runError(t, domain.CodeUnsupported, "unpair", device)
 		return
 	}
-	runSilent(t, "unpair", device)
+	runMutation(t, "unpair", device)
 	assertDeviceState(t, device, false, false)
 }
 
@@ -104,9 +105,10 @@ func runError(t *testing.T, code domain.ErrorCode, args ...string) {
 func runJSON(t *testing.T, args ...string) json.RawMessage {
 	t.Helper()
 	args = append([]string{"--json", "--timeout=30s"}, args...)
-	output, err := command(args...).CombinedOutput()
+	// Only stdout carries the result; warnings and errors go to stderr.
+	output, err := command(args...).Output()
 	if err != nil {
-		t.Fatalf("bt %v: %v\n%s", args, err, output)
+		t.Fatalf("bt %v: %v\n%s", args, err, stderrOf(err))
 	}
 	var decoded envelope
 	if err := json.Unmarshal(output, &decoded); err != nil {
@@ -118,16 +120,24 @@ func runJSON(t *testing.T, args ...string) json.RawMessage {
 	return decoded.Data
 }
 
-func runSilent(t *testing.T, args ...string) {
+// runMutation runs pair, unpair, connect, or disconnect and checks that the
+// result names the action.
+func runMutation(t *testing.T, args ...string) {
 	t.Helper()
-	args = append([]string{"--json", "--non-interactive", "--timeout=30s"}, args...)
-	output, err := command(args...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("bt %v: %v\n%s", args, err, output)
+	var result struct {
+		Action string `json:"action"`
 	}
-	if len(output) != 0 {
-		t.Fatalf("mutating command was not silent: %s", output)
+	if err := json.Unmarshal(runJSON(t, append([]string{"--non-interactive"}, args...)...), &result); err != nil || result.Action != args[0] {
+		t.Fatalf("bt %v: result=%+v err=%v", args, result, err)
 	}
+}
+
+func stderrOf(err error) []byte {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.Stderr
+	}
+	return nil
 }
 
 func assertDeviceState(t *testing.T, query string, paired, connected bool) {

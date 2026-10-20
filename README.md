@@ -1,203 +1,208 @@
 # Betty
 
-Betty is a small, cross-platform Bluetooth command-line utility. Its executable
-is called `bt`.
+Betty is one command for every Bluetooth device you own, on macOS, Linux, and
+Windows. Its executable is called `bt`.
 
 ```console
-bt scan
 bt list
+bt get keyboard battery
 bt connect "Desk Speaker"
-bt get "AirPods Pro" battery
-bt gatt sensor services
+bt set headphones noise_control anc
+bt gatt sensor read 2a19
 ```
 
-Betty gives people and applications one predictable interface for Bluetooth on
-macOS, Linux, and Windows. It uses native operating-system APIs for saved
-devices, pairing, and profile connections, while generic BLE discovery and GATT
-operations are isolated behind `tinygo.org/x/bluetooth`.
+Betty uses each operating system's native Bluetooth APIs for saved devices,
+pairing, and connections, and `tinygo.org/x/bluetooth` for BLE discovery and
+GATT. Device-specific features, such as headphone noise control, come from
+optional drivers that anyone can write.
 
-There is no daemon, account, cloud service, or network request. Normal commands
-run locally and exit.
+There is no daemon, account, cloud service, or network request. Every command
+runs locally and exits.
 
-> [!NOTE]
-> Betty is under active development. The implementation and automated tests are
-> substantial, but the native hardware evidence required for a stable release
-> is still being collected in [COMPATIBILITY.md](COMPATIBILITY.md).
+> [!WARNING]
+> Betty is pre-1.0 and has not yet been validated on real hardware; see
+> [COMPATIBILITY.md](COMPATIBILITY.md). Commands, JSON output, and the driver
+> protocol may change incompatibly until 1.0.
 
 ## Why Betty?
 
-Bluetooth automation is surprisingly platform-specific. Device names are
-ambiguous, BLE and Classic endpoints do not always share an identity, and an OS
-may expose some connection operations but not others. Betty keeps those details
-behind a compact interface without pretending the limitations do not exist.
+Bluetooth tooling is split by OS (`bluetoothctl` is Linux-only, `blueutil`
+macOS-only, and Windows has little that can be scripted), by layer (BLE
+libraries are code, not tools), and by vendor (headphone features live in each
+vendor's phone app). Betty puts them behind one interface:
 
-- One command vocabulary across macOS, Linux, and Windows.
-- Deterministic device selection that refuses ambiguous matches.
-- Human output for terminals and stable JSON envelopes for applications.
-- Generic BLE/GATT access without vendor-specific commands.
-- Optional device drivers that do not bloat the base executable.
-- Explicit `unsupported`, permission, interaction, adapter, and timeout errors.
-
-Betty is built to be built on in two directions:
-
-- **Applications and scripts** call `bt --json` and get a stable, versioned
-  [JSON API](docs/JSON_API.md).
-- **Driver authors** add support for new devices through the language-neutral
-  [driver protocol](docs/DRIVER_PROTOCOL.md) without changing Betty itself.
+- **The same commands on every OS,** with explicit `unsupported` errors where an
+  OS cannot do something, never a false success.
+- **Built for scripts:** schema-versioned JSON, stable error codes, and
+  distinct exit codes.
+- **Open device support:** drivers add properties such as battery or
+  `noise_control` through a [language-neutral protocol](docs/DRIVER_PROTOCOL.md)
+  without vendor-specific commands.
 
 ## Install
 
-Published package instructions will be added with the first validated release.
-For now, Go 1.24 or newer is required; macOS builds also require the Xcode
-command-line tools.
+Packages will be published with the first validated release. Until then, build
+from source with Go 1.24 or newer. macOS builds also need the Xcode command-line
+tools.
 
 ```console
 go install github.com/vladcuciureanu/betty/cmd/bt@latest
 ```
 
-Or build a small local binary from a checkout:
-
-```console
-go build -trimpath -ldflags="-s -w" -o bt ./cmd/bt
-```
-
-Packaging is already defined for
-[Homebrew](packaging/homebrew/README.md),
-[Debian](packaging/linux/README.md), and
-[Windows MSI](packaging/windows/README.md). Vendor support is packaged
-separately from the base utility.
+Packaging is defined for [Homebrew](packaging/homebrew/README.md),
+[Debian](packaging/linux/README.md), and [Windows MSI](packaging/windows/README.md).
 
 ## Everyday use
 
-Discover nearby devices or list devices already known to the operating system:
+`bt list` shows the devices the operating system already knows, instantly.
+`bt scan` also discovers nearby devices, which takes a few seconds.
 
 ```console
-bt scan
 bt list
+bt scan
 ```
 
-Betty accepts an opaque stable ID, an exact name, a case-insensitive name, or a
-unique partial name. It never silently chooses between ambiguous matches.
+Wherever a command takes a `<device>`, you can give its ID, its Bluetooth
+address in any common notation, its exact name, or a unique part of its name.
+Betty never chooses between matches: when a query matches several devices, it
+fails and lists them.
 
 ```console
 bt pair keyboard
-bt connect headphones
-bt inspect headphones
-bt disconnect headphones
+bt connect AA:BB:CC:DD:EE:FF
+bt inspect keyboard
+bt disconnect keyboard
 ```
 
-Read, change, or watch normalized properties exposed by the device and its
-installed optional driver:
+Betty first looks for the device among the devices the OS already knows. It
+scans only when the device is not there, or when an operation needs a BLE
+endpoint that only a scan reports. Commands on paired devices therefore start
+immediately.
+
+`pair`, `unpair`, `connect`, and `disconnect` print the state they verified.
+Asking for the state a device is already in succeeds without doing anything, so
+scripts can repeat them safely.
+
+### Properties
+
+Read, change, or watch properties that a device or an installed driver
+provides:
 
 ```console
 bt get headphones battery
-bt get headphones noise_control
 bt set headphones noise_control anc
 bt watch headphones battery
 ```
 
-Successful mutating commands are silent by default, which keeps scripts simple.
+Without any driver, Betty reads `battery` from the standard GATT Battery Service
+and `manufacturer`, `model`, `serial_number`, `hardware_revision`,
+`software_revision`, and `firmware_version` from the Device Information Service.
+On macOS it also reads battery levels that the system HID stack publishes for
+connected keyboards, mice, and trackpads, matched by exact address.
 
-On macOS, Betty also reads battery percentages published by the system HID
-stack for connected Bluetooth keyboards, mice, and trackpads. It uses native
-IOHID/IOKit APIs and correlates the reading by the exact endpoint address; it
-does not run `ioreg`, parse command output, or guess from a device name.
+`set` prints the value the driver read back from the device after writing it.
+`watch` prints the value once and again whenever it changes, polling every 2
+seconds by default (`--interval`). It reports retryable errors as warnings and
+keeps going, and it ends when interrupted.
 
-### Generic BLE and GATT
+### GATT
 
 ```console
 bt gatt sensor services
-bt gatt sensor characteristics
 bt gatt sensor characteristics 180f
 bt gatt sensor read 2a19
 bt gatt sensor write <characteristic-uuid> 01
+bt gatt sensor write <characteristic-uuid> 01 --without-response
 bt gatt sensor watch <characteristic-uuid>
 ```
 
-UUIDs may be written in canonical 16-bit or 128-bit form. Writes choose a mode
-supported by the characteristic unless `--with-response` or
-`--without-response` is supplied. Watches run until cancellation and release
-their Bluetooth resources on exit.
+UUIDs may be written in 16-bit or 128-bit form. Writes use write-with-response
+unless `--without-response` is given. `watch` prints each notification until
+interrupted and releases the device on exit.
 
-Run `bt help` for the complete command list.
+Run `bt help` for every command, and `bt help <command>` for details.
 
 ## Built for automation
 
-Global flags precede the command:
+Flags may appear anywhere on the command line:
 
 ```console
-bt --json --non-interactive --timeout=15s get headphones battery
+bt get headphones battery --json --timeout 15s
 ```
 
-- `--json` emits schema-versioned JSON and keeps diagnostics off stdout.
-- `--quiet` suppresses successful output.
-- `--verbose` includes additional diagnostics.
-- `--non-interactive` fails clearly when Betty would need terminal input.
-- `--timeout` bounds ordinary operations; watches continue until cancelled.
+| Flag | Effect |
+| --- | --- |
+| `--json` | Print one JSON envelope per result on stdout. Errors, warnings, and diagnostics go to stderr as JSON envelopes too. |
+| `-q`, `--quiet` | Print nothing on success. |
+| `-v`, `--verbose` | Print diagnostics, such as why a command decided to scan. |
+| `--non-interactive` | Fail instead of prompting for a pairing passkey. Only Linux honors it today; Windows and macOS may still show their own pairing dialogs. |
+| `--timeout <duration>` | Bound the command. The default is 10 seconds, or 60 seconds for `pair`, which may wait for a person. Streaming commands such as `watch` have no deadline. |
 
-JSON uses a versioned envelope:
+Every result uses the same envelope:
 
 ```json
-{"schema_version":1,"data":{"device_id":"opaque-id","property":"noise_control","value":"anc","estimated":false,"resolution":0}}
+{"schema_version":1,"data":{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":80,"unit":"%","estimated":false}}
 ```
 
-The stable value shapes and error behavior are documented in
-[the JSON API contract](docs/JSON_API.md).
+Failures use the same envelope with an `error` holding a stable `code`, a
+`message`, `retryable`, and optional `details`. Problems that don't stop a
+command, such as a BLE scan failing while the OS scan succeeds, print as
+`warning` envelopes. See [the JSON API](docs/JSON_API.md) for every shape.
 
-Watch output is newline-delimited JSON. It starts with a `snapshot` event and
-then emits `changed` events. Clients should ignore fields they do not recognize.
+| Exit status | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Internal error |
+| 2 | Usage error |
+| 3 | Device not found |
+| 4 | Ambiguous device |
+| 5 | Unsupported, or a driver is required |
+| 6 | Permission denied |
+| 7 | Bluetooth unavailable or device disconnected |
+| 8 | Authentication failed, or a person must act |
+| 9 | Timeout |
+| 130 | Interrupted |
 
-Errors use the same envelope and include a stable code, message, retryability,
-and optional details. Exit codes distinguish usage, not found, ambiguity,
-unsupported features, permissions, unavailable Bluetooth, authentication or
-interaction, and timeouts.
+## Device drivers
 
-## Optional device support
+Betty's base executable contains no vendor protocol code. Device-specific
+support comes from optional driver executables, while the CLI stays `inspect`,
+`get`, `set`, and `watch`.
 
-Betty's base executable contains no Apple, Beats, or Sony packet parser or model
-table. Device-specific functionality lives in optional executable drivers,
-while the public CLI remains `inspect`, `get`, `set`, and `watch`.
-
-| Driver | Devices | Available today | Details |
+| Driver | Devices | Status | Details |
 | --- | --- | --- | --- |
-| Apple Audio | AirPods and Beats | identification, passive and exact battery paths | [capabilities and platform behavior](cmd/bt-driver-apple-audio/README.md) |
-| Sony Headphones | Sony WH/WF/WI/MDR, LinkBuds, and ULT families | identification and v2 battery | [capabilities and tested protocol scope](cmd/bt-driver-sony/README.md) |
-
-Build and install a driver from source:
+| Apple Audio | AirPods and Beats | identification, estimated battery from advertisements, exact battery paths per platform | [capabilities and platform behavior](cmd/bt-driver-apple-audio/README.md) |
+| Sony Headphones | Sony WH/WF/WI/MDR, LinkBuds, and ULT families | identification and protocol v2 battery | [capabilities and tested scope](cmd/bt-driver-sony/README.md) |
 
 ```console
-go build -o bt-driver-apple-audio ./cmd/bt-driver-apple-audio
-bt driver install ./bt-driver-apple-audio
+go build -o bt-driver-sony ./cmd/bt-driver-sony
+bt driver install ./bt-driver-sony
 bt driver list
 ```
 
-Anyone can write a driver, in any language. The
-[driver protocol specification](docs/DRIVER_PROTOCOL.md) defines the
-newline-delimited JSON protocol, and Go drivers can use the `driver` package's
-`driver.Serve` SDK. See [Writing a Betty driver](driver/README.md) to get
-started.
+Anyone can write a driver, in any language: see
+[Writing a Betty driver](driver/README.md) and the
+[driver protocol specification](docs/DRIVER_PROTOCOL.md). Go drivers can use the
+`driver.Serve` SDK.
 
-Drivers are trusted native executables in the current design. Betty verifies
-their manifests, limits host operations to declared permissions and selected
-device IDs, and isolates persistent state by driver, but it does not yet provide
-a security sandbox.
+Drivers are trusted native code and are not sandboxed. Betty limits what they
+can do through its host API: only the host operations their manifest declares,
+only the devices passed in the current request, and private storage per
+driver.
 
-## Platform notes
+## Platform support
 
 | Operation | Linux / BlueZ | macOS | Windows 10/11 |
 | --- | --- | --- | --- |
 | BLE scan and GATT | Implemented | Implemented | Implemented |
-| Saved-device listing | Implemented | Implemented | Implemented |
-| Pair | Implemented | Implemented | Implemented; Windows may show UI |
-| Unpair | Implemented | Public API unavailable | Implemented |
-| Generic profile connect/disconnect | Implemented | Implemented | Not reliably available for every profile |
+| Known-device listing | Implemented | Paired devices | Implemented |
+| Classic discovery | Implemented | Not implemented: only paired devices and BLE advertisements are found | Implemented |
+| Pair | Implemented | Paired-list devices only, so new Classic devices cannot be paired yet | Implemented; Windows may show its own dialog |
+| Unpair | Implemented | Unsupported: no public API | Implemented |
+| Connect and disconnect | Implemented | Opens or closes the baseband link, not individual profiles | Unsupported: no public API for every profile |
 
-An unavailable platform operation returns `unsupported`; Betty does not report
-success merely because a request was submitted. Stable device IDs are opaque,
-platform-local values and must not be interpreted as MAC addresses.
-
-See [COMPATIBILITY.md](COMPATIBILITY.md) for verified native hardware evidence
-and unavoidable limitations.
+An operation a platform cannot perform returns `unsupported`. Device IDs are
+opaque and platform-local; don't parse them.
 
 ## Development
 
@@ -206,18 +211,19 @@ go test ./...
 go vet ./...
 ```
 
-Hardware tests are opt-in because some pair, connect, disconnect, and unpair a
-disposable device:
+Hardware tests are opt-in because some of them pair, connect, disconnect, and
+unpair a disposable device:
 
 ```console
+go build -o bt ./cmd/bt
 BETTY_BINARY="$PWD/bt" \
 BETTY_HARDWARE_BLE=sensor \
 BETTY_HARDWARE_CLASSIC=keyboard \
 go test -tags=hardware ./hardware
 ```
 
-The ordered release plan and remaining hardware/signing work live in
-[FUTURE_WORK.md](FUTURE_WORK.md).
+The roadmap is in [FUTURE_WORK.md](FUTURE_WORK.md), and the latest code and
+documentation review in [REVIEW.md](REVIEW.md).
 
 ## License
 

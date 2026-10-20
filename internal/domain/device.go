@@ -58,16 +58,38 @@ type Property struct {
 	Estimated  bool            `json:"estimated,omitempty"`
 	Resolution int             `json:"resolution,omitempty"`
 }
+
+// CapabilityStatus says whether a capability can be used now.
+type CapabilityStatus string
+
+const (
+	StatusAvailable   CapabilityStatus = "available"
+	StatusPlanned     CapabilityStatus = "planned"
+	StatusUnsupported CapabilityStatus = "unsupported"
+)
+
+// ValueKind is the type of a capability's value.
+type ValueKind string
+
+const (
+	KindBattery ValueKind = "battery"
+	KindEnum    ValueKind = "enum"
+	KindBoolean ValueKind = "boolean"
+	KindInteger ValueKind = "integer"
+	KindNumber  ValueKind = "number"
+	KindString  ValueKind = "string"
+)
+
 type DeviceCapability struct {
-	Status   string   `json:"status"`
-	Kind     string   `json:"type,omitempty"`
-	Readable bool     `json:"readable,omitempty"`
-	Writable bool     `json:"writable,omitempty"`
-	Values   []string `json:"values,omitempty"`
-	Minimum  *float64 `json:"minimum,omitempty"`
-	Maximum  *float64 `json:"maximum,omitempty"`
-	Step     *float64 `json:"step,omitempty"`
-	Reason   string   `json:"reason,omitempty"`
+	Status   CapabilityStatus `json:"status"`
+	Kind     ValueKind        `json:"type,omitempty"`
+	Readable bool             `json:"readable,omitempty"`
+	Writable bool             `json:"writable,omitempty"`
+	Values   []string         `json:"values,omitempty"`
+	Minimum  *float64         `json:"minimum,omitempty"`
+	Maximum  *float64         `json:"maximum,omitempty"`
+	Step     *float64         `json:"step,omitempty"`
+	Reason   string           `json:"reason,omitempty"`
 }
 
 type Support string

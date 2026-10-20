@@ -41,8 +41,15 @@ Three battery paths are supported:
    keys.
 
 A nearby BLE advertisement is not proof that it belongs to a saved Classic
-endpoint. Betty exposes uncertain relationships as `possible_matches`; it never
-uses such a relationship to authorize a control write.
+endpoint, so the driver reports the relationship as `possible_matches` and
+never uses it to authorize a control write.
+
+One heuristic goes further: when exactly one recognized AirPods or Beats
+advertisement is nearby and exactly one Apple audio device is connected, the
+driver also copies the advertisement's battery reading onto the connected
+device. That is usually right, but it is a correlation, not proof: with a
+second set nearby that is not advertising, the reading can belong to the wrong
+device.
 
 ## Platform behavior
 

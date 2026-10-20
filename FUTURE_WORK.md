@@ -35,7 +35,7 @@ bt driver install|list|remove ...
 bt driver export-state|import-state ...
 ```
 
-The existing `bt <device>` and `bt <device> battery` forms may remain as human-friendly aliases for `inspect` and `get`.
+The earlier `bt <device>` and `bt <device> battery` aliases were removed: they turned every mistyped command into a device lookup and a scan.
 
 ## Version 1 blockers
 
@@ -51,7 +51,7 @@ The existing `bt <device>` and `bt <device> battery` forms may remain as human-f
 
 ### 2. Stable automation behavior
 
-- [x] Add `--non-interactive` for applications and scripts.
+- [x] Add `--non-interactive` for applications and scripts. Only the Linux pairing agent honors it so far; Windows and macOS can still show OS pairing dialogs.
 - [x] Guarantee that `--json` success output is JSON-only on stdout; prompts, diagnostics, and JSON failures use stderr.
 - [x] Define schema-version-1 envelopes for inspect, get, set, watch events, and errors.
 - [x] Add structured errors for interaction required, disconnected devices, missing drivers, unsupported features, permissions, unavailable adapters, authentication, and timeout.
@@ -188,7 +188,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 
 ### Sony headphones
 
-- Route existing exact v2 battery parsing through the generic `get` API.
+- [x] Route existing exact v2 battery parsing through the generic `get` API.
 - Hardware-test SDP discovery and RFCOMM lifecycle on Linux, macOS, and Windows.
 - Validate v2 initialization, single and component battery values, charging state, fragmentation, and acknowledgements.
 - Determine whether supported v1 models expose battery through the control protocol.

@@ -22,7 +22,7 @@ Known public-API limitations:
 ## Optional driver matrix
 
 | Driver | Platform | OS build | Adapter | Device / firmware | Battery | Controls | Identity confidence | Evidence / limitation |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Apple Audio | macOS | Not tested | Not tested | Not tested | Not tested | Not supported | Not tested | Encrypted BLE requires authorized System-keychain keys; AAP PSM is unavailable to third-party apps. |
 | Apple Audio | Linux | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Native AAP hardware validation required. |
 | Apple Audio | Windows | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Exact active access requires the separately installed, Microsoft-signed profile driver. |
