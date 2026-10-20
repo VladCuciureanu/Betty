@@ -133,6 +133,18 @@ class InquiryController(Controller):
         print(f"betty_peer: controller {self.name} does not implement {command.name}", file=sys.stderr, flush=True)
         return super().on_hci_command(command)
 
+    def on_hci_authentication_requested_command(self, command):
+        # A real controller first asks the host for a stored link key, so a
+        # paired device re-authenticates without pairing again; Bumble's
+        # controller goes straight to pairing. Its link key replies already
+        # complete authentication, and a negative reply starts pairing.
+        connection = self.find_classic_connection_by_handle(command.connection_handle)
+        if connection is None:
+            return super().on_hci_authentication_requested_command(command)
+        self._send_hci_command_status(hci.HCI_COMMAND_STATUS_PENDING, command.op_code)
+        self.send_hci_packet(hci.HCI_Link_Key_Request_Event(bd_addr=connection.peer_address))
+        return None
+
     def on_hci_set_connection_encryption_command(self, command):
         # Bumble implements only LE encryption. Report Classic encryption as
         # on, which is all the host checks; the link itself is virtual.
