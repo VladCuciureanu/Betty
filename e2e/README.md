@@ -138,6 +138,10 @@ Expect Windows to show its own pairing notifications during the pairing tests.
   that ordinary commands open no network socket and leave no process behind,
   runs only on Linux, and only where `strace` is installed.
 
+`e2e/drivers/gattprobe` is a test driver that reads the sensor through
+Betty's GATT host calls, so the suite also covers the driver protocol's
+`gatt.*` calls against BlueZ.
+
 ## Adding a scenario
 
 Add or extend a persona in `peer/betty_peer/personas.py`, and add any new
