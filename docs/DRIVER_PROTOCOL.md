@@ -256,6 +256,12 @@ Failure:
 
 Unknown fields MUST be ignored by both sides. Optional fields may be omitted.
 
+[`docs/schema/driver-protocol.schema.json`](schema/driver-protocol.schema.json)
+is a JSON Schema (draft 2020-12) of every message and value below, for
+validating a driver's output or generating types in other languages. It is
+generated from the Go SDK's types, and a test keeps the two in step. It allows
+unknown fields, as this section requires.
+
 ### Device
 
 What Betty tells a driver about a device.
