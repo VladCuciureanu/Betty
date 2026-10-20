@@ -139,7 +139,7 @@ when the device was already in the requested state and nothing was done.
 ### Drivers: `driver`
 
 - `list` returns an array of driver manifests.
-- `install` returns the installed driver's manifest.
+- `install` and `upgrade` return the installed driver's manifest.
 - `remove`, `export-state`, and `import-state` return
   `{"id":"...","action":"remove"}`, plus `file` for the state operations.
 - `check` returns an array of `{"name":"...","passed":true}`, with `detail`

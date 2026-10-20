@@ -278,3 +278,42 @@ func TestConcurrentInstallsInstallOnce(t *testing.T) {
 		t.Fatalf("%d installs succeeded, want 1", installed)
 	}
 }
+
+func TestUpgradeReplacesTheDriverAndKeepsItsState(t *testing.T) {
+	m := newTestManager(t)
+	old := protocol.Manifest{ID: "example/upgraded", Name: "Upgraded", Version: "1"}
+	t.Setenv(testDriverEnv, old.ID+"=ok")
+	if _, err := m.Install(context.Background(), writeTestDriver(t, t.TempDir(), old)); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.storageSet(old, "keys/kept", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	newer := old
+	newer.Version = "2"
+	manifest, err := m.Upgrade(context.Background(), writeTestDriver(t, t.TempDir(), newer))
+	if err != nil || manifest.Version != "2" {
+		t.Fatalf("manifest=%+v err=%v", manifest, err)
+	}
+	if items := mustList(m); len(items) != 1 || items[0].Version != "2" {
+		t.Fatalf("installed=%+v", items)
+	}
+	if value, found, err := m.storageGet(old, "keys/kept"); err != nil || !found || value != "secret" {
+		t.Fatalf("state after upgrade: %q %t %v", value, found, err)
+	}
+}
+
+func TestUpgradeNeedsAUserInstalledDriver(t *testing.T) {
+	m := newTestManager(t)
+	m.bundled = t.TempDir()
+	bundled := protocol.Manifest{ID: "official/bundled", Name: "Bundled", Version: "1"}
+	writeTestDriver(t, filepath.Join(m.bundled, safeID(bundled.ID)), bundled)
+	missing := protocol.Manifest{ID: "example/missing", Name: "Missing", Version: "1"}
+	t.Setenv(testDriverEnv, bundled.ID+"=ok,"+missing.ID+"=ok")
+	if _, err := m.Upgrade(context.Background(), writeTestDriver(t, t.TempDir(), bundled)); domain.AsError(err).Code != domain.CodeUnsupported {
+		t.Fatalf("upgrading a bundled driver: %v", err)
+	}
+	if _, err := m.Upgrade(context.Background(), writeTestDriver(t, t.TempDir(), missing)); domain.AsError(err).Code != domain.CodeNotFound {
+		t.Fatalf("upgrading a driver that isn't installed: %v", err)
+	}
+}

@@ -99,8 +99,9 @@ drivers can use any file name; Betty identifies them by manifest ID.
 
 The output of `--manifest` MUST NOT exceed 64 KiB.
 
-A driver's stored state belongs to its ID. Renaming a driver starts it with
-empty state; users can carry state over with `bt driver export-state` and
+A driver's stored state belongs to its ID, and `bt driver upgrade` keeps it
+when it replaces an installed driver with a new version. Renaming a driver
+starts it with empty state; users can carry state over with `bt driver export-state` and
 `bt driver import-state`.
 
 The `official/` publisher is used by drivers shipped by the Betty project. Betty

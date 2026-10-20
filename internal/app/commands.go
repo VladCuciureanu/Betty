@@ -276,11 +276,12 @@ func (a *application) driverCommand(ctx context.Context, args []string) error {
 		"export-state": "driver export-state <id> <file>",
 		"import-state": "driver import-state <id> <file>",
 		"check":        "driver check <executable>",
+		"upgrade":      "driver upgrade <executable>",
 	}
-	wantArgs := map[string]int{"list": 0, "install": 1, "remove": 1, "export-state": 2, "import-state": 2, "check": 1}
+	wantArgs := map[string]int{"list": 0, "install": 1, "upgrade": 1, "remove": 1, "export-state": 2, "import-state": 2, "check": 1}
 	want, ok := wantArgs[args[0]]
 	if !ok {
-		return domain.NewError(domain.CodeUsage, "unknown driver operation %q; use list, install, remove, export-state, import-state, or check", args[0])
+		return domain.NewError(domain.CodeUsage, "unknown driver operation %q; use list, install, upgrade, remove, export-state, import-state, or check", args[0])
 	}
 	if len(args)-1 != want {
 		return domain.NewError(domain.CodeUsage, "usage: bt %s", usage[args[0]])
@@ -294,6 +295,12 @@ func (a *application) driverCommand(ctx context.Context, args []string) error {
 		return a.render.Data(nonNil(items))
 	case "install":
 		manifest, err := a.drivers.Install(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		return a.render.Data(manifest)
+	case "upgrade":
+		manifest, err := a.drivers.Upgrade(ctx, args[1])
 		if err != nil {
 			return err
 		}
