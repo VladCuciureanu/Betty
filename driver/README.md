@@ -31,6 +31,8 @@ func main() {
 			Name:        "ACME Gadgets",
 			Version:     "0.1.0",
 			Permissions: []string{driver.PermissionRFCOMM},
+			// Betty starts the driver only for requests with a matching device.
+			Match: &driver.Match{NameContains: []string{"ACME"}},
 		},
 		Inspect: inspect,
 		Get:     get,

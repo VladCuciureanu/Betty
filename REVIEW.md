@@ -101,7 +101,7 @@ Medium:
 - **Fixed** (`Capabilities` now reports scan as unsupported). macOS `Scan` only lists paired devices, yet `Capabilities` says scan is supported.
 - **Fixed** (every `.m` file now uses manual retain/release and refuses to build under ARC). `hidbattery/provider_darwin.m` is compiled without ARC and leaks `+1` objects; `bridge_darwin.m` uses manual release, so memory management is inconsistent across files.
 - Opening `IOHIDManager` with NULL matching may trigger the macOS Input Monitoring prompt on a plain `bt list`. (hw)
-- **Partly fixed:** `bthprops.cpl` now loads without panicking, the search parameters are laid out correctly on 32-bit, and `Paired` comes from `Authenticated` only. Still open: `Pair` can't be cancelled, and `BLUETOOTH_DEVICE_INFO` is misaligned on 32-bit x86, where Go aligns `uint64` to 4. Windows `Pair` blocks with no way to cancel. `bthprops.cpl` is loaded lazily and panics if missing. The struct padding is only correct on 64-bit. `Paired` is set from `Remembered`, which doesn't mean paired.
+- **Fixed:** `bthprops.cpl` now loads without panicking, the search parameters and `BLUETOOTH_DEVICE_INFO` are laid out correctly on 32-bit (tested under `GOARCH=386`), `Paired` comes from `Authenticated` only, and `Pair` stops waiting when the command is cancelled or times out. Windows offers no way to cancel the pairing call itself, so it ends with the process. Windows `Pair` blocks with no way to cancel. `bthprops.cpl` is loaded lazily and panics if missing. The struct padding is only correct on 64-bit. `Paired` is set from `Remembered`, which doesn't mean paired.
 - **Fixed** (hw for the disconnect watch). BLE scan keeps only the last advertisement per device, so a packet without a name resets the name to the address. GATT `watch` never notices a disconnect.
 - **Fixed.** On Linux, the retry branch in the state-polling loop can never run, and `errorAs` reimplements `errors.As`. The adapter is chosen in random map order.
 
@@ -118,12 +118,13 @@ High, beyond the "Fix first" items:
 Medium:
 
 - **Fixed** (Linux L2CAP and RFCOMM). Sub-millisecond deadlines round down to 0. A socket that is still connecting can then be registered as open.
-- Windows uses `SO_RCVTIMEO` and retries, but the socket is in an indeterminate state after such a timeout.
+- **Fixed** (the socket stays non-blocking and waits with `select`; Close waits for in-flight reads and writes). Windows used `SO_RCVTIMEO` and retried, but the socket is in an indeterminate state after such a timeout.
+- **Fixed**, found while testing the above against a real socket: every Winsock call that returns an `int` was checked against `^uintptr(0)`, but `SOCKET_ERROR` arrives as `0xFFFFFFFF` in a 64-bit register, so on 64-bit Windows every failed or would-block `recv`, `send`, `connect` and `select` read as success. A non-blocking RFCOMM connect, which always starts with would-block, looked connected at once.
 - Windows L2CAP reads ignore the context and hold the channel lock for up to 5s.
 - **Fixed** (the host reads each instance's bound address and connects only through the matching one). The Go side sends `CONNECT` to every kernel-driver instance, so it can connect through an instance bound to a different headset.
-- On Linux, the fd is read outside the lock; this is a latent reuse race.
+- **Fixed** (a channel is held open for the whole read or write; Close shuts the socket down to wake it, waits, then closes). On Linux, the fd was read outside the lock, a latent reuse race.
 - The `.m` files are written as single lines of 400–900 characters.
-- `waitFD`, the address parsers and `maxDuration` are copied between packages.
+- **Fixed** (`internal/btsock` holds the Linux socket I/O and the one address parser; `maxDuration` is the builtin `max`). `waitFD`, the address parsers and `maxDuration` were copied between packages.
 - The macOS L2CAP hardware test opens a PSM that the code says macOS always rejects, so it can never pass.
 
 ### Driver system (`internal/driver`, `driver`, the drivers)
@@ -175,8 +176,9 @@ found four bugs that unit tests could not, all fixed with the suite:
 The suite also confirms on Linux, through BlueZ: GATT reads, writes in both
 modes, and notifications; property `watch`; a dropped link ending a GATT watch
 with `device_disconnected`; duplicate names being ambiguous; and a refused
-pairing reporting `authentication_failed`. Classic `connect` and the Sony
-driver still need an over-the-air run (Windows, macOS) or real hardware.
+pairing reporting `authentication_failed`. Classic `connect` now runs too, since the patched
+controller re-authenticates paired devices; the Sony driver still needs an
+over-the-air run (Windows, macOS) or real hardware.
 
 ## Documentation claims
 

@@ -92,13 +92,24 @@ provides:
 bt get headphones battery
 bt set headphones noise_control anc
 bt watch headphones battery
+bt get --all battery
 ```
+
+`get --all` reads the property from every device the OS already knows, and
+reports each device's value or the reason it has none.
 
 Without any driver, Betty reads `battery` from the standard GATT Battery Service
 and `manufacturer`, `model`, `serial_number`, `hardware_revision`,
-`software_revision`, and `firmware_version` from the Device Information Service.
+`firmware_version`, `software_revision`, `system_id`, `pnp_id`, and
+`regulatory_certification` from the Device Information Service. All are
+strings: `system_id` and `regulatory_certification` as hex, and `pnp_id` as
+`source:vendor:product:version`, for example `usb:046d:c52b:0100`. `inspect`
+reports the same fields under `information`.
 On macOS it also reads battery levels that the system HID stack publishes for
-connected keyboards, mice, and trackpads, matched by exact address.
+connected keyboards, mice, and trackpads, matched by exact address. On Linux it
+reads the levels BlueZ publishes for HID devices, LE devices with the Battery
+Service, and headsets that report battery over HFP. Windows battery for such
+devices isn't read yet ([#24](https://github.com/VladCuciureanu/Betty/issues/24)).
 
 `set` prints the value the driver read back from the device after writing it.
 `watch` prints the value once and again whenever it changes, polling every 2
@@ -141,7 +152,7 @@ bt get headphones battery --json --timeout 15s
 Every result uses the same envelope:
 
 ```json
-{"schema_version":1,"data":{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":80,"unit":"%","estimated":false}}
+{"schema_version":1,"data":{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":{"level":80},"unit":"%","estimated":false}}
 ```
 
 Failures use the same envelope with an `error` holding a stable `code`, a
@@ -203,6 +214,18 @@ driver.
 
 An operation a platform cannot perform returns `unsupported`. Device IDs are
 opaque and platform-local; don't parse them.
+
+Some gaps are the operating system's, not Betty's. Betty documents them
+instead of working around them with private APIs:
+
+| Limitation | Platforms | Why |
+| --- | --- | --- |
+| Connecting or disconnecting an individual profile, such as A2DP | macOS | IOBluetooth opens and closes only the baseband link. |
+| Connecting or disconnecting every kind of saved device | Windows | No public API covers every profile. Windows' audio stack could connect audio devices, which isn't implemented yet ([#20](https://github.com/VladCuciureanu/Betty/issues/20)); other devices will stay `unsupported`. |
+| Unpairing | macOS | No public API. |
+| Choosing between several Bluetooth adapters | macOS, Windows | Both use one radio at a time. BlueZ exposes several ([#23](https://github.com/VladCuciureanu/Betty/issues/23)). |
+| Setting the MTU of a GATT connection | macOS, Windows | Both negotiate it and only let apps read the result ([#10](https://github.com/VladCuciureanu/Betty/issues/10)). |
+| Apple's AirPods control channel (exact battery over AAP, noise control) | macOS, Windows | macOS doesn't appear to open the channel to third-party processes, which hasn't been confirmed on hardware ([#18](https://github.com/VladCuciureanu/Betty/issues/18)); Windows opens Classic L2CAP only to signed kernel-mode drivers. See [the Apple Audio driver](cmd/bt-driver-apple-audio/README.md#platform-behavior). |
 
 ## Development
 

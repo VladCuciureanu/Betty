@@ -54,7 +54,7 @@ Ubuntu-style `generic` kernel with its modules installed (it doesn't need to be
 the running kernel), BlueZ, and dbus. On Ubuntu:
 
 ```console
-sudo apt-get install linux-image-generic virtme-ng qemu-system-x86 bluez dbus
+sudo apt-get install linux-image-generic virtme-ng qemu-system-x86 bluez dbus strace
 sudo apt-get install linux-modules-extra-$(ls /lib/modules | grep -- -generic | sort -V | tail -n 1)
 sudo chmod a+r /boot/vmlinuz-*
 python3 -m venv e2e/peer/.venv
@@ -71,22 +71,16 @@ Bluetooth stack.
 
 ### What the virtual link cannot do
 
-Bumble's software controller, which the virtual link is built on, implements
-LE and Classic pairing, but not re-authenticating a paired Classic device with
-its stored link key. Linux needs that whenever it opens a new connection to a
-device it has paired with. So on the virtual link:
-
-- the Classic lifecycle test covers pairing and unpairing, but skips
-  `connect` and `disconnect`;
-- the Sony test is skipped.
-
-Both run in full over the air, where real controllers handle
-re-authentication.
+The Sony scenario stalls on the virtual link after its RFCOMM channel is
+encrypted, so it is skipped there and runs only over the air
+([#100](https://github.com/VladCuciureanu/Betty/issues/100)). Everything else,
+Classic `connect` and `disconnect` included, runs on both.
 
 The scripted devices also run on a patched controller
 (`peer/betty_peer/controller.py`). It reports dual-mode support, answers Classic
-inquiry and the setup commands Linux sends, reports Classic encryption, and
-keeps the link working when Linux changes its private address. Each patch is
+inquiry and the setup commands Linux sends, re-authenticates paired Classic
+devices with their stored link key, reports Classic encryption, and keeps the
+link working when Linux changes its private address. Each patch is
 commented with the gap it fills.
 
 ## Running on Windows or macOS
@@ -130,8 +124,8 @@ Expect Windows to show its own pairing notifications during the pairing tests.
 
 - Tests that need several scripted devices at once, such as duplicate names,
   run only on Linux, because a dongle is one device.
-- Classic `connect`, `disconnect`, and the Sony test run only over the air;
-  see [what the virtual link cannot do](#what-the-virtual-link-cannot-do).
+- The Sony test runs only over the air; see
+  [what the virtual link cannot do](#what-the-virtual-link-cannot-do).
 - The Sony test needs the headset to connect back to the computer. Over the
   air, set `BETTY_E2E_HOST_ADDRESS` to the computer's own Bluetooth address.
   On Windows, `ipconfig /all` shows it as the physical address of the
@@ -140,6 +134,13 @@ Expect Windows to show its own pairing notifications during the pairing tests.
 - macOS skips the Classic pairing tests: Betty cannot yet discover new Classic
   devices there.
 - Windows expects `connect` and `disconnect` to fail with `unsupported`.
+- The isolation test, which traces `bt` and its drivers with `strace` to check
+  that ordinary commands open no network socket and leave no process behind,
+  runs only on Linux, and only where `strace` is installed.
+
+`e2e/drivers/gattprobe` is a test driver that reads the sensor through
+Betty's GATT host calls, so the suite also covers the driver protocol's
+`gatt.*` calls against BlueZ.
 
 ## Adding a scenario
 

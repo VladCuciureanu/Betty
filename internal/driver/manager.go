@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"time"
 
@@ -74,6 +75,9 @@ func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain
 func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpose string) []domain.Device {
 	installed, _ := m.List()
 	for _, item := range installed {
+		if !matchesAny(item.Match, devices) {
+			continue
+		}
 		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)}, m.inspectBudget())
 		if err != nil {
 			if m.OnInspectError != nil {
@@ -93,9 +97,26 @@ func (m *Manager) Property(ctx context.Context, devices []domain.Device, method,
 	if err != nil {
 		return devices, false, err
 	}
+	// The selected device and its possible matches decide which drivers
+	// may own it.
+	related := []string{deviceID}
+	for _, d := range devices {
+		if d.ID == deviceID {
+			related = append(related, d.PossibleMatches...)
+		}
+	}
+	var candidates []domain.Device
+	for _, d := range devices {
+		if slices.Contains(related, d.ID) || slices.Contains(d.PossibleMatches, deviceID) {
+			candidates = append(candidates, d)
+		}
+	}
 	handled := false
 	var operationErr error
 	for _, item := range installed {
+		if !matchesAny(item.Match, candidates) {
+			continue
+		}
 		response, callErr := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: method, DeviceID: deviceID, Property: property, Value: value, Devices: wireDevices(devices)}, 0)
 		if callErr != nil {
 			operationErr = callErr
@@ -173,9 +194,24 @@ func wireDevices(devices []domain.Device) []protocol.Device {
 func domainProperties(properties map[string]protocol.Property) map[string]domain.Property {
 	out := map[string]domain.Property{}
 	for name, p := range properties {
-		out[name] = domain.Property{Value: p.Value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution}
+		value := p.Value
+		if name == "battery" {
+			value = batteryObject(value)
+		}
+		out[name] = domain.Property{Value: value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution}
 	}
 	return out
+}
+
+// batteryObject turns a driver's bare battery percentage into the object
+// form every client receives, so clients never see two shapes.
+func batteryObject(value json.RawMessage) json.RawMessage {
+	var level int
+	if json.Unmarshal(value, &level) != nil {
+		return value
+	}
+	raw, _ := json.Marshal(protocol.SingleBattery(protocol.BatteryComponent{Level: level}))
+	return raw
 }
 
 func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest, error) {
@@ -542,6 +578,13 @@ func validateManifest(m protocol.Manifest) error {
 	}
 	if !protocol.ValidID(m.ID) {
 		return domain.NewError(domain.CodeUsage, "invalid driver ID")
+	}
+	if m.Match != nil {
+		for _, uuid := range m.Match.ServiceUUIDs {
+			if !validUUID(uuid) {
+				return domain.NewError(domain.CodeUsage, "invalid service UUID %q in the manifest's match hints", uuid)
+			}
+		}
 	}
 	return nil
 }

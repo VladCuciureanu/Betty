@@ -19,3 +19,18 @@ func TestBatteryValueJSONContract(t *testing.T) {
 		t.Fatalf("battery JSON = %s", encoded)
 	}
 }
+
+func TestSingleBatteryJSONAndDisplay(t *testing.T) {
+	value := SingleBattery(BatteryComponent{Level: 0, Charging: true})
+	encoded, _ := json.Marshal(value)
+	if string(encoded) != `{"level":0,"charging":true}` {
+		t.Fatalf("battery JSON = %s", encoded)
+	}
+	if got := value.Display(); got != "0% charging" {
+		t.Fatalf("display=%q", got)
+	}
+	parts := BatteryValue{Left: &BatteryComponent{Level: 89}, Case: &BatteryComponent{Level: 42, Charging: true}}
+	if got := parts.Display(); got != "left 89% · case 42% charging" {
+		t.Fatalf("display=%q", got)
+	}
+}

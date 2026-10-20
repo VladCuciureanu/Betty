@@ -8,5 +8,14 @@
     "advertisements",
     "l2cap",
     "driver-storage"
-  ]
+  ],
+  "match": {
+    "company_ids": [
+      76
+    ],
+    "name_contains": [
+      "AirPods",
+      "Beats"
+    ]
+  }
 }
