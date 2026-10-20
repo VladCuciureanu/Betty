@@ -33,7 +33,9 @@ modprobe hci_vhci
 mkdir -p /run/dbus
 dbus-daemon --system --fork
 /usr/libexec/bluetooth/bluetoothd --nodetach >/tmp/bluetoothd.log 2>&1 &
-trap 'status=$?; if [[ $status -ne 0 ]]; then echo "--- bluetoothd log"; tail -n 100 /tmp/bluetoothd.log; fi' EXIT
+# An HCI trace of every controller, printed if the suite fails.
+btmon >/tmp/btmon.log 2>&1 &
+trap 'status=$?; if [[ $status -ne 0 ]]; then echo "--- bluetoothd log"; tail -n 100 /tmp/bluetoothd.log; echo "--- HCI trace"; tail -n "${BETTY_E2E_TRACE_LINES:-400}" /tmp/btmon.log; fi' EXIT
 
 cd "$repo/e2e"
 BETTY_E2E_TRANSPORT=virtual \

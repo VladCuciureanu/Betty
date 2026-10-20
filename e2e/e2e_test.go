@@ -37,8 +37,10 @@ type mutation struct {
 
 func TestScanFindsABLEDevice(t *testing.T) {
 	p := startPeer(t, "sensor:Betty Sensor")
+	r := bt(t, nil, "--verbose", "scan")
+	t.Logf("scan diagnostics:\n%s", r.stderr)
 	var devices []domain.Device
-	ok(t, &devices, "scan")
+	decodeData(t, r, &devices)
 	for _, d := range devices {
 		if d.Name == p.device(0).Name {
 			return

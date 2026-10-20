@@ -165,7 +165,7 @@ async def main() -> None:
         emit({"event": "done", "cmd": command.get("cmd")})
         if not keep_running:
             break
-    transport.close()
+    await transport.close()
 
 
 if __name__ == "__main__":

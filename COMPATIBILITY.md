@@ -30,6 +30,20 @@ Known public-API limitations:
 | Sony Headphones | Linux | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Native RFCOMM hardware validation required. |
 | Sony Headphones | Windows | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Native RFCOMM hardware validation required. |
 
+## Emulated end-to-end runs
+
+These come from [the end-to-end suite](e2e/README.md), which runs `bt` against
+scripted devices. They show that Betty works through each OS's Bluetooth stack.
+They are **not** support claims: the scripted devices implement Betty's own
+reading of each protocol, so they cannot prove that real devices behave the
+same way.
+
+| Platform | Link | How | Result | Evidence |
+| --- | --- | --- | --- | --- |
+| Linux / BlueZ | Virtual (`/dev/vhci`) | CI, every pull request | Not run yet | — |
+| Windows | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
+| macOS | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
+
 ## Recording a run
 
 Attach the native hardware workflow log or a local transcript containing:
