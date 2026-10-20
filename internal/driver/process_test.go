@@ -47,6 +47,13 @@ func runTestDriver(modes string) {
 			mode = value
 		}
 	}
+	if mode == "sdk" {
+		// A conforming driver: the SDK serves every request until EOF.
+		_ = protocol.Driver{Manifest: manifest, Inspect: func(*protocol.Session, protocol.InspectRequest) (map[string]protocol.Enrichment, error) {
+			return nil, nil
+		}}.Run(nil, os.Stdin, os.Stdout)
+		return
+	}
 	in := bufio.NewReader(os.Stdin)
 	var request protocol.Request
 	if err := json.NewDecoder(in).Decode(&request); err != nil {

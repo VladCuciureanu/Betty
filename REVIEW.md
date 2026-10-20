@@ -132,10 +132,10 @@ Beyond the "Fix first" items:
 
 - **Fixed** (an advisory lock file in the driver root serializes storage writes, installs and removals). Storage read-modify-write had no file lock, so concurrent `bt` processes lost updates. The Apple driver also no longer saves over a keyring it failed to load.
 - **Fixed** (the check is repeated under the lock). Two concurrent installs could both pass the "already installed" check. Install also refuses an ID that a bundled or package-managed driver already provides, so it can't shadow one.
-- `handleHost` is 176 lines of near-identical L2CAP and RFCOMM branches, with permissions checked by hand-sliced string prefixes.
-- L2CAP and RFCOMM channels share one map keyed by a bare ID. Cleanup uses `context.Background()`, so it can block forever.
+- **Fixed** (one stream handler for both transports and a namespace-to-permission table). `handleHost` was 176 lines of near-identical L2CAP and RFCOMM branches, with permissions checked by hand-sliced string prefixes.
+- **Fixed** (channels are keyed by transport and ID; each cleanup step has its own 2s deadline). L2CAP and RFCOMM channels shared one map keyed by a bare ID.
 - **Fixed.** ✓ Sony `get battery` reports `sonyCapabilities` instead of `sonyCapabilitiesFor`. With controls enabled, `noise_control` reverts to "planned". The bug predates the SDK port, which carried it over.
-- The Sony frame stream gives up at the first bad frame, and its ACK handling recurses.
+- **Fixed** (the stream resynchronizes on the next start byte and bounds an unterminated frame; receiving is one loop). The Sony frame stream gave up at the first bad frame, and its ACK handling recursed.
 - **Fixed.** The Apple driver duplicated its AAP handshake across two functions; both now use one session type. The driver is on the SDK. A noise-control write also waits for the device to report the requested mode instead of failing on the first report of the old one, and no longer reports success without writing when a device skips feature negotiation.
 - **Fixed.** The darwin build needs cgo: the stub for `systemAppleAudioKeys` should be tagged `!darwin || !cgo`.
 - **Fixed** (256 keys and 1 MiB per driver). The storage-key regex was recompiled on every call, the number of storage keys was unlimited, and `ImportState` read the whole file before checking its size.

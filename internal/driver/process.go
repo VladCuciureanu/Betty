@@ -102,12 +102,8 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 		}
 	}()
 
-	channels := map[string]string{}
-	defer m.closeChannels(channels)
-	allowedDevices := map[string]bool{}
-	for _, device := range request.Devices {
-		allowedDevices[device.ID] = true
-	}
+	session := newHostSession(request.Devices)
+	defer m.closeSession(session)
 	encoder := json.NewEncoder(stdin)
 	reader := bufio.NewReader(stdout)
 	if err := encoder.Encode(request); err != nil {
@@ -126,7 +122,7 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 			return response, driverFailure(item, "invalid message: %v", err)
 		}
 		if header.Type == protocol.TypeHostRequest {
-			if err := encoder.Encode(m.hostReply(ctx, item, header, allowedDevices, channels)); err != nil {
+			if err := encoder.Encode(m.hostReply(ctx, item, header, session)); err != nil {
 				return response, driverFailure(item, "write host response: %v", err)
 			}
 			continue
@@ -178,8 +174,8 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 	return response, nil
 }
 
-func (m *Manager) hostReply(ctx context.Context, item protocol.Manifest, request protocol.Message, allowedDevices map[string]bool, channels map[string]string) protocol.Message {
-	result, err := m.handleHost(ctx, item, request, allowedDevices, channels)
+func (m *Manager) hostReply(ctx context.Context, item protocol.Manifest, request protocol.Message, session *hostSession) protocol.Message {
+	result, err := m.handleHost(ctx, item, request, session)
 	reply := protocol.Message{Protocol: protocol.Version, Type: protocol.TypeHostResponse, ID: request.ID, Result: result}
 	if err != nil {
 		hostErr := domain.AsError(err)
@@ -188,21 +184,6 @@ func (m *Manager) hostReply(ctx context.Context, item protocol.Manifest, request
 		reply.Details = hostErr.Details
 	}
 	return reply
-}
-
-// closeChannels closes every channel a driver left open. It uses its own
-// deadline because the request's context may already be done.
-func (m *Manager) closeChannels(channels map[string]string) {
-	for channel, transport := range channels {
-		ctx, cancel := context.WithTimeout(context.Background(), channelCloseTimeout)
-		switch transport {
-		case protocol.PermissionL2CAP:
-			_ = m.host.CloseL2CAP(ctx, channel)
-		case protocol.PermissionRFCOMM:
-			_ = m.rfcomm.CloseRFCOMM(ctx, channel)
-		}
-		cancel()
-	}
 }
 
 func driverFailure(item protocol.Manifest, format string, args ...any) error {

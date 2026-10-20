@@ -142,6 +142,8 @@ when the device was already in the requested state and nothing was done.
 - `install` returns the installed driver's manifest.
 - `remove`, `export-state`, and `import-state` return
   `{"id":"...","action":"remove"}`, plus `file` for the state operations.
+- `check` returns an array of `{"name":"...","passed":true}`, with `detail`
+  on a failed check. When any check fails, it then fails with `unsupported`.
 
 ### Other
 

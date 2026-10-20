@@ -36,11 +36,13 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 			pairingInput = nil
 		}
 		a.backend = backend.New(backend.PairingIO{In: pairingInput, Out: stderr})
-		a.ble = ble.New()
+		client := ble.New()
+		a.ble = client
 		a.hid = hidbattery.New()
 		a.drivers = driver.New()
 		a.drivers.SetHost(l2cap.New())
 		a.drivers.SetRFCOMMHost(rfcomm.New())
+		a.drivers.SetGATTHost(gattHost{client})
 		a.drivers.OnInspectError = func(id string, err error) {
 			a.render.Warn("driver %s failed to inspect devices: %v", id, err)
 		}
@@ -155,7 +157,7 @@ var commands = []command{
 	{name: "disconnect", usage: "disconnect <device>", summary: "disconnect a device", minArgs: 1, maxArgs: 1, run: mutation("disconnect")},
 	{name: "gatt", usage: "gatt <device> services|characteristics|read|write|watch ...", summary: "use BLE GATT directly; see bt help gatt", details: gattHelp, minArgs: 2, maxArgs: 4, run: (*application).gatt, streams: func(args []string) bool { return len(args) > 1 && args[1] == "watch" }},
 	{name: "capabilities", usage: "capabilities", summary: "show which operations this platform supports", maxArgs: 0, run: (*application).capabilities},
-	{name: "driver", usage: "driver list|install|remove|export-state|import-state ...", summary: "manage optional device drivers; see bt help driver", details: driverHelp, minArgs: 0, maxArgs: 3, run: (*application).driverCommand},
+	{name: "driver", usage: "driver list|install|remove|export-state|import-state|check ...", summary: "manage optional device drivers; see bt help driver", details: driverHelp, minArgs: 0, maxArgs: 3, run: (*application).driverCommand},
 }
 
 const gattHelp = `Subcommands:
@@ -174,5 +176,6 @@ const driverHelp = `Subcommands:
   bt driver remove <id>                   remove a user-installed driver
   bt driver export-state <id> <file>      save a driver's private state (mode 0600)
   bt driver import-state <id> <file>      replace a driver's private state
+  bt driver check <executable>            check a driver against the protocol, without installing it
 
 See docs/DRIVER_PROTOCOL.md to write a driver.`

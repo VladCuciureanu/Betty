@@ -21,6 +21,7 @@ const (
 	PermissionDeviceMetadata = "device-metadata"
 	PermissionL2CAP          = "l2cap"
 	PermissionRFCOMM         = "rfcomm"
+	PermissionGATT           = "gatt"
 	PermissionStorage        = "driver-storage"
 )
 
