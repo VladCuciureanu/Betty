@@ -133,7 +133,8 @@ func readAAP(host *protocol.Session, deviceID string, requestKeys bool) (exactBa
 		case startsWith(packet, aapBatteryHeader):
 			parsed, err := parseExactBattery(packet)
 			if err != nil {
-				return false, err
+				// A corrupt report is skipped: the device sends another.
+				return false, nil
 			}
 			battery = &parsed
 			if !requestKeys || keys != nil {
