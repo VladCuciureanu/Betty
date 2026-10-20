@@ -80,8 +80,7 @@ drivers can use any file name; Betty identifies them by manifest ID.
   "id": "example/heart-rate",
   "name": "Example Heart Rate",
   "version": "0.3.0",
-  "permissions": ["device-metadata", "driver-storage"],
-  "legacy_ids": ["example/hrm"]
+  "permissions": ["device-metadata", "driver-storage"]
 }
 ```
 
@@ -92,9 +91,21 @@ drivers can use any file name; Betty identifies them by manifest ID.
 | `name` | string | yes | Human-readable name. |
 | `version` | string | yes | Driver version. Semantic versioning is RECOMMENDED. |
 | `permissions` | array of strings | no | Host capabilities the driver may use ([section 8](#8-host-calls)). |
-| `legacy_ids` | array of strings | no | Earlier IDs of this driver. A driver listed here is hidden when this one is installed, and its stored state is read as a fallback. |
+| `legacy_ids` | array of strings | no | Earlier IDs of this driver. See below. |
 
-The `official/` publisher is reserved for drivers shipped by the Betty project.
+The output of `--manifest` MUST NOT exceed 64 KiB.
+
+`legacy_ids` is honored only for renames that Betty itself recognizes, such as
+`official/airpods` becoming `official/apple-audio`. For those, the earlier
+driver is hidden while this one is installed, and the earlier driver's stored
+state is read as a fallback. Because a manifest is self-declared, Betty rejects
+an install that lists any other legacy ID: otherwise any driver could claim
+another driver's private storage. To rename a third-party driver, users move
+its state with `bt driver export-state` and `bt driver import-state`.
+
+The `official/` publisher is used by drivers shipped by the Betty project. Betty
+does not verify publishers, but it refuses to install a driver whose ID is
+already provided by any installed driver ([section 11](#11-installation-and-discovery)).
 
 Permissions:
 
@@ -105,12 +116,17 @@ Permissions:
 | `rfcomm` | `rfcomm.*` host calls. |
 | `driver-storage` | `storage.*` host calls. |
 
+Betty accepts other permission names without granting anything for them. The
+official Apple Audio driver declares `advertisements` this way to document that
+it reads advertisement data.
+
 ## 4. Framing and session lifecycle
 
 Every message in either direction is one JSON object encoded as UTF-8 and
 followed by a newline (`\n`). A message MUST NOT contain a raw newline; JSON
-string escaping guarantees this. Readers SHOULD accept any JSON whitespace
-between messages.
+string escaping guarantees this. Readers SHOULD skip blank lines between
+messages. A message from a driver MUST NOT exceed 4 MiB; Betty ends the session
+with an `internal` error when one does.
 
 All messages carry `"protocol": 1` and a `type`:
 
@@ -127,19 +143,31 @@ A session is strictly sequential:
 2. While handling it, the driver MAY send any number of `host_request`
    messages. After each one, it MUST wait for the matching `host_response`
    before sending anything else.
-3. The driver ends the request with exactly one `response` whose `id` equals
-   the request's `id`.
+3. The driver ends the request with exactly one message of type `response`
+   whose `id` equals the request's `id`. Any other message type, or a response
+   with a different `id`, ends the session with an `internal` error.
 4. Betty either sends another `request` or closes the driver's stdin.
 5. When stdin reaches end-of-file, the driver MUST exit promptly with status 0.
+   Betty waits 2 seconds, then kills the driver; the response it already sent
+   still counts. A non-zero exit status after a response is reported as an
+   `internal` error.
 
 Betty currently sends one request per process and starts a new process for the
 next one. Drivers MUST still be written as a loop that handles requests until
 end-of-file, because Betty may reuse a process for several requests in a later
 release without changing the protocol version.
 
-Betty enforces the command's `--timeout` (10 seconds by default) on the whole
-session and kills the driver when it expires. A driver SHOULD finish an inspect
-quickly, because Betty runs every installed driver for every scan and list.
+Deadlines:
+
+- Each driver gets at most 5 seconds for an `inspect`. Betty kills a driver
+  that misses it, reports nothing from that driver, and moves on to the next
+  one. Every scan and list runs every installed driver, so inspect SHOULD
+  return in well under a second.
+- A `get` or `set` is bounded only by the command's `--timeout` (10 seconds by
+  default), which the user can raise for slow devices.
+- `--manifest` gets 5 seconds.
+
+When a driver misses its deadline, Betty kills it and reports `timeout`.
 
 ## 5. Requests from Betty
 
@@ -366,8 +394,8 @@ JSON is treated as `internal`.
 - Betty runs drivers in ascending order of manifest ID and merges their
   enrichments into its device list. When two drivers report the same property
   or capability, the later driver wins.
-- If a driver fails an `inspect`, Betty ignores that driver's result for the
-  command and continues.
+- If a driver fails or times out during an `inspect`, Betty ignores that
+  driver's result for the command and continues with the next driver.
 - For `get` and `set`, Betty asks every driver. The request counts as handled
   if any driver returns an enrichment for the target device. Betty reports a
   driver's error only when no driver handled the request.
@@ -376,8 +404,10 @@ JSON is treated as `internal`.
   Service and Device Information Service.
 - If a driver identifies a device whose name is only its address, Betty uses
   the driver's `model` as the device name.
-- `bt watch` polls `get` about every 2 seconds. Drivers do not need to
-  implement subscriptions.
+- `bt watch` repeats the whole `get`, including device discovery and every
+  driver's `inspect`, waiting 2 seconds between rounds, so updates arrive
+  every few seconds at best. The first failed read ends the watch. Drivers do
+  not need to implement subscriptions.
 
 ## 11. Installation and discovery
 
@@ -388,8 +418,11 @@ bt driver remove example/heart-rate
 ```
 
 `bt driver install` runs `--manifest`, validates the manifest, and copies the
-executable into the user's driver directory. Betty looks for drivers in this
-order, and the first match for an ID wins:
+executable into the user's driver directory. It refuses a driver whose ID is
+already provided by any of the locations below, because a user-installed copy
+would take precedence over a bundled or package-managed driver and inherit its
+stored state. Remove the existing driver first to replace it. Betty looks for
+drivers in this order, and the first match for an ID wins:
 
 1. the user directory: `<user config dir>/betty/drivers/`, or `$BETTY_DRIVER_DIR`;
 2. a `drivers/` directory next to the `bt` executable, or `$BETTY_BUNDLED_DRIVER_DIR`;
@@ -408,6 +441,15 @@ not sandboxed. The manifest and host-call checks prevent accidental access, not
 malicious access: they stop a driver from opening channels it did not declare
 or touching devices Betty did not hand it, but a driver can still use the
 operating system directly. Install only drivers you trust.
+
+Within those limits, Betty keeps one driver from interfering with another or
+with Betty:
+
+- each driver's stored state is private to its ID, and only legacy IDs Betty
+  recognizes can read an earlier driver's state;
+- an install cannot shadow a driver that is already provided;
+- deadlines, message-size limits, and a kill on every exit path stop a broken
+  driver from hanging Betty, exhausting its memory, or outliving the command.
 
 Drivers SHOULD treat device data as untrusted input, bound every buffer and
 loop, and never log keys, PINs, or exported state.

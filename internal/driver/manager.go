@@ -5,13 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"time"
 
@@ -23,8 +23,11 @@ type Manager struct {
 	root          string
 	bundled       string
 	systemBundled string
-	host          Host
-	rfcomm        RFCOMMHost
+	// Zero values select the defaults in process.go; tests shorten them.
+	inspectTimeout time.Duration
+	exitGrace      time.Duration
+	host           Host
+	rfcomm         RFCOMMHost
 }
 
 func New() *Manager {
@@ -58,7 +61,7 @@ func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain
 func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpose string) []domain.Device {
 	installed, _ := m.List()
 	for _, item := range installed {
-		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)})
+		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)}, m.inspectBudget())
 		if err != nil {
 			continue
 		}
@@ -77,7 +80,7 @@ func (m *Manager) Property(ctx context.Context, devices []domain.Device, method,
 	handled := false
 	var operationErr error
 	for _, item := range installed {
-		response, callErr := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: method, DeviceID: deviceID, Property: property, Value: value, Devices: wireDevices(devices)})
+		response, callErr := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: method, DeviceID: deviceID, Property: property, Value: value, Devices: wireDevices(devices)}, 0)
 		if callErr != nil {
 			operationErr = callErr
 			continue
@@ -166,6 +169,18 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 	}
 	if err := validateManifest(manifest); err != nil {
 		return manifest, err
+	}
+	// Refuse an ID that any source already provides. A user-installed driver
+	// takes precedence, so installing a second copy would silently shadow a
+	// bundled or package-managed driver and inherit its private storage.
+	available, err := m.List()
+	if err != nil {
+		return manifest, err
+	}
+	for _, item := range available {
+		if item.ID == manifest.ID {
+			return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
+		}
 	}
 	dir := filepath.Join(m.root, safeID(manifest.ID))
 	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err == nil {
@@ -259,7 +274,7 @@ func (m *Manager) List() ([]protocol.Manifest, error) {
 	}
 	out := make([]protocol.Manifest, 0, len(byID))
 	for _, item := range byID {
-		for _, legacyID := range item.LegacyIDs {
+		for _, legacyID := range honoredLegacyIDs(item) {
 			delete(byID, legacyID)
 		}
 	}
@@ -337,89 +352,6 @@ func (m *Manager) installed(id string) bool {
 	return false
 }
 func mustList(m *Manager) []protocol.Manifest { items, _ := m.List(); return items }
-func (m *Manager) call(ctx context.Context, item protocol.Manifest, request protocol.Request) (protocol.Response, error) {
-	var response protocol.Response
-	path := m.driverPath(item.ID)
-	cmd := exec.CommandContext(ctx, path)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return response, err
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return response, err
-	}
-	cmd.Stderr = io.Discard
-	if err = cmd.Start(); err != nil {
-		return response, err
-	}
-	encoder, decoder := json.NewEncoder(stdin), json.NewDecoder(stdout)
-	if err := encoder.Encode(request); err != nil {
-		return response, err
-	}
-	allowedDevices := map[string]bool{}
-	for _, device := range request.Devices {
-		allowedDevices[device.ID] = true
-	}
-	channels := map[string]string{}
-	defer func() {
-		for channel, transport := range channels {
-			switch transport {
-			case "l2cap":
-				_ = m.host.CloseL2CAP(context.Background(), channel)
-			case "rfcomm":
-				_ = m.rfcomm.CloseRFCOMM(context.Background(), channel)
-			}
-		}
-	}()
-	for {
-		var raw json.RawMessage
-		if err := decoder.Decode(&raw); err != nil {
-			return response, err
-		}
-		var header protocol.Message
-		if err := json.Unmarshal(raw, &header); err != nil {
-			return response, err
-		}
-		if header.Type == protocol.TypeHostRequest {
-			result, hostErr := m.handleHost(ctx, item, header, allowedDevices, channels)
-			reply := protocol.Message{Protocol: protocol.Version, Type: protocol.TypeHostResponse, ID: header.ID, Result: result}
-			if hostErr != nil {
-				hostDomainError := domain.AsError(hostErr)
-				reply.Error = hostDomainError.Message
-				reply.ErrorCode = string(hostDomainError.Code)
-				reply.Details = hostDomainError.Details
-			}
-			if err := encoder.Encode(reply); err != nil {
-				return response, err
-			}
-			continue
-		}
-		if err := json.Unmarshal(raw, &response); err != nil {
-			return response, err
-		}
-		break
-	}
-	_ = stdin.Close()
-	waitErr := cmd.Wait()
-	if waitErr != nil {
-		return response, waitErr
-	}
-	if response.Protocol != protocol.Version {
-		return response, fmt.Errorf("driver %s returned protocol %d", item.ID, response.Protocol)
-	}
-	if response.Error != "" {
-		code := domain.CodeInternal
-		if response.ErrorCode != "" {
-			code = driverErrorCode(response.ErrorCode)
-		}
-		err := domain.NewError(code, "driver %s: %s", item.ID, response.Error)
-		err.Details = response.Details
-		return response, err
-	}
-	return response, nil
-}
-
 func driverErrorCode(value string) domain.ErrorCode {
 	code := domain.ErrorCode(value)
 	switch code {
@@ -629,7 +561,7 @@ func (m *Manager) storageGet(driver protocol.Manifest, key string) (string, bool
 	}
 	value, ok := values[key]
 	if !ok {
-		for _, legacyID := range driver.LegacyIDs {
+		for _, legacyID := range honoredLegacyIDs(driver) {
 			legacyValues, legacyErr := m.readStorage(legacyID)
 			if legacyErr != nil {
 				return "", false, legacyErr
@@ -653,7 +585,7 @@ func (m *Manager) storageSet(driver protocol.Manifest, key, value string) error 
 		return err
 	}
 	if len(values) == 0 {
-		for _, legacyID := range driver.LegacyIDs {
+		for _, legacyID := range honoredLegacyIDs(driver) {
 			legacyValues, legacyErr := m.readStorage(legacyID)
 			if legacyErr != nil {
 				return legacyErr
@@ -715,17 +647,6 @@ func validateStorageKey(key string) error {
 	}
 	return nil
 }
-func readManifest(ctx context.Context, path string) (protocol.Manifest, error) {
-	var manifest protocol.Manifest
-	output, err := exec.CommandContext(ctx, path, "--manifest").Output()
-	if err != nil {
-		return manifest, fmt.Errorf("read driver manifest: %w", err)
-	}
-	if err = json.Unmarshal(output, &manifest); err != nil {
-		return manifest, fmt.Errorf("invalid driver manifest: %w", err)
-	}
-	return manifest, nil
-}
 func validateManifest(m protocol.Manifest) error {
 	if m.Protocol != protocol.Version {
 		return domain.NewError(domain.CodeUnsupported, "driver uses protocol %d; Betty supports %d", m.Protocol, protocol.Version)
@@ -737,8 +658,29 @@ func validateManifest(m protocol.Manifest) error {
 		if !protocol.ValidID(legacyID) || legacyID == m.ID {
 			return domain.NewError(domain.CodeUsage, "invalid legacy driver ID")
 		}
+		if !slices.Contains(knownRenames[m.ID], legacyID) {
+			return domain.NewError(domain.CodeUsage, "driver %s declares legacy ID %s, which Betty does not recognize as an earlier name of this driver", m.ID, legacyID)
+		}
 	}
 	return nil
+}
+
+// knownRenames lists the earlier IDs Betty accepts for each driver. A
+// manifest's legacy_ids is self-declared, so honoring arbitrary entries would
+// let any driver read another driver's private storage and hide that driver.
+var knownRenames = map[string][]string{
+	"official/apple-audio": {"official/airpods"},
+}
+
+// honoredLegacyIDs returns the legacy IDs of item that Betty recognizes.
+func honoredLegacyIDs(item protocol.Manifest) []string {
+	var honored []string
+	for _, legacyID := range item.LegacyIDs {
+		if legacyID != item.ID && slices.Contains(knownRenames[item.ID], legacyID) {
+			honored = append(honored, legacyID)
+		}
+	}
+	return honored
 }
 func safeID(id string) string { return base64.RawURLEncoding.EncodeToString([]byte(id)) }
 func executableName() string {
