@@ -7,9 +7,19 @@
     <ProjectGuid>{56C9CA1F-E592-42E4-87D1-507AB7449A91}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>BettyAAP</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <!-- Must match the platform version of the SDK and WDK packages below. -->
+    <WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!--
+    The WDK comes from NuGet, but the build agent's installed driver toolset
+    resolves WDK tools against its own kit, which lacks this SDK version, so
+    stampinf.exe and Inf2Cat.exe are not found. Point the tool directory at
+    the NuGet WDK. WDKContentRoot has no trailing separator in NuGet builds.
+  -->
+  <PropertyGroup Condition="'$(WDK_NuGet)' == 'true'">
+    <WDKBinRoot>$(WDKContentRoot)\bin\$(WindowsTargetPlatformVersion)</WDKBinRoot>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Driver</ConfigurationType>
     <DriverType>KMDF</DriverType>
@@ -43,6 +53,9 @@
     <Inf Include="BettyAAP.inf" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The SDK and WDK packages must share one version. -->
+    <PackageReference Include="Microsoft.Windows.SDK.CPP" Version="10.0.28000.2526" />
+    <PackageReference Include="Microsoft.Windows.SDK.CPP.x64" Version="10.0.28000.2526" />
     <PackageReference Include="Microsoft.Windows.WDK.x64" Version="10.0.28000.2526" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
