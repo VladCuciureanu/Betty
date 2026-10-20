@@ -160,6 +160,9 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		fails(t, domain.CodeUnsupported, "connect", name)
 	} else {
+		// Let the link left over from pairing drop first; connecting while
+		// the stack tears it down races.
+		waitDisconnected(t, p.device(0).Address)
 		ok(t, &m, "connect", name)
 		if !m.Connected {
 			t.Fatalf("connect=%+v", m)
@@ -207,6 +210,11 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	} else {
 		var devices []domain.Device
 		ok(t, &devices, "scan")
+		// BlueZ accepts connections from unknown devices only while
+		// discoverable.
+		if output, err := exec.Command("bluetoothctl", "discoverable", "on").CombinedOutput(); err != nil {
+			t.Fatalf("bluetoothctl discoverable on: %v\n%s", err, output)
+		}
 	}
 	// The driver reads battery only from a connected device. Headphones
 	// connect to the computer themselves; the link may also still be up
@@ -245,6 +253,17 @@ func connected(t *testing.T, address string) bool {
 	var d domain.Device
 	ok(t, &d, "inspect", address)
 	return d.Connected
+}
+
+func waitDisconnected(t *testing.T, address string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for connected(t, address) {
+		if time.Now().After(deadline) {
+			t.Fatalf("%s stayed connected", address)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func waitConnected(t *testing.T, address string) {
