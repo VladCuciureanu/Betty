@@ -204,6 +204,18 @@ driver.
 An operation a platform cannot perform returns `unsupported`. Device IDs are
 opaque and platform-local; don't parse them.
 
+Some gaps are the operating system's, not Betty's. Betty documents them
+instead of working around them with private APIs:
+
+| Limitation | Platforms | Why |
+| --- | --- | --- |
+| Connecting or disconnecting an individual profile, such as A2DP | macOS | IOBluetooth opens and closes only the baseband link. |
+| Connecting or disconnecting every kind of saved device | Windows | No public API covers every profile. Windows' audio stack could connect audio devices, which isn't implemented yet ([#20](https://github.com/VladCuciureanu/Betty/issues/20)); other devices will stay `unsupported`. |
+| Unpairing | macOS | No public API. |
+| Choosing between several Bluetooth adapters | macOS, Windows | Both use one radio at a time. BlueZ exposes several ([#23](https://github.com/VladCuciureanu/Betty/issues/23)). |
+| Setting the MTU of a GATT connection | macOS, Windows | Both negotiate it and only let apps read the result ([#10](https://github.com/VladCuciureanu/Betty/issues/10)). |
+| Apple's AirPods control channel (exact battery over AAP, noise control) | macOS, Windows | macOS doesn't appear to open the channel to third-party processes, which hasn't been confirmed on hardware ([#18](https://github.com/VladCuciureanu/Betty/issues/18)); Windows opens Classic L2CAP only to signed kernel-mode drivers. See [the Apple Audio driver](cmd/bt-driver-apple-audio/README.md#platform-behavior). |
+
 ## Development
 
 ```console

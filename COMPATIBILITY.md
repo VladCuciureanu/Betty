@@ -13,11 +13,9 @@ device firmware, and observed limitation to every test record.
 | Windows 10 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | — |
 | Windows 11 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | — |
 
-Known public-API limitations:
-
-- macOS does not expose generic unpairing through a supported public API.
-- Windows cannot generically force every saved Classic profile to connect or disconnect.
-- Device IDs are opaque and platform-local; they are not portable Bluetooth addresses.
+Known public-API limitations are listed in the
+[README's platform section](README.md#platform-support). Device IDs are opaque
+and platform-local; they are not portable Bluetooth addresses.
 
 ## Optional driver matrix
 
