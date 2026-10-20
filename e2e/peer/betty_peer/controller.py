@@ -12,12 +12,33 @@ import sys
 
 from bumble import hci
 from bumble.controller import Controller
+from bumble.core import PhysicalTransport
+from bumble.link import LocalLink
 
 # Write Scan Enable values that include inquiry scan.
 _INQUIRY_SCAN = 0x01
 # How long a virtual inquiry takes; real inquiries take seconds, but nothing
 # here needs that.
 _INQUIRY_DELAY = 0.2
+
+
+class ConnectionAddressLink(LocalLink):
+    """A virtual link that tags LE data with the connection's own address.
+
+    Bumble's link tags LE data with the sender's current random address. Linux
+    changes that address while connected, for privacy, after which the peer
+    no longer recognizes the data and drops it.
+    """
+
+    def send_acl_data(self, sender_controller, destination_address, transport, data):
+        if transport != PhysicalTransport.LE:
+            return super().send_acl_data(sender_controller, destination_address, transport, data)
+        connection = sender_controller.le_connections.get(destination_address)
+        receiver = self.find_le_controller(destination_address)
+        if connection is None or receiver is None:
+            return super().send_acl_data(sender_controller, destination_address, transport, data)
+        source = connection.self_address
+        asyncio.get_running_loop().call_soon(lambda: receiver.on_link_acl_data(source, transport, data))
 
 
 _DUAL_MODE_FEATURES = (

@@ -36,11 +36,10 @@ import threading
 from bumble.device import Device
 from bumble.hci import Address
 from bumble.host import Host
-from bumble.link import LocalLink
 from bumble.transport import open_transport
 from bumble.transport.common import AsyncPipeSink
 
-from .controller import InquiryController
+from .controller import ConnectionAddressLink, InquiryController
 from .personas import KINDS, Persona
 
 
@@ -67,7 +66,7 @@ def parse_device(spec: str) -> tuple[str, str]:
 
 async def create_virtual(specs, seed: int) -> tuple[list[Persona], str, object]:
     transport = await open_transport("vhci")
-    link = LocalLink()
+    link = ConnectionAddressLink()
     host_address = virtual_address(seed, 0)
     InquiryController(
         "computer", host_source=transport.source, host_sink=transport.sink, link=link, public_address=host_address
