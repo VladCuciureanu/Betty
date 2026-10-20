@@ -23,11 +23,10 @@ const (
 	afBTH          = 32
 	sockStream     = 1
 	bthProtoRFCOMM = 3
-	socketError    = ^uintptr(0)
+	// invalidSocket is INVALID_SOCKET, which WSASocketW returns as a SOCKET.
+	invalidSocket  = ^uintptr(0)
 	solSocket      = 0xffff
 	soError        = 0x1007
-	soRecvTimeout  = 0x1006
-	soSendTimeout  = 0x1005
 	fionbio        = 0x8004667e
 	wsaWouldBlock  = syscall.Errno(10035)
 	wsaTimedOut    = syscall.Errno(10060)
@@ -41,7 +40,6 @@ var (
 	wsaRecv        = ws2.NewProc("recv")
 	wsaSend        = ws2.NewProc("send")
 	wsaCloseSocket = ws2.NewProc("closesocket")
-	wsaSetSockOpt  = ws2.NewProc("setsockopt")
 	wsaGetSockOpt  = ws2.NewProc("getsockopt")
 	wsaIOCtlSocket = ws2.NewProc("ioctlsocket")
 	wsaSelect      = ws2.NewProc("select")
@@ -85,10 +83,16 @@ type timeval struct {
 	Usec int32
 }
 
+// windowsChannel is an open, non-blocking RFCOMM socket. Reads and writes
+// wait with select rather than SO_RCVTIMEO: after a socket-level timeout,
+// Winsock leaves the socket in an undefined state.
 type windowsChannel struct {
 	socket  uintptr
 	readMu  sync.Mutex
 	writeMu sync.Mutex
+	// closed tells waiting reads and writes to stop, so Close can take both
+	// locks before it frees the socket handle.
+	closed atomic.Bool
 }
 
 type windowsHost struct {
@@ -117,7 +121,7 @@ func (h *windowsHost) OpenRFCOMM(ctx context.Context, deviceID, serviceUUID stri
 	// third value, read on the same OS thread right after the call. A
 	// separate WSAGetLastError call could run on another thread.
 	socket, _, callErr := wsaSocketW.Call(afBTH, sockStream, bthProtoRFCOMM, 0, 0, 0)
-	if socket == socketError {
+	if socket == invalidSocket {
 		return "", winsockError("open RFCOMM socket", callErr)
 	}
 	ok := false
@@ -133,16 +137,13 @@ func (h *windowsHost) OpenRFCOMM(ctx context.Context, deviceID, serviceUUID stri
 	// service UUID through SDP. BT_PORT_ANY is only for server-side bind.
 	addressData := sockaddrBTH(address, service, 0)
 	result, _, connectErr := wsaConnect.Call(socket, uintptr(unsafe.Pointer(&addressData[0])), sockaddrBTHSize)
-	if result == socketError {
+	if failed(result) {
 		if !errors.Is(connectErr, wsaWouldBlock) {
 			return "", winsockError("connect RFCOMM service", connectErr)
 		}
 		if err := waitConnected(ctx, socket); err != nil {
 			return "", err
 		}
-	}
-	if err := setNonblocking(socket, false); err != nil {
-		return "", err
 	}
 	id := "rfcomm-windows-" + strconv.FormatUint(h.next.Add(1), 10)
 	h.mu.Lock()
@@ -164,23 +165,19 @@ func (h *windowsHost) ReadRFCOMM(ctx context.Context, channelID string, max int)
 	defer channel.readMu.Unlock()
 	buffer := make([]byte, max)
 	for {
-		if err := ctx.Err(); err != nil {
-			return nil, contextError(err)
-		}
-		if err := setSocketTimeout(channel.socket, soRecvTimeout, pollTimeout(ctx)); err != nil {
-			return nil, err
-		}
 		result, _, callErr := wsaRecv.Call(channel.socket, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), 0)
-		if result != socketError {
+		if !failed(result) {
 			if result == 0 {
 				return nil, domain.NewError(domain.CodeDisconnected, "RFCOMM channel closed by the device")
 			}
 			return buffer[:int(result)], nil
 		}
-		if errors.Is(callErr, wsaTimedOut) || errors.Is(callErr, wsaWouldBlock) {
-			continue
+		if !errors.Is(callErr, wsaWouldBlock) {
+			return nil, winsockError("read RFCOMM channel", callErr)
 		}
-		return nil, winsockError("read RFCOMM channel", callErr)
+		if err := waitReady(ctx, channel, false); err != nil {
+			return nil, err
+		}
 	}
 }
 
@@ -193,21 +190,17 @@ func (h *windowsHost) WriteRFCOMM(ctx context.Context, channelID string, data []
 	defer channel.writeMu.Unlock()
 	written := 0
 	for written < len(data) {
-		if err := ctx.Err(); err != nil {
-			return written, contextError(err)
-		}
-		if err := setSocketTimeout(channel.socket, soSendTimeout, pollTimeout(ctx)); err != nil {
-			return written, err
-		}
 		result, _, callErr := wsaSend.Call(channel.socket, uintptr(unsafe.Pointer(&data[written])), uintptr(len(data)-written), 0)
-		if result != socketError {
+		if !failed(result) {
 			written += int(result)
 			continue
 		}
-		if errors.Is(callErr, wsaTimedOut) || errors.Is(callErr, wsaWouldBlock) {
-			continue
+		if !errors.Is(callErr, wsaWouldBlock) {
+			return written, winsockError("write RFCOMM channel", callErr)
 		}
-		return written, winsockError("write RFCOMM channel", callErr)
+		if err := waitReady(ctx, channel, true); err != nil {
+			return written, err
+		}
 	}
 	return written, nil
 }
@@ -222,8 +215,15 @@ func (h *windowsHost) CloseRFCOMM(_ context.Context, channelID string) error {
 	if !ok {
 		return domain.NewError(domain.CodeNotFound, "RFCOMM channel %q is not open", channelID)
 	}
+	// Waiting reads and writes notice within one poll interval; the handle
+	// is freed only once neither can still use it.
+	channel.closed.Store(true)
+	channel.readMu.Lock()
+	defer channel.readMu.Unlock()
+	channel.writeMu.Lock()
+	defer channel.writeMu.Unlock()
 	result, _, callErr := wsaCloseSocket.Call(channel.socket)
-	if result == socketError {
+	if failed(result) {
 		return winsockError("close RFCOMM channel", callErr)
 	}
 	return nil
@@ -238,6 +238,11 @@ func (h *windowsHost) channel(id string) (*windowsChannel, error) {
 	}
 	return channel, nil
 }
+
+// failed reports whether a Winsock function that returns int returned
+// SOCKET_ERROR. The int's -1 arrives zero-extended in a 64-bit register, so
+// comparing the raw value with ^uintptr(0) never matches on 64-bit Windows.
+func failed(result uintptr) bool { return int32(result) == -1 }
 
 func ensureWinsock() error {
 	wsaInitOnce.Do(func() {
@@ -260,12 +265,12 @@ func waitConnected(ctx context.Context, socket uintptr) error {
 		}
 		writable := fdSet{Count: 1}
 		writable.Sockets[0] = socket
-		failed := fdSet{Count: 1}
-		failed.Sockets[0] = socket
+		errored := fdSet{Count: 1}
+		errored.Sockets[0] = socket
 		wait := pollTimeout(ctx)
 		tv := timeval{Sec: int32(wait / time.Second), Usec: int32((wait % time.Second) / time.Microsecond)}
-		result, _, callErr := wsaSelect.Call(0, 0, uintptr(unsafe.Pointer(&writable)), uintptr(unsafe.Pointer(&failed)), uintptr(unsafe.Pointer(&tv)))
-		if result == socketError {
+		result, _, callErr := wsaSelect.Call(0, 0, uintptr(unsafe.Pointer(&writable)), uintptr(unsafe.Pointer(&errored)), uintptr(unsafe.Pointer(&tv)))
+		if failed(result) {
 			return winsockError("wait for RFCOMM connection", callErr)
 		}
 		if result == 0 {
@@ -274,13 +279,13 @@ func waitConnected(ctx context.Context, socket uintptr) error {
 		var socketErr int32
 		length := int32(unsafe.Sizeof(socketErr))
 		result, _, callErr = wsaGetSockOpt.Call(socket, solSocket, soError, uintptr(unsafe.Pointer(&socketErr)), uintptr(unsafe.Pointer(&length)))
-		if result == socketError {
+		if failed(result) {
 			return winsockError("inspect RFCOMM connection", callErr)
 		}
 		if socketErr != 0 {
 			return winsockError("connect RFCOMM service", syscall.Errno(socketErr))
 		}
-		if failed.Count != 0 {
+		if errored.Count != 0 {
 			return winsockError("connect RFCOMM service", errors.New("connection failed"))
 		}
 		return nil
@@ -293,22 +298,41 @@ func setNonblocking(socket uintptr, enabled bool) error {
 		value = 1
 	}
 	result, _, callErr := wsaIOCtlSocket.Call(socket, fionbio, uintptr(unsafe.Pointer(&value)))
-	if result == socketError {
+	if failed(result) {
 		return winsockError("configure RFCOMM socket", callErr)
 	}
 	return nil
 }
 
-func setSocketTimeout(socket uintptr, option uintptr, timeout time.Duration) error {
-	milliseconds := int32(timeout / time.Millisecond)
-	if milliseconds < 1 {
-		milliseconds = 1
+// waitReady waits until a channel can be read, or written when write is set,
+// or has failed, polling so that cancellation and Close are noticed.
+func waitReady(ctx context.Context, channel *windowsChannel, write bool) error {
+	for {
+		if channel.closed.Load() {
+			return domain.NewError(domain.CodeNotFound, "RFCOMM channel is closed")
+		}
+		if err := ctx.Err(); err != nil {
+			return contextError(err)
+		}
+		ready := fdSet{Count: 1}
+		ready.Sockets[0] = channel.socket
+		errored := fdSet{Count: 1}
+		errored.Sockets[0] = channel.socket
+		readable, writable := uintptr(unsafe.Pointer(&ready)), uintptr(0)
+		if write {
+			readable, writable = 0, readable
+		}
+		wait := pollTimeout(ctx)
+		tv := timeval{Sec: int32(wait / time.Second), Usec: int32((wait % time.Second) / time.Microsecond)}
+		result, _, callErr := wsaSelect.Call(0, readable, writable, uintptr(unsafe.Pointer(&errored)), uintptr(unsafe.Pointer(&tv)))
+		if failed(result) {
+			return winsockError("wait for RFCOMM channel", callErr)
+		}
+		// Ready or failed: the next recv or send reports which.
+		if result > 0 {
+			return nil
+		}
 	}
-	result, _, callErr := wsaSetSockOpt.Call(socket, solSocket, option, uintptr(unsafe.Pointer(&milliseconds)), unsafe.Sizeof(milliseconds))
-	if result == socketError {
-		return winsockError("configure RFCOMM timeout", callErr)
-	}
-	return nil
 }
 
 func pollTimeout(ctx context.Context) time.Duration {
