@@ -144,7 +144,9 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
 	}
-	p := startPeer(t, "speaker:Betty Speaker")
+	// A keyboard, because BlueZ connects only profiles it knows, and HID
+	// needs no other daemon.
+	p := startPeer(t, "keyboard:Betty Keyboard")
 	name := p.device(0).Name
 	var m mutation
 	ok(t, &m, "pair", name)
@@ -197,9 +199,12 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	address := p.device(0).Address
 	ok(t, nil, "pair", address)
 	t.Cleanup(func() { bt(t, nil, "unpair", address) })
-	// Headphones connect to the computer themselves after pairing; the
-	// driver reads battery only from a connected device.
-	p.do(map[string]any{"cmd": "connect_host", "device": 0})
+	// The driver reads battery only from a connected device. Headphones
+	// connect to the computer themselves; the link may also still be up
+	// from pairing, and a second connection would confuse both sides.
+	if !connected(t, address) {
+		p.do(map[string]any{"cmd": "connect_host", "device": 0})
+	}
 	waitConnected(t, address)
 
 	if virtual() {
@@ -224,6 +229,13 @@ func assertPaired(t *testing.T, address string) {
 	if !d.Paired {
 		t.Fatalf("%s is not paired", address)
 	}
+}
+
+func connected(t *testing.T, address string) bool {
+	t.Helper()
+	var d domain.Device
+	ok(t, &d, "inspect", address)
+	return d.Connected
 }
 
 func waitConnected(t *testing.T, address string) {

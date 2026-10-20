@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from typing import Callable
 
-from bumble import gatt, hci, rfcomm
-from bumble.core import UUID, AdvertisingData, BT_BR_EDR_TRANSPORT
+from bumble import gatt, hci, hid, rfcomm, sdp
+from bumble.core import (
+    BT_BR_EDR_TRANSPORT,
+    BT_HIDP_PROTOCOL_ID,
+    BT_HUMAN_INTERFACE_DEVICE_SERVICE,
+    BT_L2CAP_PROTOCOL_ID,
+    UUID,
+    AdvertisingData,
+)
 from bumble.device import Device
 from bumble.pairing import PairingConfig, PairingDelegate
 from bumble.profiles.battery_service import BatteryService
@@ -26,6 +33,14 @@ _SDP_HANDLE = 0x00010001
 _SPEAKER_CLASS = 0x240414
 # Class of device: audio, headphones.
 _HEADPHONES_CLASS = 0x240418
+# Class of device: peripheral, keyboard.
+_KEYBOARD_CLASS = 0x002540
+
+# A standard boot-protocol keyboard report descriptor.
+_KEYBOARD_REPORT_DESCRIPTOR = bytes.fromhex(
+    "05010906a101050719e029e71500250175019508810295017508810195057501"
+    "050819012905910295017503910195067508150025650507190029658100c0"
+)
 
 
 class _Delegate(PairingDelegate):
@@ -222,4 +237,64 @@ class SonyHeadset(_Classic):
         self.headset.battery = level
 
 
-KINDS: dict[str, type[Persona]] = {cls.kind: cls for cls in (Sensor, Speaker, SonyHeadset)}
+class Keyboard(_Classic):
+    """A Classic HID keyboard, which BlueZ connects with its own input plugin.
+
+    Unlike the speaker, it has a profile BlueZ connects without other daemons,
+    so it exercises bt connect and disconnect.
+    """
+
+    kind = "keyboard"
+    class_of_device = _KEYBOARD_CLASS
+    eir_service = None
+
+    def setup_classic(self) -> None:
+        self.hid = hid.Device(self.device)
+        self.hid.on(self.hid.EVENT_INTERRUPT_CHANNEL_OPEN, lambda: self._event("hid_connected"))
+        self.device.sdp_service_records = {_SDP_HANDLE: _hid_sdp_records(_SDP_HANDLE, self.name)}
+
+
+def _hid_sdp_records(handle: int, name: str) -> list[sdp.ServiceAttribute]:
+    element = sdp.DataElement
+    attribute = sdp.ServiceAttribute
+    l2cap = lambda psm: element.sequence([element.uuid(BT_L2CAP_PROTOCOL_ID), element.unsigned_integer_16(psm)])
+    hidp = element.sequence([element.uuid(BT_HIDP_PROTOCOL_ID)])
+    return [
+        attribute(sdp.SDP_SERVICE_RECORD_HANDLE_ATTRIBUTE_ID, element.unsigned_integer_32(handle)),
+        attribute(sdp.SDP_SERVICE_CLASS_ID_LIST_ATTRIBUTE_ID, element.sequence([element.uuid(BT_HUMAN_INTERFACE_DEVICE_SERVICE)])),
+        attribute(sdp.SDP_PROTOCOL_DESCRIPTOR_LIST_ATTRIBUTE_ID, element.sequence([l2cap(hid.HID_CONTROL_PSM), hidp])),
+        attribute(sdp.SDP_BROWSE_GROUP_LIST_ATTRIBUTE_ID, element.sequence([element.uuid(sdp.SDP_PUBLIC_BROWSE_ROOT)])),
+        attribute(
+            sdp.SDP_LANGUAGE_BASE_ATTRIBUTE_ID_LIST_ATTRIBUTE_ID,
+            element.sequence([element.unsigned_integer_16(0x656E), element.unsigned_integer_16(0x006A), element.unsigned_integer_16(0x0100)]),
+        ),
+        attribute(
+            sdp.SDP_BLUETOOTH_PROFILE_DESCRIPTOR_LIST_ATTRIBUTE_ID,
+            element.sequence([element.sequence([element.uuid(BT_HUMAN_INTERFACE_DEVICE_SERVICE), element.unsigned_integer_16(0x0101)])]),
+        ),
+        attribute(
+            sdp.SDP_ADDITIONAL_PROTOCOL_DESCRIPTOR_LIST_ATTRIBUTE_ID,
+            element.sequence([element.sequence([l2cap(hid.HID_INTERRUPT_PSM), hidp])]),
+        ),
+        attribute(0x0100, element.text_string(name.encode())),  # service name
+        attribute(0x0201, element.unsigned_integer_16(0x0111)),  # HID parser version
+        attribute(0x0202, element.unsigned_integer_8(0x40)),  # device subclass: keyboard
+        attribute(0x0203, element.unsigned_integer_8(0x00)),  # country code
+        attribute(0x0204, element.boolean(True)),  # virtual cable
+        attribute(0x0205, element.boolean(True)),  # reconnect initiate
+        attribute(
+            0x0206,  # descriptor list: one report descriptor
+            element.sequence([element.sequence([element.unsigned_integer_8(0x22), element.text_string(_KEYBOARD_REPORT_DESCRIPTOR)])]),
+        ),
+        attribute(
+            0x0207,  # language ID base list
+            element.sequence([element.sequence([element.unsigned_integer_16(0x0409), element.unsigned_integer_16(0x0100)])]),
+        ),
+        attribute(0x020B, element.unsigned_integer_16(0x0100)),  # profile version
+        attribute(0x020C, element.unsigned_integer_16(0x0C80)),  # supervision timeout
+        attribute(0x020D, element.boolean(True)),  # normally connectable
+        attribute(0x020E, element.boolean(True)),  # boot device
+    ]
+
+
+KINDS: dict[str, type[Persona]] = {cls.kind: cls for cls in (Sensor, Speaker, SonyHeadset, Keyboard)}

@@ -95,6 +95,7 @@ type peer struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	events  chan peerEvent
+	read    chan struct{} // closed when the peer's output has been read
 	host    string
 	devices []peerDevice
 }
@@ -141,16 +142,18 @@ func startPeer(t *testing.T, specs ...string) *peer {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start the peer (is e2e/peer installed for %s?): %v", python, err)
 	}
-	p := &peer{t: t, cmd: cmd, stdin: stdin, events: make(chan peerEvent, 64)}
+	p := &peer{t: t, cmd: cmd, stdin: stdin, events: make(chan peerEvent, 64), read: make(chan struct{})}
 	go func() {
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			var event peerEvent
 			if json.Unmarshal(scanner.Bytes(), &event) == nil {
+				t.Logf("peer event: %s", scanner.Bytes())
 				p.events <- event
 			}
 		}
 		close(p.events)
+		close(p.read)
 	}()
 	t.Cleanup(p.stop)
 	ready := p.wait("ready", 30*time.Second)
@@ -174,6 +177,12 @@ func (p *peer) stop() {
 		_ = p.cmd.Process.Kill()
 		<-done
 	}
+	// The reader logs through t, which must not happen after the test ends.
+	go func() {
+		for range p.events {
+		}
+	}()
+	<-p.read
 }
 
 // do sends a command and waits for the peer to finish it.
