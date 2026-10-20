@@ -38,17 +38,7 @@ const (
 	protocolV2
 )
 
-type batteryComponent struct {
-	Level    int  `json:"level"`
-	Charging bool `json:"charging"`
-}
-
-type sonyBattery struct {
-	Headset *batteryComponent `json:"headset,omitempty"`
-	Left    *batteryComponent `json:"left,omitempty"`
-	Right   *batteryComponent `json:"right,omitempty"`
-	Case    *batteryComponent `json:"case,omitempty"`
-}
+type sonyBattery = protocol.BatteryValue
 
 type sonyNoiseState struct {
 	Mode         string `json:"mode"`
@@ -63,34 +53,22 @@ const (
 	sonyNoiseReservedByte
 )
 
-func (b sonyBattery) display() string {
-	var values []string
-	add := func(name string, component *batteryComponent) {
-		if component == nil {
-			return
-		}
-		value := fmt.Sprintf("%s %d%%", name, component.Level)
-		if component.Charging {
-			value += " charging"
-		}
-		values = append(values, value)
-	}
-	add("headset", b.Headset)
-	add("left", b.Left)
-	add("right", b.Right)
-	add("case", b.Case)
-	return strings.Join(values, " · ")
-}
-
 type sonyFrame struct {
 	DataType byte
 	Sequence byte
 	Payload  []byte
 }
 
+// sonyStream reassembles frames from RFCOMM reads. A frame runs from a 0x3e
+// start byte to a 0x3c end byte; both are escaped inside a frame, so after a
+// corrupt or truncated frame the stream resynchronizes on the next start byte.
 type sonyStream struct {
 	buffer []byte
 }
+
+// maxSonyBuffer bounds the bytes kept while waiting for an end byte: a frame
+// carries at most 65535 payload bytes, each escaped to at most two.
+const maxSonyBuffer = 2*(65535+7) + 2
 
 func encodeSonyFrame(dataType, sequence byte, payload []byte) []byte {
 	body := []byte{dataType, sequence, byte(len(payload) >> 24), byte(len(payload) >> 16), byte(len(payload) >> 8), byte(len(payload))}
@@ -112,30 +90,45 @@ func encodeSonyFrame(dataType, sequence byte, payload []byte) []byte {
 	return append(frame, 0x3c)
 }
 
-func (s *sonyStream) push(data []byte) ([]sonyFrame, error) {
+// push adds data read from the device and returns the complete frames it
+// finished, and how many corrupt frames it skipped.
+func (s *sonyStream) push(data []byte) (frames []sonyFrame, dropped int) {
 	s.buffer = append(s.buffer, data...)
-	var frames []sonyFrame
 	for {
-		start := bytes.IndexByte(s.buffer, 0x3e)
+		end := bytes.IndexByte(s.buffer, 0x3c)
+		if end < 0 {
+			break
+		}
+		// The frame starts at the last start byte before its end byte: an
+		// earlier one belongs to a frame whose end byte was lost.
+		start := bytes.LastIndexByte(s.buffer[:end], 0x3e)
+		body := s.buffer[start+1 : end]
+		s.buffer = s.buffer[end+1:]
 		if start < 0 {
-			s.buffer = nil
-			return frames, nil
+			dropped++
+			continue
 		}
 		if start > 0 {
-			s.buffer = s.buffer[start:]
+			// Bytes before the start byte are the rest of a corrupt frame.
+			dropped++
 		}
-		end := bytes.IndexByte(s.buffer[1:], 0x3c)
-		if end < 0 {
-			return frames, nil
-		}
-		end++
-		frame, err := decodeSonyBody(s.buffer[1:end])
-		s.buffer = s.buffer[end+1:]
+		frame, err := decodeSonyBody(body)
 		if err != nil {
-			return frames, err
+			dropped++
+			continue
 		}
 		frames = append(frames, frame)
 	}
+	if start := bytes.LastIndexByte(s.buffer, 0x3e); start < 0 {
+		s.buffer = s.buffer[:0]
+	} else {
+		s.buffer = s.buffer[start:]
+	}
+	if len(s.buffer) > maxSonyBuffer {
+		s.buffer = s.buffer[:0]
+		dropped++
+	}
+	return frames, dropped
 }
 
 func decodeSonyBody(escaped []byte) (sonyFrame, error) {
@@ -217,43 +210,44 @@ func (s *sonySession) send(dataType byte, payload []byte) error {
 	return nil
 }
 
+// receive returns the next frame that isn't an acknowledgement, and
+// acknowledges every data frame. It reads from the device at most 8 times.
 func (s *sonySession) receive(timeoutMS int) (sonyFrame, error) {
-	if len(s.pending) > 0 {
+	reads, dropped := 0, 0
+	for {
+		if len(s.pending) == 0 {
+			if reads == 8 {
+				if dropped > 0 {
+					return sonyFrame{}, fmt.Errorf("Sony device sent %d corrupt frames and no valid one", dropped)
+				}
+				return sonyFrame{}, fmt.Errorf("Sony device did not return a complete frame")
+			}
+			reads++
+			data, err := s.host.ReadRFCOMM(s.channelID, 4096, time.Duration(timeoutMS)*time.Millisecond)
+			if err != nil {
+				return sonyFrame{}, err
+			}
+			frames, skipped := s.stream.push(data)
+			s.pending = append(s.pending, frames...)
+			dropped += skipped
+			continue
+		}
 		frame := s.pending[0]
 		s.pending = s.pending[1:]
-		return s.accept(frame, timeoutMS)
+		switch frame.DataType {
+		case sonyDataACK:
+			continue
+		case sonyDataMDR:
+			ackSequence := byte(0)
+			if frame.Sequence == 0 {
+				ackSequence = 1
+			}
+			if err := s.sendWithSequence(sonyDataACK, ackSequence, nil); err != nil {
+				return sonyFrame{}, err
+			}
+		}
+		return frame, nil
 	}
-	for attempts := 0; attempts < 8; attempts++ {
-		data, err := s.host.ReadRFCOMM(s.channelID, 4096, time.Duration(timeoutMS)*time.Millisecond)
-		if err != nil {
-			return sonyFrame{}, err
-		}
-		frames, err := s.stream.push(data)
-		if err != nil {
-			return sonyFrame{}, err
-		}
-		if len(frames) > 0 {
-			s.pending = append(s.pending, frames[1:]...)
-			return s.accept(frames[0], timeoutMS)
-		}
-	}
-	return sonyFrame{}, fmt.Errorf("Sony device did not return a complete frame")
-}
-
-func (s *sonySession) accept(frame sonyFrame, timeoutMS int) (sonyFrame, error) {
-	if frame.DataType == sonyDataMDR {
-		ackSequence := byte(0)
-		if frame.Sequence == 0 {
-			ackSequence = 1
-		}
-		if err := s.sendWithSequence(sonyDataACK, ackSequence, nil); err != nil {
-			return sonyFrame{}, err
-		}
-	}
-	if frame.DataType == sonyDataACK {
-		return s.receive(timeoutMS)
-	}
-	return frame, nil
 }
 
 func (s *sonySession) sendWithSequence(dataType, sequence byte, payload []byte) error {
@@ -435,11 +429,11 @@ func parseSonyBattery(subtype byte, payload []byte) (sonyBattery, error) {
 	if len(payload) < 2 || payload[0] != 0x23 || payload[1] != subtype {
 		return sonyBattery{}, fmt.Errorf("not a Sony battery response")
 	}
-	component := func(level, charging byte) (*batteryComponent, error) {
+	component := func(level, charging byte) (*protocol.BatteryComponent, error) {
 		if level > 100 || charging > 1 {
 			return nil, fmt.Errorf("invalid Sony battery component")
 		}
-		return &batteryComponent{Level: int(level), Charging: charging == 1}, nil
+		return &protocol.BatteryComponent{Level: int(level), Charging: charging == 1}, nil
 	}
 	var result sonyBattery
 	var err error
@@ -448,7 +442,10 @@ func parseSonyBattery(subtype byte, payload []byte) (sonyBattery, error) {
 		if len(payload) < 4 {
 			return result, fmt.Errorf("truncated Sony headset battery response")
 		}
-		result.Headset, err = component(payload[2], payload[3])
+		var single *protocol.BatteryComponent
+		if single, err = component(payload[2], payload[3]); err == nil {
+			result = protocol.SingleBattery(*single)
+		}
 	case 0x09:
 		if len(payload) < 6 {
 			return result, fmt.Errorf("truncated Sony earbud battery response")

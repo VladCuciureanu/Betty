@@ -31,6 +31,8 @@ func main() {
 			Name:        "ACME Gadgets",
 			Version:     "0.1.0",
 			Permissions: []string{driver.PermissionRFCOMM},
+			// Betty starts the driver only for requests with a matching device.
+			Match: &driver.Match{NameContains: []string{"ACME"}},
 		},
 		Inspect: inspect,
 		Get:     get,
@@ -93,7 +95,7 @@ bt get "ACME-42" battery
 | `Driver` | Your manifest and the optional `Inspect`, `Get`, and `Set` handlers. |
 | `Serve(d)` | Runs the driver: answers `--manifest`, handles requests until Betty closes stdin, and exits. |
 | `Driver.Run(args, in, out)` | The same over arbitrary streams, for tests. |
-| `*Session` | Host calls for the current request: `OpenL2CAP`, `ReadL2CAP`, `WriteL2CAP`, `CloseL2CAP`, the same four for RFCOMM, `GetState`, and `SetState`. |
+| `*Session` | Host calls for the current request: `OpenL2CAP`, `ReadL2CAP`, `WriteL2CAP`, `CloseL2CAP`, the same four for RFCOMM, `GATTServices`, `ReadGATT`, `WriteGATT`, `SubscribeGATT`, `NextGATT`, `UnsubscribeGATT`, `GetState`, and `SetState`. |
 | `Errorf(code, …)` | Returns a structured error with a stable code. |
 | `Wrap(err, fallback)` | Keeps the code of a failed host call, or applies `fallback`. |
 | `PropertyRequest.DecodeValue` | Decodes a `set` value, reporting `usage` for the wrong JSON type. |
@@ -120,6 +122,19 @@ session when they make no host calls. To test the wire behavior, pipe encoded
 requests into `Driver.Run` and decode its output. See
 [`serve_test.go`](serve_test.go) and the Sony driver's
 [`sony_test.go`](../cmd/bt-driver-sony/sony_test.go).
+
+Before installing a driver, in any language, check it against the protocol:
+
+```console
+bt driver check ./my-driver
+```
+
+The check runs the driver as Betty would, with scripted requests and a host
+that refuses every host call, and reports each rule it tests: a valid
+manifest, a response for each request with the request's ID, serving several
+requests in one process, `unsupported` for an unknown method, not claiming
+properties it doesn't own, exiting when its input ends, and host calls only
+within the manifest's permissions. It needs no Bluetooth.
 
 ## Reference drivers
 

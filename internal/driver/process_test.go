@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -46,6 +47,13 @@ func runTestDriver(modes string) {
 			mode = value
 		}
 	}
+	if mode == "sdk" {
+		// A conforming driver: the SDK serves every request until EOF.
+		_ = protocol.Driver{Manifest: manifest, Inspect: func(*protocol.Session, protocol.InspectRequest) (map[string]protocol.Enrichment, error) {
+			return nil, nil
+		}}.Run(nil, os.Stdin, os.Stdout)
+		return
+	}
 	in := bufio.NewReader(os.Stdin)
 	var request protocol.Request
 	if err := json.NewDecoder(in).Decode(&request); err != nil {
@@ -65,6 +73,9 @@ func runTestDriver(modes string) {
 		_, _ = io.Copy(io.Discard, in)
 	case "hang":
 		time.Sleep(time.Hour)
+	case "chatty":
+		fmt.Fprint(os.Stderr, "first line\nsecond line\r\nno newline")
+		respond(request.ID)
 	case "linger":
 		respond(request.ID)
 		time.Sleep(time.Hour)
@@ -209,5 +220,61 @@ func TestReadMessage(t *testing.T) {
 	}
 	if _, err := readMessage(bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", 100)+"\n"), 16), 64); err == nil {
 		t.Fatal("expected size error")
+	}
+}
+
+func TestDriverStderrReachesTheLogLineByLine(t *testing.T) {
+	m := newTestManager(t)
+	manifest := protocol.Manifest{ID: "example/chatty", Name: "chatty", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=chatty")
+	var lines []string
+	m.OnDriverLog = func(id, line string) { lines = append(lines, id+": "+line) }
+	if _, err := m.call(context.Background(), manifest, inspectRequest(), m.inspectBudget()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"example/chatty: first line", "example/chatty: second line", "example/chatty: no newline"}
+	if strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("lines=%q", lines)
+	}
+}
+
+func TestLineLogStopsAtItsLimit(t *testing.T) {
+	var lines []string
+	log := newLineLog(func(line string) { lines = append(lines, line) })
+	chunk := strings.Repeat("x", 1023) + "\n"
+	for range maxStderrBytes/len(chunk) + 4 {
+		if n, err := log.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("n=%d err=%v", n, err)
+		}
+	}
+	log.flush()
+	if len(lines) != maxStderrBytes/len(chunk)+1 || lines[len(lines)-1] != "(further stderr output dropped)" {
+		t.Fatalf("%d lines, last %q", len(lines), lines[len(lines)-1])
+	}
+}
+
+func TestConcurrentInstallsInstallOnce(t *testing.T) {
+	m := newTestManager(t)
+	manifest := protocol.Manifest{ID: "example/racy", Name: "Racy", Version: "1"}
+	source := writeTestDriver(t, t.TempDir(), manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=ok")
+	errs := make(chan error, 4)
+	for range cap(errs) {
+		go func() {
+			_, err := m.Install(context.Background(), source)
+			errs <- err
+		}()
+	}
+	installed := 0
+	for range cap(errs) {
+		if err := <-errs; err == nil {
+			installed++
+		} else if !strings.Contains(err.Error(), "already installed") {
+			t.Fatal(err)
+		}
+	}
+	if installed != 1 {
+		t.Fatalf("%d installs succeeded, want 1", installed)
 	}
 }

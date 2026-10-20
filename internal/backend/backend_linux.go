@@ -4,6 +4,7 @@ package backend
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/godbus/dbus/v5"
+	protocol "github.com/vladcuciureanu/betty/driver"
 	"github.com/vladcuciureanu/betty/internal/bluez"
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
@@ -58,30 +60,44 @@ func (b *linuxBackend) List(ctx context.Context) ([]domain.Device, error) {
 	}
 	var devices []domain.Device
 	for path, interfaces := range objects {
-		props, ok := interfaces["org.bluez.Device1"]
-		if !ok {
-			continue
+		if d, ok := deviceFromObject(path, interfaces); ok {
+			devices = append(devices, d)
 		}
-		address, _ := variant[string](props, "Address")
-		name, _ := variant[string](props, "Alias")
-		if name == "" {
-			name, _ = variant[string](props, "Name")
-		}
-		if name == "" {
-			name = address
-		}
-		paired, _ := variant[bool](props, "Paired")
-		connected, _ := variant[bool](props, "Connected")
-		rssi, hasRSSI := variant[int16](props, "RSSI")
-		uuids, _ := variant[[]string](props, "UUIDs")
-		d := domain.Device{ID: "bluez:" + address, Name: name, Paired: paired, Connected: connected, Services: uuids, Endpoints: []domain.Endpoint{{ID: string(path), Address: address, Transport: domain.TransportOS}}}
-		if hasRSSI {
-			d.RSSI = &rssi
-		}
-		devices = append(devices, d)
 	}
 	sort.Slice(devices, func(i, j int) bool { return devices[i].Name < devices[j].Name })
 	return devices, nil
+}
+
+// deviceFromObject reads a BlueZ device object. BlueZ adds a Battery1
+// interface for devices that report battery: HID devices, LE devices with the
+// Battery Service, and headsets through HFP.
+func deviceFromObject(path dbus.ObjectPath, interfaces map[string]map[string]dbus.Variant) (domain.Device, bool) {
+	props, ok := interfaces["org.bluez.Device1"]
+	if !ok {
+		return domain.Device{}, false
+	}
+	address, _ := variant[string](props, "Address")
+	name, _ := variant[string](props, "Alias")
+	if name == "" {
+		name, _ = variant[string](props, "Name")
+	}
+	if name == "" {
+		name = address
+	}
+	paired, _ := variant[bool](props, "Paired")
+	connected, _ := variant[bool](props, "Connected")
+	rssi, hasRSSI := variant[int16](props, "RSSI")
+	uuids, _ := variant[[]string](props, "UUIDs")
+	d := domain.Device{ID: "bluez:" + address, Name: name, Paired: paired, Connected: connected, Services: uuids, Endpoints: []domain.Endpoint{{ID: string(path), Address: address, Transport: domain.TransportOS}}}
+	if hasRSSI {
+		d.RSSI = &rssi
+	}
+	if percentage, ok := variant[byte](interfaces["org.bluez.Battery1"], "Percentage"); ok && percentage <= 100 {
+		raw, _ := json.Marshal(protocol.SingleBattery(protocol.BatteryComponent{Level: int(percentage)}))
+		d.Properties = map[string]domain.Property{"battery": {Value: raw, Unit: "%", Display: fmt.Sprintf("%d%%", percentage)}}
+		d.Capabilities = map[string]domain.DeviceCapability{"battery": {Status: domain.StatusAvailable, Kind: domain.KindBattery, Readable: true}}
+	}
+	return d, true
 }
 
 func (b *linuxBackend) Pair(ctx context.Context, d domain.Device) error {

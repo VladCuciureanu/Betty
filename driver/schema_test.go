@@ -41,6 +41,7 @@ var schemaRoots = []any{
 	L2CAPOpenParams{}, L2CAPReadParams{}, L2CAPWriteParams{}, L2CAPChannelParams{},
 	RFCOMMOpenParams{}, RFCOMMReadParams{}, RFCOMMWriteParams{}, RFCOMMChannelParams{},
 	StorageGetParams{}, StorageSetParams{},
+	GATTServicesParams{}, GATTCharacteristicParams{}, GATTWriteParams{}, GATTNextParams{}, GATTSubscriptionParams{},
 }
 
 func TestProtocolSchema(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/vladcuciureanu/betty/internal/btsock"
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/driver"
 )
@@ -179,7 +180,7 @@ func formatAddress(address uint64) string {
 	return b.String()
 }
 
-func (h *windowsHost) ReadL2CAP(ctx context.Context, channelID string, max int) ([]byte, error) {
+func (h *windowsHost) ReadL2CAP(ctx context.Context, channelID string, maxBytes int) ([]byte, error) {
 	channel, err := h.channel(channelID)
 	if err != nil {
 		return nil, err
@@ -191,12 +192,12 @@ func (h *windowsHost) ReadL2CAP(ctx context.Context, channelID string, max int) 
 			return nil, ctx.Err()
 		}
 		if remaining < 5*time.Second {
-			timeout = uint32(maxDuration(remaining, time.Millisecond).Milliseconds())
+			timeout = uint32(max(remaining, time.Millisecond).Milliseconds())
 		}
 	}
 	input := make([]byte, 4)
 	binary.LittleEndian.PutUint32(input, timeout)
-	output := make([]byte, max)
+	output := make([]byte, maxBytes)
 	channel.mu.Lock()
 	n, err := ioctl(channel.handle, ioctlReceive, input, output)
 	channel.mu.Unlock()
@@ -268,16 +269,8 @@ func (h *windowsHost) channel(id string) (*windowsChannel, error) {
 }
 
 func windowsAddress(deviceID string) (uint64, error) {
-	value := strings.TrimPrefix(deviceID, "windows:")
-	value = strings.NewReplacer(":", "", "-", "").Replace(value)
-	if len(value) != 12 {
-		return 0, domain.NewError(domain.CodeUsage, "device %q has no Windows Classic address", deviceID)
-	}
-	address, err := strconv.ParseUint(value, 16, 48)
-	if err != nil {
-		return 0, domain.NewError(domain.CodeUsage, "device %q has an invalid Bluetooth address", deviceID)
-	}
-	return address, nil
+	address, err := btsock.ParseAddress(deviceID, "windows:")
+	return btsock.Uint64(address), err
 }
 
 func airPodsDriverPaths() ([]string, error) {
@@ -348,9 +341,3 @@ func ioctl(handle syscall.Handle, code uint32, input, output []byte) (int, error
 	return int(returned), nil
 }
 
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}

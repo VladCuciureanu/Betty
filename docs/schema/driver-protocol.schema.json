@@ -22,14 +22,20 @@
         "case": {
           "$ref": "#/$defs/BatteryComponent"
         },
-        "headset": {
-          "$ref": "#/$defs/BatteryComponent"
+        "charging": {
+          "type": "boolean"
         },
         "left": {
           "$ref": "#/$defs/BatteryComponent"
         },
+        "level": {
+          "type": "integer"
+        },
         "right": {
           "$ref": "#/$defs/BatteryComponent"
+        },
+        "status": {
+          "type": "string"
         }
       },
       "type": "object"
@@ -208,6 +214,85 @@
       ],
       "type": "string"
     },
+    "GATTCharacteristicParams": {
+      "properties": {
+        "characteristic_uuid": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "service_uuid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "characteristic_uuid"
+      ],
+      "type": "object"
+    },
+    "GATTNextParams": {
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "GATTServicesParams": {
+      "properties": {
+        "device_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id"
+      ],
+      "type": "object"
+    },
+    "GATTSubscriptionParams": {
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "GATTWriteParams": {
+      "properties": {
+        "characteristic_uuid": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "service_uuid": {
+          "type": "string"
+        },
+        "without_response": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device_id",
+        "characteristic_uuid",
+        "data"
+      ],
+      "type": "object"
+    },
     "Identification": {
       "properties": {
         "confidence": {
@@ -300,6 +385,9 @@
         "id": {
           "type": "string"
         },
+        "match": {
+          "$ref": "#/$defs/Match"
+        },
         "name": {
           "type": "string"
         },
@@ -341,6 +429,30 @@
         "company_id",
         "data"
       ],
+      "type": "object"
+    },
+    "Match": {
+      "properties": {
+        "company_ids": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "name_contains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "service_uuids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "Message": {

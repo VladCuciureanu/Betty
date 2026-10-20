@@ -6,27 +6,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 
+	"github.com/vladcuciureanu/betty/internal/btsock"
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/driver"
 	"golang.org/x/sys/unix"
 )
 
 type linuxHost struct {
-	mu       sync.Mutex
-	channels map[string]int
-	next     atomic.Uint64
+	channels *btsock.Channels
 }
 
-func New() driver.Host { return &linuxHost{channels: map[string]int{}} }
+func New() driver.Host { return &linuxHost{channels: btsock.NewChannels("L2CAP", "linux-")} }
 
 func (h *linuxHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16) (string, error) {
-	address, err := linuxAddress(deviceID)
+	address, err := btsock.ParseAddress(deviceID, "bluez:")
 	if err != nil {
 		return "", err
 	}
@@ -37,147 +31,42 @@ func (h *linuxHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16) 
 		}
 		return "", fmt.Errorf("open Linux L2CAP socket: %w", err)
 	}
-	ok := false
-	defer func() {
-		if !ok {
-			_ = unix.Close(fd)
-		}
-	}()
-	err = unix.Connect(fd, &unix.SockaddrL2{PSM: psm, Addr: address})
-	if err != nil && !errors.Is(err, unix.EINPROGRESS) {
-		return "", fmt.Errorf("connect Linux L2CAP PSM 0x%04x: %w", psm, err)
-	}
-	if err != nil {
-		if err = waitFD(ctx, fd, unix.POLLOUT); err != nil {
+	// unix.SockaddrL2 takes the address in display order.
+	if err := btsock.Connect(ctx, fd, &unix.SockaddrL2{PSM: psm, Addr: address}); err != nil {
+		_ = unix.Close(fd)
+		if ctx.Err() != nil {
 			return "", err
 		}
-		socketErr, getErr := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_ERROR)
-		if getErr != nil {
-			return "", getErr
-		}
-		if socketErr != 0 {
-			return "", fmt.Errorf("connect Linux L2CAP PSM 0x%04x: %w", psm, unix.Errno(socketErr))
-		}
+		return "", fmt.Errorf("connect Linux L2CAP PSM 0x%04x: %w", psm, err)
 	}
-	id := "linux-" + strconv.FormatUint(h.next.Add(1), 10)
-	h.mu.Lock()
-	h.channels[id] = fd
-	h.mu.Unlock()
-	ok = true
-	return id, nil
+	return h.channels.Add(fd), nil
 }
 
 func (h *linuxHost) ReadL2CAP(ctx context.Context, channelID string, max int) ([]byte, error) {
-	fd, err := h.fd(channelID)
-	if err != nil {
-		return nil, err
-	}
-	for {
-		buffer := make([]byte, max)
-		n, err := unix.Read(fd, buffer)
-		if err == nil {
-			// SOCK_SEQPACKET never delivers empty packets: 0 means the peer
-			// closed the channel.
-			if n == 0 {
-				return nil, domain.NewError(domain.CodeDisconnected, "L2CAP channel closed by the device")
-			}
-			return buffer[:n], nil
+	var data []byte
+	err := h.channels.Use(channelID, func(fd int) error {
+		var err error
+		data, err = btsock.Read(ctx, fd, max)
+		// SOCK_SEQPACKET never delivers empty packets, so zero bytes means
+		// the peer closed the channel.
+		if errors.Is(err, btsock.ErrPeerClosed) {
+			return domain.NewError(domain.CodeDisconnected, "L2CAP channel closed by the device")
 		}
-		if !errors.Is(err, unix.EAGAIN) {
-			return nil, err
-		}
-		if err := waitFD(ctx, fd, unix.POLLIN); err != nil {
-			return nil, err
-		}
-	}
+		return err
+	})
+	return data, err
 }
 
 func (h *linuxHost) WriteL2CAP(ctx context.Context, channelID string, data []byte) (int, error) {
-	fd, err := h.fd(channelID)
-	if err != nil {
-		return 0, err
-	}
-	for {
-		n, err := unix.Write(fd, data)
-		if err == nil {
-			return n, nil
-		}
-		if !errors.Is(err, unix.EAGAIN) {
-			return 0, err
-		}
-		if err := waitFD(ctx, fd, unix.POLLOUT); err != nil {
-			return 0, err
-		}
-	}
+	var written int
+	err := h.channels.Use(channelID, func(fd int) error {
+		var err error
+		written, err = btsock.Write(ctx, fd, data)
+		return err
+	})
+	return written, err
 }
 
 func (h *linuxHost) CloseL2CAP(_ context.Context, channelID string) error {
-	h.mu.Lock()
-	fd, ok := h.channels[channelID]
-	if ok {
-		delete(h.channels, channelID)
-	}
-	h.mu.Unlock()
-	if !ok {
-		return domain.NewError(domain.CodeNotFound, "L2CAP channel %q is not open", channelID)
-	}
-	return unix.Close(fd)
-}
-
-func (h *linuxHost) fd(id string) (int, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	fd, ok := h.channels[id]
-	if !ok {
-		return 0, domain.NewError(domain.CodeNotFound, "L2CAP channel %q is not open", id)
-	}
-	return fd, nil
-}
-
-func linuxAddress(deviceID string) ([6]byte, error) {
-	var out [6]byte
-	value := strings.TrimPrefix(deviceID, "bluez:")
-	value = strings.ReplaceAll(value, "-", ":")
-	parts := strings.Split(value, ":")
-	if len(parts) != 6 {
-		return out, domain.NewError(domain.CodeUsage, "device %q has no Linux Classic address", deviceID)
-	}
-	for i, part := range parts {
-		n, err := strconv.ParseUint(part, 16, 8)
-		if err != nil {
-			return out, domain.NewError(domain.CodeUsage, "device %q has an invalid Bluetooth address", deviceID)
-		}
-		out[i] = byte(n)
-	}
-	return out, nil
-}
-
-func waitFD(ctx context.Context, fd int, events int16) error {
-	for {
-		timeout := 200
-		if deadline, ok := ctx.Deadline(); ok {
-			remaining := timeUntil(deadline)
-			if remaining <= 0 {
-				return context.DeadlineExceeded
-			}
-			// Round up: truncating a sub-millisecond remainder to 0 would
-			// return before the deadline with ctx.Err() still nil, and the
-			// caller would treat a still-connecting socket as ready.
-			if ms := int((remaining + time.Millisecond - 1) / time.Millisecond); ms < timeout {
-				timeout = ms
-			}
-		}
-		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: events}}, timeout)
-		if err != nil && !errors.Is(err, unix.EINTR) {
-			return err
-		}
-		if n > 0 {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
+	return h.channels.Close(channelID)
 }

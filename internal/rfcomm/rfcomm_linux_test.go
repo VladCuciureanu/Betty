@@ -5,6 +5,8 @@ package rfcomm
 import (
 	"encoding/binary"
 	"testing"
+
+	"github.com/vladcuciureanu/betty/internal/btsock"
 )
 
 func TestServiceAttributeRequestContainsUUIDAndContinuation(t *testing.T) {
@@ -40,22 +42,11 @@ func TestParseServiceAttributeResponse(t *testing.T) {
 }
 
 func TestRFCOMMAddressIsLittleEndian(t *testing.T) {
-	address, err := bluetoothAddress("bluez:F0:E2:09:00:00:01")
+	address, err := btsock.ParseAddress("bluez:F0:E2:09:00:00:01", "bluez:")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := rfcommAddress(address); got != [6]byte{0x01, 0x00, 0x00, 0x09, 0xE2, 0xF0} {
 		t.Fatalf("rfcommAddress=% x", got)
-	}
-}
-
-func TestBluetoothAddress(t *testing.T) {
-	got, err := bluetoothAddress("bluez:50-F3-51-CE-C5-60")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := [6]byte{0x50, 0xf3, 0x51, 0xce, 0xc5, 0x60}
-	if got != want {
-		t.Fatalf("address=%x want=%x", got, want)
 	}
 }

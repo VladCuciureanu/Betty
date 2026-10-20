@@ -1,7 +1,11 @@
 // Package driver defines Betty's versioned external-driver wire protocol.
 package driver
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 const Version = 1
 
@@ -11,6 +15,23 @@ type Manifest struct {
 	Name        string   `json:"name"`
 	Version     string   `json:"version"`
 	Permissions []string `json:"permissions,omitempty"`
+	// Match, when set, limits the requests Betty sends this driver to those
+	// with a device it may recognize. Without it the driver gets every
+	// request.
+	Match *Match `json:"match,omitempty"`
+}
+
+// Match lists cheap hints about the devices a driver recognizes. A device
+// matches when any one hint does. Hints only decide whether Betty starts the
+// driver; the driver still receives every device in the request.
+type Match struct {
+	// CompanyIDs are Bluetooth SIG company identifiers in manufacturer data.
+	CompanyIDs []uint16 `json:"company_ids,omitempty"`
+	// ServiceUUIDs are advertised or SDP service UUIDs, or service-data
+	// UUIDs, as 16-bit ("180f") or 128-bit UUIDs.
+	ServiceUUIDs []string `json:"service_uuids,omitempty"`
+	// NameContains are case-insensitive substrings of the device name.
+	NameContains []string `json:"name_contains,omitempty"`
 }
 type Request struct {
 	Protocol int             `json:"protocol"`
@@ -69,6 +90,13 @@ const (
 	HostRFCOMMClose = "rfcomm.close"
 	HostStorageGet  = "storage.get"
 	HostStorageSet  = "storage.set"
+
+	HostGATTServices    = "gatt.services"
+	HostGATTRead        = "gatt.read"
+	HostGATTWrite       = "gatt.write"
+	HostGATTSubscribe   = "gatt.subscribe"
+	HostGATTNext        = "gatt.next"
+	HostGATTUnsubscribe = "gatt.unsubscribe"
 )
 
 type Device struct {
@@ -110,13 +138,52 @@ type Property struct {
 	Resolution int             `json:"resolution,omitempty"`
 }
 
-// BatteryValue is the schema-version-1 object form of the standard battery
-// property. A single-component device may instead expose a JSON number.
+// BatteryValue is the value of the standard battery property. A device with
+// one battery sets Level, and optionally Charging and Status, which mean the
+// same as in a BatteryComponent. A device with independently reported parts
+// sets Left, Right and Case instead. Unavailable parts are left nil; never
+// report them as 0%.
 type BatteryValue struct {
-	Headset *BatteryComponent `json:"headset,omitempty"`
-	Left    *BatteryComponent `json:"left,omitempty"`
-	Right   *BatteryComponent `json:"right,omitempty"`
-	Case    *BatteryComponent `json:"case,omitempty"`
+	Level    *int              `json:"level,omitempty"`
+	Charging bool              `json:"charging,omitempty"`
+	Status   string            `json:"status,omitempty"`
+	Left     *BatteryComponent `json:"left,omitempty"`
+	Right    *BatteryComponent `json:"right,omitempty"`
+	Case     *BatteryComponent `json:"case,omitempty"`
+}
+
+// SingleBattery returns the value of a device with one battery.
+func SingleBattery(component BatteryComponent) BatteryValue {
+	level := component.Level
+	return BatteryValue{Level: &level, Charging: component.Charging, Status: component.Status}
+}
+
+// Display renders the value for people, for example "80% charging" or
+// "left 89% · right 88% · case 42%".
+func (v BatteryValue) Display() string {
+	part := func(name string, level int, charging bool) string {
+		value := fmt.Sprintf("%d%%", level)
+		if name != "" {
+			value = name + " " + value
+		}
+		if charging {
+			value += " charging"
+		}
+		return value
+	}
+	var parts []string
+	if v.Level != nil {
+		parts = append(parts, part("", *v.Level, v.Charging))
+	}
+	for _, component := range []struct {
+		name  string
+		value *BatteryComponent
+	}{{"left", v.Left}, {"right", v.Right}, {"case", v.Case}} {
+		if component.value != nil {
+			parts = append(parts, part(component.name, component.value.Level, component.value.Charging))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 type BatteryComponent struct {
@@ -178,6 +245,41 @@ type RFCOMMWriteParams struct {
 	ChannelID string `json:"channel_id"`
 	Data      string `json:"data"`
 }
+
+// GATTServicesParams names the device whose GATT services to list.
+type GATTServicesParams struct {
+	DeviceID string `json:"device_id"`
+}
+
+// GATTService is one service in a gatt.services result.
+type GATTService struct {
+	UUID            string   `json:"uuid"`
+	Characteristics []string `json:"characteristics"`
+}
+
+// GATTCharacteristicParams selects a characteristic. ServiceUUID is needed
+// only when the characteristic UUID appears in more than one service.
+type GATTCharacteristicParams struct {
+	DeviceID           string `json:"device_id"`
+	ServiceUUID        string `json:"service_uuid,omitempty"`
+	CharacteristicUUID string `json:"characteristic_uuid"`
+}
+
+type GATTWriteParams struct {
+	GATTCharacteristicParams
+	Data            string `json:"data"`
+	WithoutResponse bool   `json:"without_response,omitempty"`
+}
+
+type GATTNextParams struct {
+	SubscriptionID string `json:"subscription_id"`
+	TimeoutMS      int    `json:"timeout_ms,omitempty"`
+}
+
+type GATTSubscriptionParams struct {
+	SubscriptionID string `json:"subscription_id"`
+}
+
 type StorageGetParams struct {
 	Key string `json:"key"`
 }

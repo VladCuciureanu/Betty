@@ -40,7 +40,7 @@ type TinyGo struct {
 	disconnects map[string][]chan struct{}
 }
 
-func New() Client { return &TinyGo{adapter: bluetooth.DefaultAdapter} }
+func New() *TinyGo { return &TinyGo{adapter: bluetooth.DefaultAdapter} }
 
 func (b *TinyGo) enable() error {
 	b.once.Do(func() {

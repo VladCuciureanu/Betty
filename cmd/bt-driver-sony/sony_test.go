@@ -19,13 +19,13 @@ func TestSonyFrameRoundTripAndFragmentation(t *testing.T) {
 	payload := []byte{0x23, 0x00, 89, 1, 0x3c, 0x3d, 0x3e}
 	encoded := encodeSonyFrame(sonyDataMDR, 1, payload)
 	var stream sonyStream
-	frames, err := stream.push(encoded[:4])
-	if err != nil || len(frames) != 0 {
-		t.Fatalf("first push frames=%v err=%v", frames, err)
+	frames, dropped := stream.push(encoded[:4])
+	if dropped != 0 || len(frames) != 0 {
+		t.Fatalf("first push frames=%v dropped=%d", frames, dropped)
 	}
-	frames, err = stream.push(encoded[4:])
-	if err != nil || len(frames) != 1 {
-		t.Fatalf("second push frames=%v err=%v", frames, err)
+	frames, dropped = stream.push(encoded[4:])
+	if dropped != 0 || len(frames) != 1 {
+		t.Fatalf("second push frames=%v dropped=%d", frames, dropped)
 	}
 	if frames[0].DataType != sonyDataMDR || frames[0].Sequence != 1 || !bytes.Equal(frames[0].Payload, payload) {
 		t.Fatalf("frame=%#v", frames[0])
@@ -35,14 +35,51 @@ func TestSonyFrameRoundTripAndFragmentation(t *testing.T) {
 func TestSonyFrameRejectsChecksum(t *testing.T) {
 	encoded := encodeSonyFrame(sonyDataMDR, 0, []byte{0x22, 0x00})
 	encoded[len(encoded)-2] ^= 1
-	if _, err := (&sonyStream{}).push(encoded); err == nil {
-		t.Fatal("expected checksum error")
+	if frames, dropped := (&sonyStream{}).push(encoded); len(frames) != 0 || dropped != 1 {
+		t.Fatalf("frames=%v dropped=%d", frames, dropped)
+	}
+}
+
+func TestSonyStreamResynchronizesAfterCorruptFrames(t *testing.T) {
+	good := encodeSonyFrame(sonyDataMDR, 1, []byte{0x23, 0x00, 89, 1})
+	corrupt := encodeSonyFrame(sonyDataMDR, 0, []byte{0x22, 0x00})
+	corrupt[len(corrupt)-2] ^= 1
+	truncated := encodeSonyFrame(sonyDataMDR, 0, []byte{0x24, 0x00})
+	truncated = truncated[:len(truncated)-1] // its end byte was lost
+	var data []byte
+	data = append(data, 0x00, 0x01) // noise before any frame
+	data = append(data, corrupt...)
+	data = append(data, truncated...)
+	data = append(data, good...)
+	var stream sonyStream
+	frames, dropped := stream.push(data)
+	if len(frames) != 1 || frames[0].Payload[0] != 0x23 {
+		t.Fatalf("frames=%#v", frames)
+	}
+	if dropped != 3 {
+		t.Fatalf("dropped=%d, want the noise, the corrupt frame and the truncated one", dropped)
+	}
+	// The stream keeps working afterwards, including across reads.
+	if frames, dropped = stream.push(good[:3]); len(frames) != 0 || dropped != 0 {
+		t.Fatalf("frames=%v dropped=%d", frames, dropped)
+	}
+	if frames, dropped = stream.push(good[3:]); len(frames) != 1 || dropped != 0 {
+		t.Fatalf("frames=%v dropped=%d", frames, dropped)
+	}
+}
+
+func TestSonyStreamBoundsAnUnterminatedFrame(t *testing.T) {
+	var stream sonyStream
+	stream.push([]byte{0x3e})
+	_, dropped := stream.push(bytes.Repeat([]byte{0x01}, maxSonyBuffer))
+	if dropped != 1 || len(stream.buffer) != 0 {
+		t.Fatalf("dropped=%d buffered=%d", dropped, len(stream.buffer))
 	}
 }
 
 func TestParseSonyBattery(t *testing.T) {
 	single, err := parseSonyBattery(0x00, []byte{0x23, 0x00, 89, 1})
-	if err != nil || single.Headset == nil || single.Headset.Level != 89 || !single.Headset.Charging {
+	if err != nil || single.Level == nil || *single.Level != 89 || !single.Charging {
 		t.Fatalf("single=%#v err=%v", single, err)
 	}
 	buds, err := parseSonyBattery(0x09, []byte{0x23, 0x09, 88, 0, 76, 1})
