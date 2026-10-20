@@ -1,5 +1,7 @@
 <Project Sdk="WixToolset.Sdk/7.0.0">
   <PropertyGroup>
+    <!-- The project owner accepted the WiX v7 Open Source Maintenance Fee EULA. -->
+    <AcceptEula>wix7</AcceptEula>
     <OutputType>Package</OutputType>
     <Platform>x64</Platform>
     <InstallerPlatform>x64</InstallerPlatform>

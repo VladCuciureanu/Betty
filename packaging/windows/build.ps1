@@ -21,6 +21,10 @@ if ($msiVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
 }
 $driverVersion = $msiVersion
 while ($driverVersion.Split('.').Count -lt 4) { $driverVersion += ".0" }
+if (-not $BaseOnly -and -not $MicrosoftSignedDriverDir -and $driverVersion -eq "0.0.0.0") {
+    # InfVerif rejects an all-zero DriverVer.
+    throw "Version 0.0.0 cannot be stamped into the driver INF; use 0.0.1 or later"
+}
 
 New-Item -ItemType Directory -Force $payload, $driverOutput, $obj, $msiOutput | Out-Null
 Get-ChildItem $msiOutput -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
@@ -50,8 +54,22 @@ if (-not $BaseOnly) {
         if ($RequireMicrosoftDriverSignature) {
             throw "A Microsoft Hardware Dev Center-signed driver package is required for the Advanced Support MSI"
         }
-        msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
+        # The WDK's InfVerif task needs a 64-bit MSBuild: the x64 WDK package
+        # has no x86 InfVerif.dll. Prefer the amd64 MSBuild next to an x86 one.
+        $msbuild = (Get-Command msbuild -ErrorAction Stop).Source
+        $msbuild64 = Join-Path (Split-Path $msbuild) "amd64\MSBuild.exe"
+        if ((Split-Path (Split-Path $msbuild) -Leaf) -notin @("amd64", "arm64") -and (Test-Path $msbuild64)) {
+            $msbuild = $msbuild64
+        }
+        & $msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
         if ($LASTEXITCODE -ne 0) { throw "WDK driver build failed" }
+        # The WDK writes the driver package, with its catalog, to a subfolder.
+        $package = Join-Path $driverOutput "BettyAAP"
+        foreach ($name in @("BettyAAP.inf", "BettyAAP.sys", "BettyAAP.cat")) {
+            $source = Join-Path $package $name
+            if (-not (Test-Path $source)) { throw "WDK driver package is missing $name" }
+            Copy-Item $source (Join-Path $driverOutput $name) -Force
+        }
     }
 }
 
