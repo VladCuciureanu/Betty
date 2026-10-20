@@ -40,7 +40,7 @@ same way.
 
 | Platform | Link | How | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| Linux / BlueZ | Virtual (`/dev/vhci`) | CI, every pull request | Not run yet | — |
+| Linux / BlueZ 5.72 | Virtual (`/dev/vhci`), Ubuntu generic kernel in a VM | CI, every pull request | Scan, GATT read/write/notify, property watch, link drop, ambiguity, pairing, refused pairing, unpairing pass. Classic connect and Sony battery are skipped: the virtual controller cannot re-authenticate a paired device. | `.github/workflows/e2e-linux.yml` |
 | Windows | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
 | macOS | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
 

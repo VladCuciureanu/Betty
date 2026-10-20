@@ -154,6 +154,30 @@ Beyond the "Fix first" items:
   Windows `SO_RCVTIMEO` retries, macOS RFCOMM's asynchronous SDP query or
   the duplicated `waitFD` helpers. They remain as listed above.
 
+### Found by the end-to-end suite
+
+Running `bt` against scripted devices on Linux (see [e2e/README.md](e2e/README.md))
+found four bugs that unit tests could not, all fixed with the suite:
+
+- **Fixed.** The BLE half of every Linux scan failed with "Operation already
+  in progress": the backend and the BLE library shared godbus's system-bus
+  connection, and BlueZ allows one discovery per D-Bus client.
+- **Fixed.** `bt pair` could not find a new Classic device on Linux: the
+  lookup scan stopped after 4s, before BlueZ's discovery reaches Classic
+  inquiry. It now scans for up to 8s.
+- **Fixed.** Every RFCOMM connection on Linux went to the byte-reversed
+  address: `unix.SockaddrRFCOMM` expects little-endian order, while
+  `unix.SockaddrL2` reverses display order itself. The Sony driver could not
+  reach real headphones on Linux.
+- **Fixed.** The Sony driver reported only its last failed RFCOMM attempt,
+  hiding the informative one.
+
+The suite also confirms on Linux, through BlueZ: GATT reads, writes in both
+modes, and notifications; property `watch`; a dropped link ending a GATT watch
+with `device_disconnected`; duplicate names being ambiguous; and a refused
+pairing reporting `authentication_failed`. Classic `connect` and the Sony
+driver still need an over-the-air run (Windows, macOS) or real hardware.
+
 ## Documentation claims
 
 FALSE or misleading claims that users or integrators would act on:
