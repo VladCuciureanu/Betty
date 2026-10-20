@@ -48,7 +48,7 @@ than rough.
 | 7 | **Fixed.** ✓ **A cancelled BLE connect leaks a live connection.** The connect goroutine keeps running and nobody disconnects its result. | `internal/ble/ble.go:124` |
 | 8 | **Fixed.** ✓ **The driver host can leak or hang child processes.** Early returns skip `cmd.Wait()`. The host never drains stdout or sets `WaitDelay`. There's no per-driver timeout, so one slow driver uses up the whole command's time. Reads from drivers have no size limit. (A reviewer also said `bt watch` has no deadline; that was wrong, because each watch round runs under `--timeout`.) | `internal/driver/manager.go` `call` |
 | 9 | **Fixed.** ✓ **The driver host accepts any non-host message as the final response.** `type` and `id` are never checked, so a stray line ends the session as an empty success. | `internal/driver/manager.go` `call` |
-| 10 | ✓ **Apple encrypted-battery decryption accepts wrong keys** about 2 times in 256 per key. Keys saved with `ModelID` 0 match every model, so a nearby stranger's AirPods can show an "exact" random battery value. | `cmd/bt-driver-apple-audio/keys.go:83` |
+| 10 | **Fixed** (a key applies only if its IRK resolves the advertiser's private address, where visible, and its decrypted levels agree with the advertisement's unencrypted estimates). ✓ **Apple encrypted-battery decryption accepts wrong keys** about 2 times in 256 per key. Keys saved with `ModelID` 0 match every model, so a nearby stranger's AirPods can show an "exact" random battery value. | `cmd/bt-driver-apple-audio/keys.go:83` |
 
 ## Findings by area
 
@@ -130,14 +130,14 @@ Medium:
 
 Beyond the "Fix first" items:
 
-- Storage read-modify-write has no file lock, so concurrent `bt` processes lose updates. The Apple driver also ignores a failed keyring load and then overwrites every stored key.
+- Storage read-modify-write has no file lock, so concurrent `bt` processes lose updates. **Fixed:** the Apple driver no longer saves over a keyring it failed to load; the missing lock remains.
 - Two concurrent installs can both pass the "already installed" check. (Install now also refuses an ID that a bundled or package-managed driver already provides, so it can't shadow one; the concurrency race remains.)
 - `handleHost` is 176 lines of near-identical L2CAP and RFCOMM branches, with permissions checked by hand-sliced string prefixes.
 - L2CAP and RFCOMM channels share one map keyed by a bare ID. Cleanup uses `context.Background()`, so it can block forever.
-- ✓ Sony `get battery` reports `sonyCapabilities` instead of `sonyCapabilitiesFor`. With controls enabled, `noise_control` reverts to "planned". The bug predates the SDK port, which carried it over.
+- **Fixed.** ✓ Sony `get battery` reports `sonyCapabilities` instead of `sonyCapabilitiesFor`. With controls enabled, `noise_control` reverts to "planned". The bug predates the SDK port, which carried it over.
 - The Sony frame stream gives up at the first bad frame, and its ACK handling recurses.
-- The Apple driver duplicates its AAP handshake across two functions. It isn't on the SDK yet; the port is done in a separate session.
-- The darwin build needs cgo: the stub for `systemAppleAudioKeys` should be tagged `!darwin || !cgo`.
+- **Fixed.** The Apple driver duplicated its AAP handshake across two functions; both now use one session type. The driver is on the SDK. A noise-control write also waits for the device to report the requested mode instead of failing on the first report of the old one, and no longer reports success without writing when a device skips feature negotiation.
+- **Fixed.** The darwin build needs cgo: the stub for `systemAppleAudioKeys` should be tagged `!darwin || !cgo`.
 - The storage-key regex is recompiled on every call. The number of storage keys is unlimited. `ImportState` reads the whole file before checking its size.
 
 ### Still open after the backend fixes
