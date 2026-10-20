@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -201,6 +202,14 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	p.do(map[string]any{"cmd": "connect_host", "device": 0})
 	waitConnected(t, address)
 
+	if virtual() {
+		t.Cleanup(func() {
+			if t.Failed() {
+				output, _ := exec.Command("bluetoothctl", "info", address).CombinedOutput()
+				t.Logf("BlueZ's view of the headset:\n%s", output)
+			}
+		})
+	}
 	var battery property
 	ok(t, &battery, "get", address, "battery")
 	if string(battery.Value) != `{"headset":{"level":73}}` {
