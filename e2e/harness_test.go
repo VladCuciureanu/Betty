@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -374,9 +375,11 @@ type prefixWriter struct {
 	prefix string
 }
 
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
 func (w *prefixWriter) Write(p []byte) (int, error) {
 	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
-		if line != "" && !strings.Contains(line, "\x1b[") && !strings.Contains(line, "secure_connections_host_support") {
+		if line = ansiEscape.ReplaceAllString(line, ""); line != "" {
 			w.t.Log(w.prefix + line)
 		}
 	}

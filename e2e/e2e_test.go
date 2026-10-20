@@ -195,6 +195,7 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	t.Setenv("BETTY_DRIVER_DIR", drivers)
 	ok(t, nil, "driver", "install", filepath.Join(binDir, executable("bt-driver-sony")))
 
+	t.Setenv("BETTY_PEER_LOG", "DEBUG")
 	p := startPeer(t, "sony:WH-1000XM5")
 	address := p.device(0).Address
 	ok(t, nil, "pair", address)

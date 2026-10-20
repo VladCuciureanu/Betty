@@ -250,7 +250,6 @@ class Keyboard(_Classic):
 
     def setup_classic(self) -> None:
         self.hid = hid.Device(self.device)
-        self.hid.on(self.hid.EVENT_INTERRUPT_CHANNEL_OPEN, lambda: self._event("hid_connected"))
         self.device.sdp_service_records = {_SDP_HANDLE: _hid_sdp_records(_SDP_HANDLE, self.name)}
 
 
