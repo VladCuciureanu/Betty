@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,20 +34,19 @@ const (
 )
 
 var (
-	ws2             = syscall.NewLazyDLL("ws2_32.dll")
-	wsaStartup      = ws2.NewProc("WSAStartup")
-	wsaSocketW      = ws2.NewProc("WSASocketW")
-	wsaConnect      = ws2.NewProc("connect")
-	wsaRecv         = ws2.NewProc("recv")
-	wsaSend         = ws2.NewProc("send")
-	wsaCloseSocket  = ws2.NewProc("closesocket")
-	wsaSetSockOpt   = ws2.NewProc("setsockopt")
-	wsaGetSockOpt   = ws2.NewProc("getsockopt")
-	wsaIOCtlSocket  = ws2.NewProc("ioctlsocket")
-	wsaSelect       = ws2.NewProc("select")
-	wsaGetLastError = ws2.NewProc("WSAGetLastError")
-	wsaInitOnce     sync.Once
-	wsaInitErr      error
+	ws2            = syscall.NewLazyDLL("ws2_32.dll")
+	wsaStartup     = ws2.NewProc("WSAStartup")
+	wsaSocketW     = ws2.NewProc("WSASocketW")
+	wsaConnect     = ws2.NewProc("connect")
+	wsaRecv        = ws2.NewProc("recv")
+	wsaSend        = ws2.NewProc("send")
+	wsaCloseSocket = ws2.NewProc("closesocket")
+	wsaSetSockOpt  = ws2.NewProc("setsockopt")
+	wsaGetSockOpt  = ws2.NewProc("getsockopt")
+	wsaIOCtlSocket = ws2.NewProc("ioctlsocket")
+	wsaSelect      = ws2.NewProc("select")
+	wsaInitOnce    sync.Once
+	wsaInitErr     error
 )
 
 type windowsGUID struct {
@@ -58,18 +56,27 @@ type windowsGUID struct {
 	Data4 [8]byte
 }
 
-type sockaddrBTH struct {
-	AddressFamily uint16
-	_             [6]byte
-	Address       uint64
-	Service       windowsGUID
-	Port          uint32
-	_             [4]byte
+// sockaddrBTHSize is sizeof(SOCKADDR_BTH). ws2bth.h declares it inside
+// #include <pshpack1.h>, so it is packed: addressFamily at 0, btAddr at 2,
+// serviceClassId at 10 and port at 26. A Go struct would pad btAddr to 8.
+const sockaddrBTHSize = 30
+
+func sockaddrBTH(address uint64, service windowsGUID, port uint32) [sockaddrBTHSize]byte {
+	var out [sockaddrBTHSize]byte
+	binary.LittleEndian.PutUint16(out[0:2], afBTH)
+	binary.LittleEndian.PutUint64(out[2:10], address)
+	binary.LittleEndian.PutUint32(out[10:14], service.Data1)
+	binary.LittleEndian.PutUint16(out[14:16], service.Data2)
+	binary.LittleEndian.PutUint16(out[16:18], service.Data3)
+	copy(out[18:26], service.Data4[:])
+	binary.LittleEndian.PutUint32(out[26:30], port)
+	return out
 }
 
+// fdSet mirrors fd_set; natural alignment pads Count before the SOCKET
+// array on 64-bit Windows, as the C struct does.
 type fdSet struct {
 	Count   uint32
-	_       [4]byte
 	Sockets [64]uintptr
 }
 
@@ -106,9 +113,12 @@ func (h *windowsHost) OpenRFCOMM(ctx context.Context, deviceID, serviceUUID stri
 	if err != nil {
 		return "", err
 	}
-	socket, _, _ := wsaSocketW.Call(afBTH, sockStream, bthProtoRFCOMM, 0, 0, 0)
+	// LazyProc.Call returns GetLastError (which WSAGetLastError wraps) as its
+	// third value, read on the same OS thread right after the call. A
+	// separate WSAGetLastError call could run on another thread.
+	socket, _, callErr := wsaSocketW.Call(afBTH, sockStream, bthProtoRFCOMM, 0, 0, 0)
 	if socket == socketError {
-		return "", winsockError("open RFCOMM socket", lastWinsockError())
+		return "", winsockError("open RFCOMM socket", callErr)
 	}
 	ok := false
 	defer func() {
@@ -121,18 +131,14 @@ func (h *windowsHost) OpenRFCOMM(ctx context.Context, deviceID, serviceUUID stri
 	}
 	// A zero port tells Winsock to resolve the remote RFCOMM channel from the
 	// service UUID through SDP. BT_PORT_ANY is only for server-side bind.
-	addressData := sockaddrBTH{AddressFamily: afBTH, Address: address, Service: service}
-	result, _, _ := wsaConnect.Call(socket, uintptr(unsafe.Pointer(&addressData)), unsafe.Sizeof(addressData))
-	connectErr := error(nil)
+	addressData := sockaddrBTH(address, service, 0)
+	result, _, connectErr := wsaConnect.Call(socket, uintptr(unsafe.Pointer(&addressData[0])), sockaddrBTHSize)
 	if result == socketError {
-		connectErr = lastWinsockError()
-	}
-	if result == socketError && !errors.Is(connectErr, wsaWouldBlock) {
-		return "", winsockError("connect RFCOMM service", connectErr)
-	}
-	if result == socketError {
-		if err := waitWritable(ctx, socket); err != nil {
-			return "", fmt.Errorf("connect RFCOMM service %s: %w", serviceUUID, err)
+		if !errors.Is(connectErr, wsaWouldBlock) {
+			return "", winsockError("connect RFCOMM service", connectErr)
+		}
+		if err := waitConnected(ctx, socket); err != nil {
+			return "", err
 		}
 	}
 	if err := setNonblocking(socket, false); err != nil {
@@ -164,14 +170,13 @@ func (h *windowsHost) ReadRFCOMM(ctx context.Context, channelID string, max int)
 		if err := setSocketTimeout(channel.socket, soRecvTimeout, pollTimeout(ctx)); err != nil {
 			return nil, err
 		}
-		result, _, _ := wsaRecv.Call(channel.socket, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), 0)
+		result, _, callErr := wsaRecv.Call(channel.socket, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), 0)
 		if result != socketError {
 			if result == 0 {
-				return nil, fmt.Errorf("RFCOMM channel closed")
+				return nil, domain.NewError(domain.CodeDisconnected, "RFCOMM channel closed by the device")
 			}
 			return buffer[:int(result)], nil
 		}
-		callErr := lastWinsockError()
 		if errors.Is(callErr, wsaTimedOut) || errors.Is(callErr, wsaWouldBlock) {
 			continue
 		}
@@ -194,12 +199,11 @@ func (h *windowsHost) WriteRFCOMM(ctx context.Context, channelID string, data []
 		if err := setSocketTimeout(channel.socket, soSendTimeout, pollTimeout(ctx)); err != nil {
 			return written, err
 		}
-		result, _, _ := wsaSend.Call(channel.socket, uintptr(unsafe.Pointer(&data[written])), uintptr(len(data)-written), 0)
+		result, _, callErr := wsaSend.Call(channel.socket, uintptr(unsafe.Pointer(&data[written])), uintptr(len(data)-written), 0)
 		if result != socketError {
 			written += int(result)
 			continue
 		}
-		callErr := lastWinsockError()
 		if errors.Is(callErr, wsaTimedOut) || errors.Is(callErr, wsaWouldBlock) {
 			continue
 		}
@@ -218,9 +222,9 @@ func (h *windowsHost) CloseRFCOMM(_ context.Context, channelID string) error {
 	if !ok {
 		return domain.NewError(domain.CodeNotFound, "RFCOMM channel %q is not open", channelID)
 	}
-	result, _, _ := wsaCloseSocket.Call(channel.socket)
+	result, _, callErr := wsaCloseSocket.Call(channel.socket)
 	if result == socketError {
-		return winsockError("close RFCOMM channel", lastWinsockError())
+		return winsockError("close RFCOMM channel", callErr)
 	}
 	return nil
 }
@@ -246,30 +250,38 @@ func ensureWinsock() error {
 	return wsaInitErr
 }
 
-func waitWritable(ctx context.Context, socket uintptr) error {
+// waitConnected waits for a non-blocking connect to finish. Winsock signals
+// success through writefds but failure only through exceptfds, so watching
+// writefds alone turns a refused connect into a wait for the deadline.
+func waitConnected(ctx context.Context, socket uintptr) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return contextError(err)
 		}
-		set := fdSet{Count: 1}
-		set.Sockets[0] = socket
+		writable := fdSet{Count: 1}
+		writable.Sockets[0] = socket
+		failed := fdSet{Count: 1}
+		failed.Sockets[0] = socket
 		wait := pollTimeout(ctx)
 		tv := timeval{Sec: int32(wait / time.Second), Usec: int32((wait % time.Second) / time.Microsecond)}
-		result, _, _ := wsaSelect.Call(0, 0, uintptr(unsafe.Pointer(&set)), 0, uintptr(unsafe.Pointer(&tv)))
+		result, _, callErr := wsaSelect.Call(0, 0, uintptr(unsafe.Pointer(&writable)), uintptr(unsafe.Pointer(&failed)), uintptr(unsafe.Pointer(&tv)))
 		if result == socketError {
-			return winsockError("wait for RFCOMM connection", lastWinsockError())
+			return winsockError("wait for RFCOMM connection", callErr)
 		}
 		if result == 0 {
 			continue
 		}
 		var socketErr int32
 		length := int32(unsafe.Sizeof(socketErr))
-		result, _, _ = wsaGetSockOpt.Call(socket, solSocket, soError, uintptr(unsafe.Pointer(&socketErr)), uintptr(unsafe.Pointer(&length)))
+		result, _, callErr = wsaGetSockOpt.Call(socket, solSocket, soError, uintptr(unsafe.Pointer(&socketErr)), uintptr(unsafe.Pointer(&length)))
 		if result == socketError {
-			return winsockError("inspect RFCOMM connection", lastWinsockError())
+			return winsockError("inspect RFCOMM connection", callErr)
 		}
 		if socketErr != 0 {
 			return winsockError("connect RFCOMM service", syscall.Errno(socketErr))
+		}
+		if failed.Count != 0 {
+			return winsockError("connect RFCOMM service", errors.New("connection failed"))
 		}
 		return nil
 	}
@@ -280,9 +292,9 @@ func setNonblocking(socket uintptr, enabled bool) error {
 	if enabled {
 		value = 1
 	}
-	result, _, _ := wsaIOCtlSocket.Call(socket, fionbio, uintptr(unsafe.Pointer(&value)))
+	result, _, callErr := wsaIOCtlSocket.Call(socket, fionbio, uintptr(unsafe.Pointer(&value)))
 	if result == socketError {
-		return winsockError("configure RFCOMM socket", lastWinsockError())
+		return winsockError("configure RFCOMM socket", callErr)
 	}
 	return nil
 }
@@ -292,9 +304,9 @@ func setSocketTimeout(socket uintptr, option uintptr, timeout time.Duration) err
 	if milliseconds < 1 {
 		milliseconds = 1
 	}
-	result, _, _ := wsaSetSockOpt.Call(socket, solSocket, option, uintptr(unsafe.Pointer(&milliseconds)), unsafe.Sizeof(milliseconds))
+	result, _, callErr := wsaSetSockOpt.Call(socket, solSocket, option, uintptr(unsafe.Pointer(&milliseconds)), unsafe.Sizeof(milliseconds))
 	if result == socketError {
-		return winsockError("configure RFCOMM timeout", lastWinsockError())
+		return winsockError("configure RFCOMM timeout", callErr)
 	}
 	return nil
 }
@@ -346,11 +358,6 @@ func parseWindowsGUID(value string) (windowsGUID, error) {
 	return guid, nil
 }
 
-func lastWinsockError() error {
-	code, _, _ := wsaGetLastError.Call()
-	return syscall.Errno(code)
-}
-
 func winsockError(operation string, err error) error {
 	if errors.Is(err, syscall.Errno(10013)) {
 		return domain.NewError(domain.CodeAuthentication, "%s: Windows could not authenticate the Bluetooth service", operation)
@@ -361,7 +368,10 @@ func winsockError(operation string, err error) error {
 	if errors.Is(err, wsaTimedOut) {
 		return domain.NewError(domain.CodeTimeout, "%s timed out", operation)
 	}
-	return fmt.Errorf("%s: %w", operation, err)
+	if errors.Is(err, syscall.Errno(10061)) || errors.Is(err, syscall.Errno(10053)) || errors.Is(err, syscall.Errno(10054)) {
+		return domain.NewError(domain.CodeDisconnected, "%s: the device refused or closed the connection", operation)
+	}
+	return domain.NewError(domain.CodeUnavailable, "%s: %v", operation, err)
 }
 
 func maxDuration(a, b time.Duration) time.Duration {

@@ -3,8 +3,8 @@
 package rfcomm
 
 import (
+	"bytes"
 	"testing"
-	"unsafe"
 )
 
 func TestWindowsAddress(t *testing.T) {
@@ -27,8 +27,20 @@ func TestParseWindowsGUID(t *testing.T) {
 	}
 }
 
-func TestSockaddrBTHLayout(t *testing.T) {
-	if unsafe.Sizeof(sockaddrBTH{}) != 40 || unsafe.Offsetof(sockaddrBTH{}.Address) != 8 || unsafe.Offsetof(sockaddrBTH{}.Service) != 16 || unsafe.Offsetof(sockaddrBTH{}.Port) != 32 {
-		t.Fatalf("invalid SOCKADDR_BTH layout: size=%d address=%d service=%d port=%d", unsafe.Sizeof(sockaddrBTH{}), unsafe.Offsetof(sockaddrBTH{}.Address), unsafe.Offsetof(sockaddrBTH{}.Service), unsafe.Offsetof(sockaddrBTH{}.Port))
+func TestSockaddrBTHIsPacked(t *testing.T) {
+	guid, err := parseWindowsGUID("96cc203e-5068-46ad-b32d-e316f5e069ba")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := sockaddrBTH(0x50f351cec560, guid, 7)
+	want := []byte{
+		32, 0, // AF_BTH
+		0x60, 0xc5, 0xce, 0x51, 0xf3, 0x50, 0, 0, // btAddr at offset 2
+		0x3e, 0x20, 0xcc, 0x96, 0x68, 0x50, 0xad, 0x46, // GUID Data1-3, little-endian
+		0xb3, 0x2d, 0xe3, 0x16, 0xf5, 0xe0, 0x69, 0xba, // GUID Data4
+		7, 0, 0, 0, // port at offset 26
+	}
+	if !bytes.Equal(got[:], want) {
+		t.Fatalf("SOCKADDR_BTH=%x want=%x", got, want)
 	}
 }

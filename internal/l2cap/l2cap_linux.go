@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/driver"
@@ -75,6 +76,11 @@ func (h *linuxHost) ReadL2CAP(ctx context.Context, channelID string, max int) ([
 		buffer := make([]byte, max)
 		n, err := unix.Read(fd, buffer)
 		if err == nil {
+			// SOCK_SEQPACKET never delivers empty packets: 0 means the peer
+			// closed the channel.
+			if n == 0 {
+				return nil, domain.NewError(domain.CodeDisconnected, "L2CAP channel closed by the device")
+			}
 			return buffer[:n], nil
 		}
 		if !errors.Is(err, unix.EAGAIN) {
@@ -150,12 +156,15 @@ func waitFD(ctx context.Context, fd int, events int16) error {
 	for {
 		timeout := 200
 		if deadline, ok := ctx.Deadline(); ok {
-			remaining := int(timeUntil(deadline).Milliseconds())
+			remaining := timeUntil(deadline)
 			if remaining <= 0 {
-				return ctx.Err()
+				return context.DeadlineExceeded
 			}
-			if remaining < timeout {
-				timeout = remaining
+			// Round up: truncating a sub-millisecond remainder to 0 would
+			// return before the deadline with ctx.Err() still nil, and the
+			// caller would treat a still-connecting socket as ready.
+			if ms := int((remaining + time.Millisecond - 1) / time.Millisecond); ms < timeout {
+				timeout = ms
 			}
 		}
 		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: events}}, timeout)

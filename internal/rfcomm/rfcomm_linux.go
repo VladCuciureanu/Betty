@@ -67,7 +67,7 @@ func (h *host) ReadRFCOMM(ctx context.Context, channelID string, max int) ([]byt
 		n, err := unix.Read(fd, buffer)
 		if err == nil {
 			if n == 0 {
-				return nil, fmt.Errorf("RFCOMM channel closed")
+				return nil, domain.NewError(domain.CodeDisconnected, "RFCOMM channel closed by the device")
 			}
 			return buffer[:n], nil
 		}
@@ -309,12 +309,15 @@ func waitFD(ctx context.Context, fd int, events int16) error {
 	for {
 		timeout := 200
 		if deadline, ok := ctx.Deadline(); ok {
-			remaining := int(time.Until(deadline).Milliseconds())
+			remaining := time.Until(deadline)
 			if remaining <= 0 {
-				return ctx.Err()
+				return context.DeadlineExceeded
 			}
-			if remaining < timeout {
-				timeout = remaining
+			// Round up: truncating a sub-millisecond remainder to 0 would
+			// return before the deadline with ctx.Err() still nil, and the
+			// caller would treat a still-connecting socket as ready.
+			if ms := int((remaining + time.Millisecond - 1) / time.Millisecond); ms < timeout {
+				timeout = ms
 			}
 		}
 		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: events}}, timeout)
