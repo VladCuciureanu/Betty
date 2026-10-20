@@ -28,6 +28,9 @@ type Manager struct {
 	// OnInspectError, when set, receives each driver failure during inspect.
 	// Inspect failures never fail the command, so this is how they surface.
 	OnInspectError func(driverID string, err error)
+	// OnDriverLog, when set, receives each line a driver writes to stderr,
+	// up to 64 KiB per driver process. Otherwise stderr is discarded.
+	OnDriverLog func(driverID, line string)
 	host           Host
 	rfcomm         RFCOMMHost
 }

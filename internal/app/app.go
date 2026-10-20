@@ -44,6 +44,11 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		a.drivers.OnInspectError = func(id string, err error) {
 			a.render.Warn("driver %s failed to inspect devices: %v", id, err)
 		}
+		if a.opts.verbose {
+			a.drivers.OnDriverLog = func(id, line string) {
+				a.render.Debugf("driver %s: %s", id, line)
+			}
+		}
 	})
 }
 
