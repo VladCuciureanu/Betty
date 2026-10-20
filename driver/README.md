@@ -125,8 +125,8 @@ requests into `Driver.Run` and decode its output. See
 
 - [Sony Headphones](../cmd/bt-driver-sony): built on `driver.Serve`, using
   RFCOMM host calls.
-- [Apple Audio](../cmd/bt-driver-apple-audio): L2CAP and driver storage. It
-  still uses the lower-level `Session` API directly.
+- [Apple Audio](../cmd/bt-driver-apple-audio): built on `driver.Serve`, using
+  L2CAP and driver-storage host calls.
 
 ## Security status
 

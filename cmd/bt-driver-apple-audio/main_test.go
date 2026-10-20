@@ -4,18 +4,32 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"strings"
 	"testing"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
 
+// inspectDevices runs inspect with a host that refuses every call, so the
+// keyring is empty.
+func inspectDevices(t *testing.T, purpose string, devices ...protocol.Device) map[string]protocol.Enrichment {
+	t.Helper()
+	enrichments, err := inspect(protocol.NewSession(strings.NewReader(""), io.Discard), protocol.InspectRequest{Purpose: purpose, Devices: devices})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return enrichments
+}
+
 func TestInspectRecognizesAndCorrelatesUniqueAirPods(t *testing.T) {
 	devices := []protocol.Device{{ID: "classic", Name: "AirPods Pro", Connected: true}, {ID: "ble", Name: "uuid", ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "07190124202b998f110004446263ff09d489000000061e82f24d93"}}}}
-	response := inspect(protocol.NewSession(strings.NewReader(""), io.Discard), devices, "scan")
-	classic := response.Enrichments["classic"]
-	advertisement := response.Enrichments["ble"]
+	enrichments := inspectDevices(t, protocol.PurposeScan, devices...)
+	classic := enrichments["classic"]
+	advertisement := enrichments["ble"]
 	if advertisement.Identification == nil || advertisement.Identification.Model != "AirPods Pro (2nd generation, USB-C)" {
 		t.Fatalf("identification=%#v", advertisement.Identification)
 	}
@@ -33,9 +47,9 @@ func TestInspectRecognizesAndCorrelatesUniqueAirPods(t *testing.T) {
 
 func TestInspectDoesNotGuessWithMultipleAdvertisements(t *testing.T) {
 	payload := []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "07190124202b998f110004446263ff09d489000000061e82f24d93"}}
-	response := inspect(protocol.NewSession(strings.NewReader(""), io.Discard), []protocol.Device{{ID: "classic", Name: "AirPods", Connected: true}, {ID: "one", ManufacturerData: payload}, {ID: "two", ManufacturerData: payload}}, "scan")
-	if len(response.Enrichments["classic"].PossibleMatches) != 0 {
-		t.Fatalf("guessed match: %#v", response.Enrichments["classic"])
+	enrichments := inspectDevices(t, protocol.PurposeScan, protocol.Device{ID: "classic", Name: "AirPods", Connected: true}, protocol.Device{ID: "one", ManufacturerData: payload}, protocol.Device{ID: "two", ManufacturerData: payload})
+	if len(enrichments["classic"].PossibleMatches) != 0 {
+		t.Fatalf("guessed match: %#v", enrichments["classic"])
 	}
 }
 
@@ -44,8 +58,8 @@ func TestInspectRecognizesPowerbeatsPro2(t *testing.T) {
 		{ID: "classic", Name: "Powerbeats Pro 2", Connected: true},
 		{ID: "ble", Name: "uuid", ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "0719011d202b998f110004446263ff09d489000000061e82f24d93"}}},
 	}
-	response := inspect(protocol.NewSession(strings.NewReader(""), io.Discard), devices, "scan")
-	advertisement := response.Enrichments["ble"]
+	enrichments := inspectDevices(t, protocol.PurposeScan, devices...)
+	advertisement := enrichments["ble"]
 	if advertisement.Identification == nil || advertisement.Identification.Vendor != "Beats" || advertisement.Identification.Family != "Beats" || advertisement.Identification.Model != "Powerbeats Pro 2" {
 		t.Fatalf("identification=%#v", advertisement.Identification)
 	}
@@ -87,8 +101,8 @@ func TestPowerbeatsPro2NameSelectsMostSpecificCapabilities(t *testing.T) {
 }
 
 func TestInspectIdentifiesSavedAppleAudioWithoutConnecting(t *testing.T) {
-	response := inspect(protocol.NewSession(strings.NewReader(""), io.Discard), []protocol.Device{{ID: "saved", Name: "AirPods Pro", Paired: true}}, "list")
-	identity := response.Enrichments["saved"].Identification
+	enrichments := inspectDevices(t, protocol.PurposeList, protocol.Device{ID: "saved", Name: "AirPods Pro", Paired: true})
+	identity := enrichments["saved"].Identification
 	if identity == nil || identity.Vendor != "Apple" || identity.Family != "AirPods" || identity.Model != "AirPods Pro" || identity.Confidence != "name" {
 		t.Fatalf("identity=%#v", identity)
 	}
@@ -173,5 +187,159 @@ func TestParsePrivateKeys(t *testing.T) {
 	keys, err := parsePrivateKeys(packet)
 	if err != nil || keys.IRK != "00112233445566778899aabbccddeeff" || keys.ENC != "ffeeddccbbaa99887766554433221100" {
 		t.Fatalf("keys=%#v err=%v", keys, err)
+	}
+}
+
+// fakeBetty plays Betty's side of the driver protocol over a pipe. It sends
+// requests and answers the driver's host calls with a minimal L2CAP device and
+// in-memory driver storage.
+type fakeBetty struct {
+	t        *testing.T
+	encoder  *json.Encoder
+	decoder  *json.Decoder
+	storage  map[string]string
+	packets  []string
+	deniedID string
+	calls    []string
+}
+
+func (b *fakeBetty) request(request protocol.Request) protocol.Response {
+	b.t.Helper()
+	request.Protocol, request.Type = protocol.Version, protocol.TypeRequest
+	if err := b.encoder.Encode(request); err != nil {
+		b.t.Fatal(err)
+	}
+	for {
+		var raw json.RawMessage
+		var message protocol.Message
+		if err := b.decoder.Decode(&raw); err != nil {
+			b.t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &message); err != nil {
+			b.t.Fatal(err)
+		}
+		if message.Type == protocol.TypeResponse {
+			var response protocol.Response
+			if err := json.Unmarshal(raw, &response); err != nil {
+				b.t.Fatal(err)
+			}
+			return response
+		}
+		b.calls = append(b.calls, message.Method)
+		reply := protocol.Message{Protocol: protocol.Version, Type: protocol.TypeHostResponse, ID: message.ID}
+		result, code := b.hostCall(message)
+		if code != "" {
+			reply.Error, reply.ErrorCode = message.Method+" failed", code
+		} else {
+			reply.Result, _ = json.Marshal(result)
+		}
+		if err := b.encoder.Encode(reply); err != nil {
+			b.t.Fatal(err)
+		}
+	}
+}
+
+func (b *fakeBetty) hostCall(call protocol.Message) (any, string) {
+	switch call.Method {
+	case protocol.HostStorageGet:
+		var params protocol.StorageGetParams
+		_ = json.Unmarshal(call.Params, &params)
+		value, found := b.storage[params.Key]
+		return map[string]any{"value": value, "found": found}, ""
+	case protocol.HostStorageSet:
+		var params protocol.StorageSetParams
+		_ = json.Unmarshal(call.Params, &params)
+		b.storage[params.Key] = params.Value
+		return map[string]any{}, ""
+	case protocol.HostL2CAPOpen:
+		var params protocol.L2CAPOpenParams
+		_ = json.Unmarshal(call.Params, &params)
+		if params.DeviceID == b.deniedID || params.PSM != airPodsPSM {
+			return nil, string(protocol.CodePermissionDenied)
+		}
+		return map[string]string{"channel_id": "c1"}, ""
+	case protocol.HostL2CAPWrite:
+		var params protocol.L2CAPWriteParams
+		_ = json.Unmarshal(call.Params, &params)
+		return map[string]int{"written": len(params.Data) / 2}, ""
+	case protocol.HostL2CAPRead:
+		if len(b.packets) == 0 {
+			return nil, string(protocol.CodeTimeout)
+		}
+		packet := b.packets[0]
+		b.packets = b.packets[1:]
+		return map[string]string{"data": packet}, ""
+	case protocol.HostL2CAPClose:
+		return map[string]bool{"closed": true}, ""
+	}
+	return nil, string(protocol.CodeUnsupported)
+}
+
+func TestAppleAudioDriverServesOverProtocol(t *testing.T) {
+	t.Setenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS", "")
+	host, child := net.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		defer child.Close()
+		done <- protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set}.Run(nil, child, child)
+	}()
+	betty := &fakeBetty{
+		t:       t,
+		encoder: json.NewEncoder(host),
+		decoder: json.NewDecoder(host),
+		storage: map[string]string{},
+		packets: []string{
+			"040004000400030401590201020158020108012a0101",
+			"04000400310002" + "01001000" + "00112233445566778899aabbccddeeff" + "04001000" + "ffeeddccbbaa99887766554433221100",
+		},
+		deniedID: "max",
+	}
+	devices := []protocol.Device{
+		{ID: "classic", Name: "AirPods Pro", Connected: true},
+		{ID: "ble", Name: "uuid", ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "07190124202b998f110004446263ff09d489000000061e82f24d93"}}},
+	}
+
+	inspected := betty.request(protocol.Request{ID: "1", Method: protocol.MethodInspect, Purpose: protocol.PurposeList, Devices: devices})
+	if inspected.Error != "" || len(inspected.Enrichments) != 2 || len(inspected.Enrichments["classic"].PossibleMatches) != 1 {
+		t.Fatalf("inspect=%+v", inspected)
+	}
+	if battery := inspected.Enrichments["ble"].Properties["battery"]; !battery.Estimated {
+		t.Fatalf("inspect must not read exact battery: %+v", battery)
+	}
+	for _, call := range betty.calls {
+		if call != protocol.HostStorageGet {
+			t.Fatalf("inspect made host call %q", call)
+		}
+	}
+
+	got := betty.request(protocol.Request{ID: "2", Method: protocol.MethodGet, DeviceID: "classic", Property: "battery", Devices: devices})
+	battery, ok := got.Enrichments["classic"].Properties["battery"]
+	if got.Error != "" || len(got.Enrichments) != 1 || !ok || battery.Estimated || battery.Display != "left 89% · right 88% · case 42% charging" {
+		t.Fatalf("get=%+v", got)
+	}
+	var keyring appleAudioKeyring
+	if err := json.Unmarshal([]byte(betty.storage[keyringStorageKey]), &keyring); err != nil || len(keyring.Keys) != 1 {
+		t.Fatalf("keyring=%q err=%v", betty.storage[keyringStorageKey], err)
+	}
+	if keys := keyring.Keys[0]; keys.DeviceID != "classic" || keys.ModelID != 0x2420 || keys.IRK != "00112233445566778899aabbccddeeff" {
+		t.Fatalf("keys=%+v", keys)
+	}
+
+	denied := []protocol.Device{{ID: "max", Name: "AirPods Max", Connected: true}}
+	failed := betty.request(protocol.Request{ID: "3", Method: protocol.MethodGet, DeviceID: "max", Property: "battery", Devices: denied})
+	if failed.ErrorCode != string(protocol.CodePermissionDenied) || len(failed.Enrichments) != 0 {
+		t.Fatalf("host error code must reach Betty: %+v", failed)
+	}
+
+	for i, property := range []string{"battery", "noise_control"} {
+		set := betty.request(protocol.Request{ID: fmt.Sprint(4 + i), Method: protocol.MethodSet, DeviceID: "classic", Property: property, Value: json.RawMessage(`"anc"`), Devices: devices})
+		if set.Error != "" || len(set.Enrichments) != 0 {
+			t.Fatalf("set %s must be left to other drivers: %+v", property, set)
+		}
+	}
+
+	host.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

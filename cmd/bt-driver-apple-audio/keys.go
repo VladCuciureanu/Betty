@@ -34,24 +34,21 @@ func (k *appleAudioKeyring) Upsert(value appleAudioKeys) {
 	k.Keys = append(k.Keys, value)
 }
 
-func loadKeyring(session *protocol.Session) (appleAudioKeyring, error) {
-	keyring, _, err := loadStoredKeyring(session, keyringStorageKey)
+func loadKeyring(host *protocol.Session) (appleAudioKeyring, error) {
+	keyring, _, err := loadStoredKeyring(host, keyringStorageKey)
 	return keyring, err
 }
 
-func loadStoredKeyring(session *protocol.Session, key string) (appleAudioKeyring, bool, error) {
-	var result struct {
-		Value string `json:"value"`
-		Found bool   `json:"found"`
-	}
-	if err := session.CallHost(protocol.HostStorageGet, protocol.StorageGetParams{Key: key}, &result); err != nil {
+func loadStoredKeyring(host *protocol.Session, key string) (appleAudioKeyring, bool, error) {
+	value, found, err := host.GetState(key)
+	if err != nil {
 		return appleAudioKeyring{Version: 1}, false, err
 	}
-	if !result.Found {
+	if !found {
 		return appleAudioKeyring{Version: 1}, false, nil
 	}
 	var keyring appleAudioKeyring
-	if err := json.Unmarshal([]byte(result.Value), &keyring); err != nil {
+	if err := json.Unmarshal([]byte(value), &keyring); err != nil {
 		return appleAudioKeyring{}, true, err
 	}
 	if keyring.Version != 1 {
@@ -60,13 +57,13 @@ func loadStoredKeyring(session *protocol.Session, key string) (appleAudioKeyring
 	return keyring, true, nil
 }
 
-func saveKeyring(session *protocol.Session, keyring appleAudioKeyring) error {
+func saveKeyring(host *protocol.Session, keyring appleAudioKeyring) error {
 	keyring.Version = 1
 	raw, err := json.Marshal(keyring)
 	if err != nil {
 		return err
 	}
-	return session.CallHost(protocol.HostStorageSet, protocol.StorageSetParams{Key: keyringStorageKey, Value: string(raw)}, nil)
+	return host.SetState(keyringStorageKey, string(raw))
 }
 
 func decryptAdvertisement(device protocol.Device, modelID uint16, keyring appleAudioKeyring) (exactBattery, bool) {

@@ -4,11 +4,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
 
-const airPodsPSM = 0x1001
+const (
+	airPodsPSM     = 0x1001
+	aapReadTimeout = 1500 * time.Millisecond
+)
 
 var (
 	aapHandshake            = mustHex("00000400010002000000000000000000")
@@ -32,15 +36,13 @@ var aapNoiseControlValues = map[string]byte{
 type exactBattery = protocol.BatteryValue
 type batteryComponent = protocol.BatteryComponent
 
-func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *appleAudioKeys, error) {
-	var opened struct {
-		ChannelID string `json:"channel_id"`
-	}
-	if err := session.CallHost(protocol.HostL2CAPOpen, protocol.L2CAPOpenParams{DeviceID: deviceID, PSM: airPodsPSM}, &opened); err != nil {
+func readAAP(host *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *appleAudioKeys, error) {
+	channelID, err := host.OpenL2CAP(deviceID, airPodsPSM)
+	if err != nil {
 		return exactBattery{}, nil, err
 	}
-	defer session.CallHost(protocol.HostL2CAPClose, protocol.L2CAPChannelParams{ChannelID: opened.ChannelID}, nil)
-	if err := writeAAP(session, opened.ChannelID, aapHandshake); err != nil {
+	defer host.CloseL2CAP(channelID)
+	if err := writeAAP(host, channelID, aapHandshake); err != nil {
 		return exactBattery{}, nil, err
 	}
 	notificationsRequested := false
@@ -48,32 +50,25 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 	var battery *exactBattery
 	var acquiredKeys *appleAudioKeys
 	for attempts := 0; attempts < 12; attempts++ {
-		var read struct {
-			Data string `json:"data"`
-		}
-		err := session.CallHost(protocol.HostL2CAPRead, protocol.L2CAPReadParams{ChannelID: opened.ChannelID, MaxBytes: 4096, TimeoutMS: 1500}, &read)
+		packet, err := host.ReadL2CAP(channelID, 4096, aapReadTimeout)
 		if err != nil {
 			if battery != nil {
 				return *battery, nil, nil
 			}
 			return exactBattery{}, nil, err
 		}
-		packet, err := hex.DecodeString(read.Data)
-		if err != nil {
-			return exactBattery{}, nil, fmt.Errorf("host returned invalid L2CAP data: %w", err)
-		}
 		switch {
 		case startsWith(packet, aapHandshakeACK):
-			if err := writeAAP(session, opened.ChannelID, aapSetSpecificFeatures); err != nil {
+			if err := writeAAP(host, channelID, aapSetSpecificFeatures); err != nil {
 				return exactBattery{}, nil, err
 			}
 		case startsWith(packet, aapFeaturesACK):
-			if err := writeAAP(session, opened.ChannelID, aapRequestNotifications); err != nil {
+			if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
 				return exactBattery{}, nil, err
 			}
 			notificationsRequested = true
 			if requestKeys {
-				if err := writeAAP(session, opened.ChannelID, aapRequestPrivateKeys); err != nil {
+				if err := writeAAP(host, channelID, aapRequestPrivateKeys); err != nil {
 					return exactBattery{}, nil, err
 				}
 				keysRequested = true
@@ -91,7 +86,7 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 				return parsed, acquiredKeys, nil
 			}
 			if !keysRequested {
-				if err := writeAAP(session, opened.ChannelID, aapRequestPrivateKeys); err != nil {
+				if err := writeAAP(host, channelID, aapRequestPrivateKeys); err != nil {
 					return exactBattery{}, nil, err
 				}
 				keysRequested = true
@@ -106,13 +101,13 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 			}
 		default:
 			if !notificationsRequested {
-				if err := writeAAP(session, opened.ChannelID, aapRequestNotifications); err != nil {
+				if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
 					return exactBattery{}, nil, err
 				}
 				notificationsRequested = true
 			}
 			if requestKeys && !keysRequested {
-				if err := writeAAP(session, opened.ChannelID, aapRequestPrivateKeys); err != nil {
+				if err := writeAAP(host, channelID, aapRequestPrivateKeys); err != nil {
 					return exactBattery{}, nil, err
 				}
 				keysRequested = true
@@ -128,37 +123,29 @@ func readAAP(session *protocol.Session, deviceID string, requestKeys bool) (exac
 // readAAPNoiseControl obtains the current state from the device notification
 // stream. A write is successful only after the device reports the requested
 // state back; completion of the L2CAP write itself is not treated as success.
-func readAAPNoiseControl(session *protocol.Session, deviceID string, requested *string) (string, error) {
-	var opened struct {
-		ChannelID string `json:"channel_id"`
-	}
-	if err := session.CallHost(protocol.HostL2CAPOpen, protocol.L2CAPOpenParams{DeviceID: deviceID, PSM: airPodsPSM}, &opened); err != nil {
+func readAAPNoiseControl(host *protocol.Session, deviceID string, requested *string) (string, error) {
+	channelID, err := host.OpenL2CAP(deviceID, airPodsPSM)
+	if err != nil {
 		return "", err
 	}
-	defer session.CallHost(protocol.HostL2CAPClose, protocol.L2CAPChannelParams{ChannelID: opened.ChannelID}, nil)
-	if err := writeAAP(session, opened.ChannelID, aapHandshake); err != nil {
+	defer host.CloseL2CAP(channelID)
+	if err := writeAAP(host, channelID, aapHandshake); err != nil {
 		return "", err
 	}
 	notificationsRequested := false
 	controlWritten := false
 	for attempts := 0; attempts < 16; attempts++ {
-		var read struct {
-			Data string `json:"data"`
-		}
-		if err := session.CallHost(protocol.HostL2CAPRead, protocol.L2CAPReadParams{ChannelID: opened.ChannelID, MaxBytes: 4096, TimeoutMS: 1500}, &read); err != nil {
-			return "", err
-		}
-		packet, err := hex.DecodeString(read.Data)
+		packet, err := host.ReadL2CAP(channelID, 4096, aapReadTimeout)
 		if err != nil {
-			return "", fmt.Errorf("host returned invalid L2CAP data: %w", err)
+			return "", err
 		}
 		switch {
 		case startsWith(packet, aapHandshakeACK):
-			if err := writeAAP(session, opened.ChannelID, aapSetSpecificFeatures); err != nil {
+			if err := writeAAP(host, channelID, aapSetSpecificFeatures); err != nil {
 				return "", err
 			}
 		case startsWith(packet, aapFeaturesACK):
-			if err := writeAAP(session, opened.ChannelID, aapRequestNotifications); err != nil {
+			if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
 				return "", err
 			}
 			notificationsRequested = true
@@ -167,7 +154,7 @@ func readAAPNoiseControl(session *protocol.Session, deviceID string, requested *
 				if err != nil {
 					return "", err
 				}
-				if err := writeAAP(session, opened.ChannelID, packet); err != nil {
+				if err := writeAAP(host, channelID, packet); err != nil {
 					return "", err
 				}
 				controlWritten = true
@@ -182,7 +169,7 @@ func readAAPNoiseControl(session *protocol.Session, deviceID string, requested *
 				}
 			}
 			if !notificationsRequested {
-				if err := writeAAP(session, opened.ChannelID, aapRequestNotifications); err != nil {
+				if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
 					return "", err
 				}
 				notificationsRequested = true
@@ -243,15 +230,13 @@ func parsePrivateKeys(packet []byte) (appleAudioKeys, error) {
 	return keys, nil
 }
 
-func writeAAP(session *protocol.Session, channelID string, packet []byte) error {
-	var result struct {
-		Written int `json:"written"`
-	}
-	if err := session.CallHost(protocol.HostL2CAPWrite, protocol.L2CAPWriteParams{ChannelID: channelID, Data: hex.EncodeToString(packet)}, &result); err != nil {
+func writeAAP(host *protocol.Session, channelID string, packet []byte) error {
+	written, err := host.WriteL2CAP(channelID, packet)
+	if err != nil {
 		return err
 	}
-	if result.Written != len(packet) {
-		return fmt.Errorf("short AAP write: wrote %d of %d bytes", result.Written, len(packet))
+	if written != len(packet) {
+		return fmt.Errorf("short AAP write: wrote %d of %d bytes", written, len(packet))
 	}
 	return nil
 }
