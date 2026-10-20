@@ -54,7 +54,7 @@ Ubuntu-style `generic` kernel with its modules installed (it doesn't need to be
 the running kernel), BlueZ, and dbus. On Ubuntu:
 
 ```console
-sudo apt-get install linux-image-generic virtme-ng qemu-system-x86 bluez dbus
+sudo apt-get install linux-image-generic virtme-ng qemu-system-x86 bluez dbus strace
 sudo apt-get install linux-modules-extra-$(ls /lib/modules | grep -- -generic | sort -V | tail -n 1)
 sudo chmod a+r /boot/vmlinuz-*
 python3 -m venv e2e/peer/.venv
@@ -140,6 +140,9 @@ Expect Windows to show its own pairing notifications during the pairing tests.
 - macOS skips the Classic pairing tests: Betty cannot yet discover new Classic
   devices there.
 - Windows expects `connect` and `disconnect` to fail with `unsupported`.
+- The isolation test, which traces `bt` and its drivers with `strace` to check
+  that ordinary commands open no network socket and leave no process behind,
+  runs only on Linux, and only where `strace` is installed.
 
 ## Adding a scenario
 
