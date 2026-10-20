@@ -34,7 +34,7 @@ try {
     $bt = Join-Path $installDirectory "bt.exe"
     if (-not (Test-Path $bt)) { throw "Base MSI did not install bt.exe" }
     & $bt --version
-    $drivers = & $bt driver list
+    $drivers = (& $bt driver list) -join "`n"
     if ($drivers -match 'official/apple-audio') { throw "Base MSI unexpectedly bundled the Apple Audio driver" }
 
     if ($BaseOnly) {
@@ -46,7 +46,7 @@ try {
 
     Invoke-Msi "/i `"$advancedMsiPath`" $skipArgument" "betty-advanced-install.log"
     $advancedInstalled = $true
-    $drivers = & $bt driver list
+    $drivers = (& $bt driver list) -join "`n"
     if ($drivers -notmatch 'official/apple-audio') { throw "Advanced MSI Apple Audio driver was not discovered" }
     if (-not $SkipDriver) {
         $published = Get-ItemPropertyValue "HKLM:\SOFTWARE\Betty" "AirPodsDriverPublishedName"
