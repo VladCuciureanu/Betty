@@ -1,9 +1,10 @@
-"""A Bumble virtual controller that also answers Classic inquiry.
+"""A dual-mode Bumble virtual controller that also answers Classic inquiry.
 
-Bumble's software controller implements Classic connections and pairing but
-not the Inquiry command, which BlueZ uses to discover Classic devices. This
-subclass answers inquiry with every other Classic controller on the same
-virtual link that has inquiry scan enabled.
+Bumble's software controller implements Classic connections and pairing, but
+by default it reports itself as LE-only, and it does not implement the
+Inquiry command, which BlueZ uses to discover Classic devices. This subclass
+reports Classic support and answers inquiry with every other Classic
+controller on the same virtual link that has inquiry scan enabled.
 """
 
 import asyncio
@@ -18,9 +19,61 @@ _INQUIRY_SCAN = 0x01
 _INQUIRY_DELAY = 0.2
 
 
+_DUAL_MODE_FEATURES = (
+    hci.LmpFeatureMask.LE_SUPPORTED_CONTROLLER
+    | hci.LmpFeatureMask.EXTENDED_FEATURES
+    | hci.LmpFeatureMask.ENCRYPTION
+    | hci.LmpFeatureMask.RSSI_WITH_INQUIRY_RESULTS
+    | hci.LmpFeatureMask.EXTENDED_INQUIRY_RESPONSE
+    | hci.LmpFeatureMask.SIMULTANEOUS_LE_AND_BR_EDR_TO_SAME_DEVICE_CAPABLE_CONTROLLER
+    | hci.LmpFeatureMask.SECURE_SIMPLE_PAIRING_CONTROLLER_SUPPORT
+)
+
+# Classic commands this controller handles, added to the supported-commands
+# bitmap so that the host uses them.
+_CLASSIC_COMMANDS = [
+    "INQUIRY",
+    "INQUIRY_CANCEL",
+    "CREATE_CONNECTION",
+    "ACCEPT_CONNECTION_REQUEST",
+    "REMOTE_NAME_REQUEST",
+    "READ_REMOTE_SUPPORTED_FEATURES",
+    "READ_REMOTE_EXTENDED_FEATURES",
+    "AUTHENTICATION_REQUESTED",
+    "IO_CAPABILITY_REQUEST_REPLY",
+    "IO_CAPABILITY_REQUEST_NEGATIVE_REPLY",
+    "USER_CONFIRMATION_REQUEST_REPLY",
+    "USER_CONFIRMATION_REQUEST_NEGATIVE_REPLY",
+    "USER_PASSKEY_REQUEST_REPLY",
+    "USER_PASSKEY_REQUEST_NEGATIVE_REPLY",
+    "LINK_KEY_REQUEST_REPLY",
+    "LINK_KEY_REQUEST_NEGATIVE_REPLY",
+    "WRITE_LOCAL_NAME",
+    "READ_LOCAL_NAME",
+    "WRITE_SCAN_ENABLE",
+    "READ_CLASS_OF_DEVICE",
+    "WRITE_CLASS_OF_DEVICE",
+    "WRITE_EXTENDED_INQUIRY_RESPONSE",
+    "WRITE_SIMPLE_PAIRING_MODE",
+    "READ_SIMPLE_PAIRING_MODE",
+    "READ_LE_HOST_SUPPORT",
+    "WRITE_LE_HOST_SUPPORT",
+    "READ_LOCAL_EXTENDED_FEATURES",
+]
+
+
 class InquiryController(Controller):
     class_of_device: int = 0
     extended_inquiry_response: bytes = b""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.lmp_features = _DUAL_MODE_FEATURES
+        self.supported_commands = set(self.supported_commands) | {
+            opcode
+            for name in _CLASSIC_COMMANDS
+            if (opcode := getattr(hci, f"HCI_{name}_COMMAND", None)) is not None
+        }
 
     def on_hci_write_class_of_device_command(self, command):
         self.class_of_device = command.class_of_device

@@ -126,6 +126,12 @@ class Sensor(Persona):
         await self.device.power_on()
         advertising = AdvertisingData(
             [
+                # Without discoverable flags, BlueZ ignores the advertiser
+                # during discovery, as it would a real device.
+                (
+                    AdvertisingData.FLAGS,
+                    bytes([AdvertisingData.LE_GENERAL_DISCOVERABLE_MODE_FLAG | AdvertisingData.BR_EDR_NOT_SUPPORTED_FLAG]),
+                ),
                 (AdvertisingData.COMPLETE_LOCAL_NAME, self.name.encode()),
                 (AdvertisingData.COMPLETE_LIST_OF_16_BIT_SERVICE_CLASS_UUIDS, bytes(UUID("180F"))),
             ]
