@@ -123,6 +123,19 @@ requests into `Driver.Run` and decode its output. See
 [`serve_test.go`](serve_test.go) and the Sony driver's
 [`sony_test.go`](../cmd/bt-driver-sony/sony_test.go).
 
+Before installing a driver, in any language, check it against the protocol:
+
+```console
+bt driver check ./my-driver
+```
+
+The check runs the driver as Betty would, with scripted requests and a host
+that refuses every host call, and reports each rule it tests: a valid
+manifest, a response for each request with the request's ID, serving several
+requests in one process, `unsupported` for an unknown method, not claiming
+properties it doesn't own, exiting when its input ends, and host calls only
+within the manifest's permissions. It needs no Bluetooth.
+
 ## Reference drivers
 
 - [Sony Headphones](../cmd/bt-driver-sony): built on `driver.Serve`, using
