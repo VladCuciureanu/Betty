@@ -3,6 +3,7 @@ package ble
 import (
 	"context"
 	"encoding/hex"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -385,20 +386,66 @@ func (b *TinyGo) DeviceInformation(ctx context.Context, address string) (map[str
 	if err != nil {
 		return nil, translate("characteristic discovery", err, domain.CodeInternal)
 	}
-	names := map[string]string{"2a29": "manufacturer", "2a24": "model", "2a25": "serial_number", "2a27": "hardware_revision", "2a26": "firmware_revision", "2a28": "software_revision"}
 	out := map[string]string{}
 	for _, c := range chars {
-		name, ok := names[strings.ToLower(shortUUID(c.UUID().String()))]
-		if !ok {
+		short := strings.ToLower(shortUUID(c.UUID().String()))
+		if _, known := deviceInformationFields[short]; !known {
 			continue
 		}
 		buf := make([]byte, 512)
 		n, readErr := c.Read(buf)
-		if readErr == nil {
-			out[name] = strings.TrimRight(string(buf[:n]), "\x00")
+		if readErr != nil {
+			continue
+		}
+		if name, value, ok := deviceInformationValue(short, buf[:n]); ok {
+			out[name] = value
 		}
 	}
 	return out, nil
+}
+
+// deviceInformationFields names the Device Information Service
+// characteristics Betty reads, by 16-bit UUID.
+var deviceInformationFields = map[string]string{
+	"2a29": "manufacturer",
+	"2a24": "model",
+	"2a25": "serial_number",
+	"2a27": "hardware_revision",
+	"2a26": "firmware_version",
+	"2a28": "software_revision",
+	"2a23": "system_id",
+	"2a50": "pnp_id",
+	"2a2a": "regulatory_certification",
+}
+
+// deviceInformationValue decodes one Device Information characteristic.
+// Text fields are UTF-8; System ID and regulatory data are reported as hex;
+// PnP ID as "source:vendor:product:version", where source is "bluetooth" or
+// "usb" and the rest are four hex digits each.
+func deviceInformationValue(short string, raw []byte) (name, value string, ok bool) {
+	name, ok = deviceInformationFields[short]
+	if !ok {
+		return "", "", false
+	}
+	switch short {
+	case "2a23", "2a2a":
+		if len(raw) == 0 {
+			return "", "", false
+		}
+		return name, hex.EncodeToString(raw), true
+	case "2a50":
+		if len(raw) != 7 {
+			return "", "", false
+		}
+		source := map[byte]string{1: "bluetooth", 2: "usb"}[raw[0]]
+		if source == "" {
+			return "", "", false
+		}
+		le := func(i int) uint16 { return uint16(raw[i]) | uint16(raw[i+1])<<8 }
+		return name, fmt.Sprintf("%s:%04x:%04x:%04x", source, le(1), le(3), le(5)), true
+	}
+	text := strings.TrimRight(string(raw), "\x00")
+	return name, text, text != ""
 }
 
 func shortUUID(value string) string {

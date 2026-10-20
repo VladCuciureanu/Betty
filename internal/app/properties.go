@@ -125,10 +125,11 @@ func (a *application) readDeviceInformation(ctx context.Context, d domain.Device
 // field, or returns "" for other properties.
 func deviceInformationName(property string) string {
 	switch property {
-	case "manufacturer", "model", "serial_number", "hardware_revision", "software_revision":
+	case "manufacturer", "model", "serial_number", "hardware_revision", "software_revision",
+		"firmware_version", "system_id", "pnp_id", "regulatory_certification":
 		return property
-	case "firmware_version", "firmware_revision":
-		return "firmware_revision"
+	case "firmware_revision": // the characteristic's own name
+		return "firmware_version"
 	default:
 		return ""
 	}
