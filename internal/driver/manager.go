@@ -58,7 +58,7 @@ func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain
 func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpose string) []domain.Device {
 	installed, _ := m.List()
 	for _, item := range installed {
-		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: "inspect", Purpose: purpose, Devices: wireDevices(devices)})
+		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)})
 		if err != nil {
 			continue
 		}
@@ -437,13 +437,13 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 	marshal := func(value any) (json.RawMessage, error) { bytes, err := json.Marshal(value); return bytes, err }
 	required := ""
 	if len(message.Method) >= 6 && message.Method[:6] == "l2cap." {
-		required = "l2cap"
+		required = protocol.PermissionL2CAP
 	}
 	if len(message.Method) >= 8 && message.Method[:8] == "storage." {
-		required = "driver-storage"
+		required = protocol.PermissionStorage
 	}
 	if len(message.Method) >= 7 && message.Method[:7] == "rfcomm." {
-		required = "rfcomm"
+		required = protocol.PermissionRFCOMM
 	}
 	if required != "" && !hasPermission(driver, required) {
 		return nil, domain.NewError(domain.CodePermission, "driver %s lacks %s permission", driver.ID, required)
@@ -730,11 +730,11 @@ func validateManifest(m protocol.Manifest) error {
 	if m.Protocol != protocol.Version {
 		return domain.NewError(domain.CodeUnsupported, "driver uses protocol %d; Betty supports %d", m.Protocol, protocol.Version)
 	}
-	if !regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$`).MatchString(m.ID) {
+	if !protocol.ValidID(m.ID) {
 		return domain.NewError(domain.CodeUsage, "invalid driver ID")
 	}
 	for _, legacyID := range m.LegacyIDs {
-		if !regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*/[a-z0-9][a-z0-9._-]*$`).MatchString(legacyID) || legacyID == m.ID {
+		if !protocol.ValidID(legacyID) || legacyID == m.ID {
 			return domain.NewError(domain.CodeUsage, "invalid legacy driver ID")
 		}
 	}

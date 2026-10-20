@@ -2,7 +2,7 @@
 
 Betty is a small, cross-platform Bluetooth device utility. It discovers and manages Bluetooth devices, exposes generic BLE/GATT operations, and provides a minimal property interface for optional device-protocol drivers.
 
-Betty is not an automation platform, UI framework, package marketplace, or background service. Client applications should own presentation, shortcuts, refresh policy, workflows, and installation guidance.
+Betty is a platform in one narrow sense: third parties extend it with device drivers through a published, language-neutral protocol. It is not an automation platform, UI framework, package marketplace, or background service. Client applications should own presentation, shortcuts, refresh policy, workflows, and installation guidance.
 
 ## Version 1 release definition
 
@@ -140,6 +140,22 @@ Document supported public-API limitations instead of working around them with pr
 - [x] Generate release checksums, an SPDX JSON SBOM, and signed SLSA build-provenance attestations.
 - Test upgrades and uninstalls from the previous stable version once one exists.
 
+## Driver platform
+
+Third-party drivers are a first-class extension point. The protocol in [docs/DRIVER_PROTOCOL.md](docs/DRIVER_PROTOCOL.md) is the contract; the Go SDK is a convenience.
+
+- [x] Publish a normative, language-neutral protocol specification with a worked transcript and a non-Go example driver.
+- [x] Provide a Go SDK: `driver.Serve`, typed `Inspect`/`Get`/`Set` handlers, typed host calls, structured errors, and exported constants for every protocol string.
+- [x] Port the Sony driver to the SDK as the reference implementation.
+- Port the Apple Audio driver to the SDK.
+- Add GATT host calls (discover, read, write, subscribe) so BLE-only devices, the most common third-party case, can have drivers. This is an additive protocol 1 change.
+- Add manifest match hints (company IDs, service UUIDs, name prefixes) so Betty starts only relevant drivers instead of every driver for every command.
+- Ship a conformance checker that runs a driver against scripted requests and a fake host, for example `bt driver check <executable>`.
+- Surface driver stderr and skipped-inspect failures under `--verbose`.
+- Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
+- Bound message sizes and test malformed, oversized, crashing, and hanging drivers.
+- Reuse one driver process across requests within a command once the per-request loop is proven by every official driver.
+
 ## Optional driver work required for supported claims
 
 Optional drivers do not block a base Betty release unless their packages or features are advertised as supported release artifacts. A capability must remain `planned` or `unsupported` until it is implemented and hardware-validated.
@@ -203,7 +219,7 @@ These are outside Betty v1 unless a concrete Bluetooth-device use case demonstra
 - historical device state;
 - multi-property watch multiplexing;
 - complex action parameter schemas;
-- generic third-party plugin SDK and runtime;
+- in-process plugins or a plugin runtime other than executable drivers;
 - driver sandboxing;
 - multi-adapter selection;
 - RPM, Arch, and portable package formats;

@@ -38,8 +38,12 @@ behind a compact interface without pretending the limitations do not exist.
 - Optional device drivers that do not bloat the base executable.
 - Explicit `unsupported`, permission, interaction, adapter, and timeout errors.
 
-Betty is a standalone CLI with a stable subprocess API for local applications
-and scripts.
+Betty is built to be built on in two directions:
+
+- **Applications and scripts** call `bt --json` and get a stable, versioned
+  [JSON API](docs/JSON_API.md).
+- **Driver authors** add support for new devices through the language-neutral
+  [driver protocol](docs/DRIVER_PROTOCOL.md) without changing Betty itself.
 
 ## Install
 
@@ -167,11 +171,16 @@ bt driver install ./bt-driver-apple-audio
 bt driver list
 ```
 
+Anyone can write a driver, in any language. The
+[driver protocol specification](docs/DRIVER_PROTOCOL.md) defines the
+newline-delimited JSON protocol, and Go drivers can use the `driver` package's
+`driver.Serve` SDK. See [Writing a Betty driver](driver/README.md) to get
+started.
+
 Drivers are trusted native executables in the current design. Betty verifies
 their manifests, limits host operations to declared permissions and selected
 device IDs, and isolates persistent state by driver, but it does not yet provide
-a security sandbox. The wire protocol and host boundary are documented in
-[driver/README.md](driver/README.md).
+a security sandbox.
 
 ## Platform notes
 

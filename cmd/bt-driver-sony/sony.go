@@ -2,9 +2,9 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
@@ -189,12 +189,9 @@ func openSonySession(host *protocol.Session, deviceID string, version sonyProtoc
 	}
 	var lastErr error
 	for _, service := range services {
-		var opened struct {
-			ChannelID string `json:"channel_id"`
-		}
-		err := host.CallHost(protocol.HostRFCOMMOpen, protocol.RFCOMMOpenParams{DeviceID: deviceID, ServiceUUID: service}, &opened)
+		channelID, err := host.OpenRFCOMM(deviceID, service)
 		if err == nil {
-			return &sonySession{host: host, channelID: opened.ChannelID}, nil
+			return &sonySession{host: host, channelID: channelID}, nil
 		}
 		lastErr = err
 	}
@@ -202,20 +199,18 @@ func openSonySession(host *protocol.Session, deviceID string, version sonyProtoc
 }
 
 func (s *sonySession) close() {
-	_ = s.host.CallHost(protocol.HostRFCOMMClose, protocol.RFCOMMChannelParams{ChannelID: s.channelID}, nil)
+	_ = s.host.CloseRFCOMM(s.channelID)
 }
 
 func (s *sonySession) send(dataType byte, payload []byte) error {
 	frame := encodeSonyFrame(dataType, s.sequence, payload)
 	s.sequence ^= 1
-	var result struct {
-		Written int `json:"written"`
-	}
-	if err := s.host.CallHost(protocol.HostRFCOMMWrite, protocol.RFCOMMWriteParams{ChannelID: s.channelID, Data: hex.EncodeToString(frame)}, &result); err != nil {
+	written, err := s.host.WriteRFCOMM(s.channelID, frame)
+	if err != nil {
 		return err
 	}
-	if result.Written != len(frame) {
-		return fmt.Errorf("short Sony RFCOMM write: wrote %d of %d bytes", result.Written, len(frame))
+	if written != len(frame) {
+		return fmt.Errorf("short Sony RFCOMM write: wrote %d of %d bytes", written, len(frame))
 	}
 	return nil
 }
@@ -227,15 +222,9 @@ func (s *sonySession) receive(timeoutMS int) (sonyFrame, error) {
 		return s.accept(frame, timeoutMS)
 	}
 	for attempts := 0; attempts < 8; attempts++ {
-		var result struct {
-			Data string `json:"data"`
-		}
-		if err := s.host.CallHost(protocol.HostRFCOMMRead, protocol.RFCOMMReadParams{ChannelID: s.channelID, MaxBytes: 4096, TimeoutMS: timeoutMS}, &result); err != nil {
-			return sonyFrame{}, err
-		}
-		data, err := hex.DecodeString(result.Data)
+		data, err := s.host.ReadRFCOMM(s.channelID, 4096, time.Duration(timeoutMS)*time.Millisecond)
 		if err != nil {
-			return sonyFrame{}, fmt.Errorf("host returned invalid RFCOMM data: %w", err)
+			return sonyFrame{}, err
 		}
 		frames, err := s.stream.push(data)
 		if err != nil {
@@ -267,13 +256,11 @@ func (s *sonySession) accept(frame sonyFrame, timeoutMS int) (sonyFrame, error) 
 
 func (s *sonySession) sendWithSequence(dataType, sequence byte, payload []byte) error {
 	frame := encodeSonyFrame(dataType, sequence, payload)
-	var result struct {
-		Written int `json:"written"`
-	}
-	if err := s.host.CallHost(protocol.HostRFCOMMWrite, protocol.RFCOMMWriteParams{ChannelID: s.channelID, Data: hex.EncodeToString(frame)}, &result); err != nil {
+	written, err := s.host.WriteRFCOMM(s.channelID, frame)
+	if err != nil {
 		return err
 	}
-	if result.Written != len(frame) {
+	if written != len(frame) {
 		return fmt.Errorf("short Sony RFCOMM write")
 	}
 	return nil

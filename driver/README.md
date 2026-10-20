@@ -1,61 +1,135 @@
-# Betty driver protocol
+# Writing a Betty driver
 
-Optional device support runs as trusted external executables. Drivers enrich
-Betty's generic device model and property vocabulary; they do not add vendor
+A driver teaches Betty about one family of devices. It is a separate
+executable: Betty starts it, sends it JSON requests over stdin, and reads JSON
+responses from stdout. Drivers add properties and capabilities to Betty's
+generic `inspect`, `get`, `set`, and `watch` commands; they never add vendor
 commands to the CLI.
 
-## Boundary
+- **Any language:** implement the
+  [driver protocol specification](../docs/DRIVER_PROTOCOL.md). It includes a
+  complete Python example.
+- **Go:** use this package. `driver.Serve` implements the protocol, so you only
+  write handlers.
 
-Betty starts a driver as a child process and communicates through a versioned,
-duplex JSON protocol over stdin and stdout. A driver may handle `inspect`, `get`,
-and `set` requests and return identification, properties, capabilities, or a
-structured error.
+## Go quickstart
 
-During that session, a driver may request only the host operations declared in
-its manifest:
+```go
+package main
 
-- Classic L2CAP open, read, write, and close;
-- RFCOMM open, read, write, and close;
-- namespaced persistent state reads and writes.
+import (
+	"encoding/json"
+	"strings"
 
-Host access is restricted to device IDs Betty supplied to the driver and to
-channel IDs opened during the current session. Persistent state is isolated by
-driver ID and written with user-only permissions.
+	"github.com/vladcuciureanu/betty/driver"
+)
 
-## Capability model
+func main() {
+	driver.Serve(driver.Driver{
+		Manifest: driver.Manifest{
+			ID:          "example/acme",
+			Name:        "ACME Gadgets",
+			Version:     "0.1.0",
+			Permissions: []string{driver.PermissionRFCOMM},
+		},
+		Inspect: inspect,
+		Get:     get,
+	})
+}
 
-A capability has a stable property name and reports:
+// inspect identifies ACME devices. It runs on every scan and list, so it must
+// not open connections.
+func inspect(_ *driver.Session, request driver.InspectRequest) (map[string]driver.Enrichment, error) {
+	enrichments := map[string]driver.Enrichment{}
+	for _, device := range request.Devices {
+		if !strings.HasPrefix(device.Name, "ACME-") {
+			continue
+		}
+		enrichments[device.ID] = driver.Enrichment{
+			Identification: &driver.Identification{Vendor: "ACME", Family: "Gadget", Confidence: driver.ConfidenceName},
+			Capabilities: map[string]driver.Capability{
+				"battery": {Status: driver.StatusAvailable, Kind: driver.KindBattery, Readable: true},
+			},
+		}
+	}
+	return enrichments, nil
+}
 
-- status: `available`, `planned`, or `unsupported`;
-- type, such as `battery`, `enum`, `boolean`, or `integer`;
-- whether it is readable or writable;
-- accepted enum values or numeric minimum, maximum, and step;
-- a reason when it is not currently available.
+// get reads a property. Returning nil, nil means "not mine" and lets another
+// driver answer.
+func get(host *driver.Session, request driver.PropertyRequest) (*driver.Enrichment, error) {
+	if request.Property != "battery" || !strings.HasPrefix(request.Device.Name, "ACME-") {
+		return nil, nil
+	}
+	if !request.Device.Connected {
+		return nil, driver.Errorf(driver.CodeDeviceDisconnected, "%s is not connected", request.Device.Name)
+	}
+	channel, err := host.OpenRFCOMM(request.Device.ID, "00001101-0000-1000-8000-00805f9b34fb")
+	if err != nil {
+		return nil, driver.Wrap(err, driver.CodeBluetoothUnavailable)
+	}
+	defer host.CloseRFCOMM(channel)
+	level, err := readBatteryLevel(host, channel) // your device protocol
+	if err != nil {
+		return nil, driver.Wrap(err, driver.CodeBluetoothUnavailable)
+	}
+	value, _ := json.Marshal(level)
+	return &driver.Enrichment{Properties: map[string]driver.Property{"battery": {Value: value, Unit: "%"}}}, nil
+}
+```
 
-Shared concepts use normalized names such as `battery`, `noise_control`, and
-`ambient_level`. Only genuinely vendor-specific behavior is namespaced, for
-example `sony.speak_to_chat`.
-
-## Discovery and installation
-
-`bt driver install <executable>` reads and verifies the executable's manifest,
-then installs it in Betty's per-user driver directory. Official package-manager
-drivers can also be discovered by exact executable name on `PATH`; Betty checks
-the manifest ID before using one.
+Build it, install it, and use it through the normal CLI:
 
 ```console
-bt driver install ./bt-driver-example
-bt driver list
-bt driver remove example/vendor
+go build -o bt-driver-acme .
+bt driver install ./bt-driver-acme
+bt get "ACME-42" battery
 ```
+
+## The SDK
+
+| Piece | What it does |
+| --- | --- |
+| `Driver` | Your manifest and the optional `Inspect`, `Get`, and `Set` handlers. |
+| `Serve(d)` | Runs the driver: answers `--manifest`, handles requests until Betty closes stdin, and exits. |
+| `Driver.Run(args, in, out)` | The same over arbitrary streams, for tests. |
+| `*Session` | Host calls for the current request: `OpenL2CAP`, `ReadL2CAP`, `WriteL2CAP`, `CloseL2CAP`, the same four for RFCOMM, `GetState`, and `SetState`. |
+| `Errorf(code, …)` | Returns a structured error with a stable code. |
+| `Wrap(err, fallback)` | Keeps the code of a failed host call, or applies `fallback`. |
+| `PropertyRequest.DecodeValue` | Decodes a `set` value, reporting `usage` for the wrong JSON type. |
+| Constants | Methods, purposes, permissions, capability statuses and types, confidence levels, and every `ErrorCode`. |
+
+Handler rules, which `Serve` enforces where it can:
+
+- A missing handler, or a `nil` enrichment, means the request isn't yours.
+  Betty then asks other drivers. Return an error only for a device and property
+  you own.
+- `Get` and `Set` run only when the target device is in the request.
+  `request.Device` is already resolved.
+- `Set` must return state read back from the device, never the requested
+  value.
+- A plain `error` becomes `internal`, and a panic becomes an `internal` error
+  response; neither crashes the session.
+- Host calls are synchronous and sequential. Don't call `Session` from more
+  than one goroutine.
+
+## Testing a driver
+
+Handlers are plain functions, so unit-test them directly with `nil` for the
+session when they make no host calls. To test the wire behavior, pipe encoded
+requests into `Driver.Run` and decode its output. See
+[`serve_test.go`](serve_test.go) and the Sony driver's
+[`sony_test.go`](../cmd/bt-driver-sony/sony_test.go).
+
+## Reference drivers
+
+- [Sony Headphones](../cmd/bt-driver-sony): built on `driver.Serve`, using
+  RFCOMM host calls.
+- [Apple Audio](../cmd/bt-driver-apple-audio): L2CAP and driver storage. It
+  still uses the lower-level `Session` API directly.
 
 ## Security status
 
-Executable drivers are currently trusted native code. Manifest permissions and
-the host API reduce accidental authority, but they are not a process sandbox.
-Install only drivers you trust. Sandboxing, cryptographic endpoint identity, and
-formal protocol upgrade/deprecation rules remain roadmap work.
-
-The public Go types and session implementation in this directory are the
-protocol reference. Protocol version 1 clients should ignore unknown JSON
-fields so compatible fields can be added without changing existing meaning.
+Executable drivers are trusted native code. Manifest permissions and the host
+API prevent accidental access, but they are not a sandbox. Install only drivers
+you trust. See the [security model](../docs/DRIVER_PROTOCOL.md#12-security-model).

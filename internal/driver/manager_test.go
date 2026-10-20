@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -167,8 +168,8 @@ func TestExportImportDriverState(t *testing.T) {
 	if err := m.ExportState(id, export); err != nil {
 		t.Fatal(err)
 	}
-	info, _ := os.Stat(export)
-	if info.Mode().Perm() != 0o600 {
+	// Windows has no Unix permission bits; Go always reports 0666 there.
+	if info, _ := os.Stat(export); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode=%o", info.Mode().Perm())
 	}
 	if err := m.storageSet(protocol.Manifest{ID: id}, "airpods/keyring-v1", "changed"); err != nil {
@@ -248,5 +249,16 @@ func TestOfficialPathDriverNamesAreStable(t *testing.T) {
 	drivers := officialPathDrivers()
 	if drivers["official/apple-audio"] == "" || drivers["official/sony-headphones"] == "" {
 		t.Fatalf("drivers=%v", drivers)
+	}
+}
+
+func TestPublicErrorCodesMatchDomainCodes(t *testing.T) {
+	for _, code := range protocol.ErrorCodes {
+		if got := driverErrorCode(string(code)); string(got) != string(code) {
+			t.Fatalf("public code %q maps to %q", code, got)
+		}
+	}
+	if len(protocol.ErrorCodes) != 12 {
+		t.Fatalf("public error codes changed; update driverErrorCode and docs/DRIVER_PROTOCOL.md")
 	}
 }
