@@ -25,6 +25,9 @@ var manifest = protocol.Manifest{
 		protocol.PermissionL2CAP,
 		protocol.PermissionStorage,
 	},
+	// Apple's company ID marks Continuity advertisements; names find saved
+	// Classic endpoints.
+	Match: &protocol.Match{CompanyIDs: []uint16{0x004c}, NameContains: []string{"AirPods", "Beats"}},
 }
 
 func main() {

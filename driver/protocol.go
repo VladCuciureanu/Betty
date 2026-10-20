@@ -11,6 +11,23 @@ type Manifest struct {
 	Name        string   `json:"name"`
 	Version     string   `json:"version"`
 	Permissions []string `json:"permissions,omitempty"`
+	// Match, when set, limits the requests Betty sends this driver to those
+	// with a device it may recognize. Without it the driver gets every
+	// request.
+	Match *Match `json:"match,omitempty"`
+}
+
+// Match lists cheap hints about the devices a driver recognizes. A device
+// matches when any one hint does. Hints only decide whether Betty starts the
+// driver; the driver still receives every device in the request.
+type Match struct {
+	// CompanyIDs are Bluetooth SIG company identifiers in manufacturer data.
+	CompanyIDs []uint16 `json:"company_ids,omitempty"`
+	// ServiceUUIDs are advertised or SDP service UUIDs, or service-data
+	// UUIDs, as 16-bit ("180f") or 128-bit UUIDs.
+	ServiceUUIDs []string `json:"service_uuids,omitempty"`
+	// NameContains are case-insensitive substrings of the device name.
+	NameContains []string `json:"name_contains,omitempty"`
 }
 type Request struct {
 	Protocol int             `json:"protocol"`

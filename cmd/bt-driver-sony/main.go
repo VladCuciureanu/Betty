@@ -21,6 +21,10 @@ var manifest = protocol.Manifest{
 		protocol.PermissionDeviceMetadata,
 		protocol.PermissionRFCOMM,
 	},
+	Match: &protocol.Match{
+		ServiceUUIDs: []string{"96cc203e-5068-46ad-b32d-e316f5e069ba", "956c7b26-d49a-4ba8-b03f-b17d393cb6e2"},
+		NameContains: []string{"WH-", "WF-", "WI-", "MDR-", "LinkBuds", "ULT WEAR"},
+	},
 }
 
 func main() {

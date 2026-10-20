@@ -85,7 +85,8 @@ drivers can use any file name; Betty identifies them by manifest ID.
   "id": "example/heart-rate",
   "name": "Example Heart Rate",
   "version": "0.3.0",
-  "permissions": ["device-metadata", "driver-storage"]
+  "permissions": ["device-metadata", "driver-storage"],
+  "match": {"service_uuids": ["180d"]}
 }
 ```
 
@@ -96,8 +97,24 @@ drivers can use any file name; Betty identifies them by manifest ID.
 | `name` | string | yes | Human-readable name. |
 | `version` | string | yes | Driver version. Semantic versioning is RECOMMENDED. |
 | `permissions` | array of strings | no | Host capabilities the driver may use ([section 8](#8-host-calls)). |
+| `match` | object | no | Hints about the devices the driver recognizes, described below. |
 
 The output of `--manifest` MUST NOT exceed 64 KiB.
+
+`match` lets Betty skip starting a driver that can't recognize any device in a
+request. A device matches when any one hint does:
+
+| Hint | Type | Matches a device with |
+| --- | --- | --- |
+| `company_ids` | array of integers | manufacturer data from one of these Bluetooth SIG company IDs |
+| `service_uuids` | array of strings | one of these UUIDs among its services or service data, as 16-bit (`"180f"`) or 128-bit UUIDs |
+| `name_contains` | array of strings | a name containing one of these, ignoring case |
+
+Betty sends `inspect` only when some device in the request matches, and `get`
+or `set` only when the selected device or one of its possible matches does.
+The request still carries every device, so a driver can correlate endpoints.
+A driver without `match` receives every request. Hints are a filter, not
+identification: a driver MUST still check each device itself.
 
 A driver's stored state belongs to its ID. Renaming a driver starts it with
 empty state; users can carry state over with `bt driver export-state` and
