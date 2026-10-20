@@ -38,7 +38,7 @@ same way.
 
 | Platform | Link | How | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| Linux / BlueZ 5.72 | Virtual (`/dev/vhci`), Ubuntu generic kernel in a VM | CI, every pull request | Scan, GATT read/write/notify, property watch, link drop, ambiguity, pairing, refused pairing, unpairing pass. Classic connect and Sony battery are skipped: the virtual controller cannot re-authenticate a paired device. | `.github/workflows/e2e-linux.yml` |
+| Linux / BlueZ 5.72 | Virtual (`/dev/vhci`), Ubuntu generic kernel in a VM | CI, every pull request | Scan, GATT read/write/notify, property watch, link drop, ambiguity, pairing, refused pairing, Classic connect and disconnect, unpairing pass. Sony battery is skipped: its RFCOMM session stalls on the virtual link ([#100](https://github.com/VladCuciureanu/Betty/issues/100)). | `.github/workflows/e2e-linux.yml` |
 | Windows | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
 | macOS | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
 
