@@ -46,7 +46,7 @@ func (h *host) OpenRFCOMM(ctx context.Context, deviceID, serviceUUID string) (st
 			_ = unix.Close(fd)
 		}
 	}()
-	if err = connect(ctx, fd, &unix.SockaddrRFCOMM{Addr: address, Channel: channel}); err != nil {
+	if err = connect(ctx, fd, &unix.SockaddrRFCOMM{Addr: rfcommAddress(address), Channel: channel}); err != nil {
 		return "", fmt.Errorf("connect RFCOMM service %s: %w", serviceUUID, err)
 	}
 	id := "rfcomm-linux-" + strconv.FormatUint(h.next.Add(1), 10)
@@ -231,6 +231,17 @@ func parseUUID(value string) ([16]byte, error) {
 	}
 	copy(out[:], decoded)
 	return out, nil
+}
+
+// rfcommAddress converts an address in display order to the little-endian
+// order that unix.SockaddrRFCOMM copies into the socket address unchanged.
+// unix.SockaddrL2, by contrast, takes display order and reverses it itself.
+func rfcommAddress(address [6]byte) [6]byte {
+	var out [6]byte
+	for i, b := range address {
+		out[len(address)-1-i] = b
+	}
+	return out
 }
 
 func bluetoothAddress(deviceID string) ([6]byte, error) {

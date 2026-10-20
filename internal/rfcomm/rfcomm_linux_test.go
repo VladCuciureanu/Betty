@@ -39,6 +39,16 @@ func TestParseServiceAttributeResponse(t *testing.T) {
 	}
 }
 
+func TestRFCOMMAddressIsLittleEndian(t *testing.T) {
+	address, err := bluetoothAddress("bluez:F0:E2:09:00:00:01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rfcommAddress(address); got != [6]byte{0x01, 0x00, 0x00, 0x09, 0xE2, 0xF0} {
+		t.Fatalf("rfcommAddress=% x", got)
+	}
+}
+
 func TestBluetoothAddress(t *testing.T) {
 	got, err := bluetoothAddress("bluez:50-F3-51-CE-C5-60")
 	if err != nil {
