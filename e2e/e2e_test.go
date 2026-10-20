@@ -198,8 +198,16 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	t.Setenv("BETTY_PEER_LOG", "DEBUG")
 	p := startPeer(t, "sony:WH-1000XM5")
 	address := p.device(0).Address
-	ok(t, nil, "pair", address)
-	t.Cleanup(func() { bt(t, nil, "unpair", address) })
+	if !virtual() {
+		// Bumble's virtual controller cannot re-authenticate a bonded Classic
+		// link, which the driver's RFCOMM connection would need, so on the
+		// virtual link the headset connects without pairing.
+		ok(t, nil, "pair", address)
+		t.Cleanup(func() { bt(t, nil, "unpair", address) })
+	} else {
+		var devices []domain.Device
+		ok(t, &devices, "scan")
+	}
 	// The driver reads battery only from a connected device. Headphones
 	// connect to the computer themselves; the link may also still be up
 	// from pairing, and a second connection would confuse both sides.
