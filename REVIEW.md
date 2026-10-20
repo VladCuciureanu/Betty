@@ -41,7 +41,7 @@ than rough.
 | --- | --- | --- |
 | 1 | **Fixed** (legacy IDs removed entirely). ✓ **A driver can read another driver's private storage.** A manifest may claim any `legacy_ids`; the host then serves that driver's storage as a fallback and hides the real driver. A third-party driver declaring `"legacy_ids":["official/apple-audio"]` reads the AirPods encryption keys. | `internal/driver/manager.go` `storageGet`, `storageSet`, `List`, `validateManifest` |
 | 2 | ✓ **The Windows kernel driver has no access control.** All IOCTLs are `FILE_ANY_ACCESS`, there's no SDDL, and `IOCTL_BETTY_CONNECT` accepts any address. Any local user can send raw AAP traffic to any device in range. Don't ship it as is. | `packaging/windows/driver/BettyAAP.h`, `Driver.c` |
-| 3 | ✓ **Same-name devices resolve at random.** The exact-name pass returns the first match and never reports ambiguity. The scan merge never joins a device's OS entry with its BLE entry, so on this machine `55" OLED` appears as both `windows:04:E4:…` and `ble:04:E4:…`. Which one `bt get`/`connect` acts on depends on goroutine timing. | `internal/resolver/resolver.go:19`, `internal/app/app.go` `merge`/`sameEndpoint` |
+| 3 | **Fixed.** ✓ **Same-name devices resolve at random.** The exact-name pass returns the first match and never reports ambiguity. The scan merge never joins a device's OS entry with its BLE entry, so on this machine `55" OLED` appears as both `windows:04:E4:…` and `ble:04:E4:…`. Which one `bt get`/`connect` acts on depends on goroutine timing. | `internal/resolver/resolver.go:19`, `internal/app/app.go` `merge`/`sameEndpoint` |
 | 4 | ✓ **Windows RFCOMM uses the wrong socket-address layout.** `SOCKADDR_BTH` is a packed 30-byte struct with the address at offset 2. The Go struct pads the address to offset 8, and a unit test locks that in. Every connect goes to the wrong address. (hw) | `internal/rfcomm/rfcomm_windows.go:61` |
 | 5 | ✓ **The macOS transports have a use-after-free on cancel.** `defer C.free(cAddress)` runs while the open goroutine is still inside the C call that reads the string. | `internal/l2cap/l2cap_darwin.go:30`, `internal/rfcomm/rfcomm_darwin.go` |
 | 6 | ✓ **macOS pairing can spin forever.** The run-loop wait has no timeout and never calls `[pair stop]`. A nil device makes `start` return success and the loop never ends. Passkey/confirmation callbacks aren't implemented. (hw) | `internal/backend/bridge_darwin.m:27` |
@@ -56,35 +56,35 @@ than rough.
 
 High:
 
-- ✓ `--verbose` does nothing. `Renderer.Verbose` is never read.
-- ✓ `bt -h` and `bt --json --help` fail with the usage error "flag: help requested".
-- ✓ Ctrl-C mid-operation is reported as an `internal` error with exit 1, because only `DeadlineExceeded` is translated and `context.Canceled` isn't.
-- Successful `pair`, `connect`, `gatt write` and similar commands print nothing, even with `--json`, so a script can't tell success from silence.
-- In human mode, ambiguity errors drop the list of candidate devices, so the user has no IDs to retry with.
+- **Fixed.** ✓ `--verbose` does nothing. `Renderer.Verbose` is never read.
+- **Fixed.** ✓ `bt -h` and `bt --json --help` fail with the usage error "flag: help requested".
+- **Fixed.** ✓ Ctrl-C mid-operation is reported as an `internal` error with exit 1, because only `DeadlineExceeded` is translated and `context.Canceled` isn't.
+- **Fixed.** Successful `pair`, `connect`, `gatt write` and similar commands print nothing, even with `--json`, so a script can't tell success from silence.
+- **Fixed.** In human mode, ambiguity errors drop the list of candidate devices, so the user has no IDs to retry with.
 
 Medium:
 
-- ✓ Every `get` and `set` runs a discovery scan of at least ~4s first. `watch` repeats it on every poll, so the scans run back to back. Any transient error ends the watch.
-- ✓ Extra arguments are silently ignored. `bt --json scan extra` succeeds.
-- An unknown command, such as the typo `bt lsit`, runs a ~4s scan and then fails with `device_not_found` (exit 3) instead of `usage` (exit 2).
-- Scan errors are dropped whenever the other source returned devices.
-- An empty scan prints `"data":null` instead of `[]`.
-- `requiresDeviceDriver` hardcodes vendor property names in the core, which crosses the driver boundary.
-- Capability status and kind are untyped strings, while `domain.Support` is typed.
-- `--timeout 0` and negative timeouts aren't validated.
-- `validateRange` rejects valid negative values when `step` is set without `minimum`.
-- `pair` spends up to 4s of its 10s budget scanning before the user can enter a PIN.
+- **Fixed.** ✓ Every `get` and `set` runs a discovery scan of at least ~4s first. `watch` repeats it on every poll, so the scans run back to back. Any transient error ends the watch.
+- **Fixed.** ✓ Extra arguments are silently ignored. `bt --json scan extra` succeeds.
+- **Fixed.** An unknown command, such as the typo `bt lsit`, runs a ~4s scan and then fails with `device_not_found` (exit 3) instead of `usage` (exit 2).
+- **Fixed.** Scan errors are dropped whenever the other source returned devices.
+- **Fixed.** An empty scan prints `"data":null` instead of `[]`.
+- **Fixed.** `requiresDeviceDriver` hardcodes vendor property names in the core, which crosses the driver boundary.
+- **Fixed.** Capability status and kind are untyped strings, while `domain.Support` is typed.
+- **Fixed.** `--timeout 0` and negative timeouts aren't validated.
+- **Fixed.** `validateRange` rejects valid negative values when `step` is set without `minimum`.
+- **Fixed.** `pair` spends up to 4s of its 10s budget scanning before the user can enter a PIN.
 
 Idiom:
 
-- A local `min` shadows the builtin, and `contains` duplicates `slices.Contains`.
-- Many functions have no blank line between them.
-- `parseGlobal` has an unused `stderr` parameter.
-- `fmt.Errorf` is called with no format verbs.
-- Human output sorts the caller's slice in place, with an unstable sort.
-- Help and version are handled in two places.
+- **Fixed.** A local `min` shadows the builtin, and `contains` duplicates `slices.Contains`.
+- **Fixed.** Many functions have no blank line between them.
+- **Fixed.** `parseGlobal` has an unused `stderr` parameter.
+- **Fixed.** `fmt.Errorf` is called with no format verbs.
+- **Fixed.** Human output sorts the caller's slice in place, with an unstable sort.
+- **Fixed.** Help and version are handled in two places.
 
-Tests miss the resolver's duplicate exact names, `mutate`, `set`, `watch`, `gatt`, cancellation, and exit codes from `Main`.
+**Fixed.** Tests miss the resolver's duplicate exact names, `mutate`, `set`, `watch`, `gatt`, cancellation, and exit codes from `Main`.
 
 ### OS backends and BLE (`internal/backend`, `ble`, `hidbattery`)
 
@@ -146,28 +146,28 @@ FALSE or misleading claims that users or integrators would act on:
 
 | Doc | Claim | Reality |
 | --- | --- | --- |
-| README | "never silently chooses between ambiguous matches" | ✓ False for duplicate exact names (finding 3). |
-| README | `--verbose` "includes additional diagnostics" | ✓ The flag does nothing. |
-| README | GATT writes "choose a mode supported by the characteristic" | ✓ Writes always use with-response unless `--without-response` is passed. |
-| README | "Successful mutating commands are silent" | `set` and `driver install` print output. |
-| README | Windows connect/disconnect "not reliably available for every profile" | ✓ Always `unsupported`. |
-| README | macOS connect/disconnect "Implemented" | It opens a baseband link, not profiles. |
-| README | macOS pair "Implemented" | Unpaired Classic devices are never discovered, so they can't be paired. |
-| README | `--non-interactive` "fails clearly" | Only Linux honors it; Windows and macOS can still show OS pairing UI. |
-| README | host access limited to "selected device IDs" | Drivers can reach every device in the request, which means every known device. |
-| README / JSON_API | JSON contract | Neither says that errors go to stderr. `bt --json --quiet` prints a plain-text error, and `bt --json --version` returns a usage error. |
-| DRIVER_PROTOCOL | Drivers MUST loop until EOF and answer unknown methods with `unsupported`; Apple Audio is a reference driver | Apple Audio handles one request and sends errors without `error_code`. The SDK port fixes this. |
+| README | "never silently chooses between ambiguous matches" | **Corrected.** ✓ False for duplicate exact names (finding 3). |
+| README | `--verbose` "includes additional diagnostics" | **Corrected.** ✓ The flag does nothing. |
+| README | GATT writes "choose a mode supported by the characteristic" | **Corrected.** ✓ Writes always use with-response unless `--without-response` is passed. |
+| README | "Successful mutating commands are silent" | **Corrected.** `set` and `driver install` print output. |
+| README | Windows connect/disconnect "not reliably available for every profile" | **Corrected.** ✓ Always `unsupported`. |
+| README | macOS connect/disconnect "Implemented" | **Corrected.** It opens a baseband link, not profiles. |
+| README | macOS pair "Implemented" | **Corrected.** Unpaired Classic devices are never discovered, so they can't be paired. |
+| README | `--non-interactive` "fails clearly" | **Corrected.** Only Linux honors it; Windows and macOS can still show OS pairing UI. |
+| README | host access limited to "selected device IDs" | **Corrected.** Drivers can reach every device in the request, which means every known device. |
+| README / JSON_API | JSON contract | **Corrected.** Neither says that errors go to stderr. `bt --json --quiet` prints a plain-text error, and `bt --json --version` returns a usage error. |
+| DRIVER_PROTOCOL | Drivers MUST loop until EOF and answer unknown methods with `unsupported`; Apple Audio is a reference driver | **Corrected.** Apple Audio handles one request and sends errors without `error_code`. The SDK port fixes this. |
 | DRIVER_PROTOCOL | `bt watch` polls "about every 2 seconds" | **Corrected.** ✓ The real cadence is ≥4s, because each poll rescans, and any error ends the watch. |
 | DRIVER_PROTOCOL | The `official/` publisher is "reserved" | **Corrected.** Nothing enforces it. |
 | DRIVER_PROTOCOL | Permission table | **Corrected.** Omits `advertisements`, which the Apple manifest declares. Unknown permissions are accepted silently. |
 | DRIVER_PROTOCOL | Betty "kills the driver" on timeout | **Fixed.** It surfaced as `internal` (exit 1); it now reports `timeout`. |
-| Apple README | A nearby advertisement "is not proof" of identity | With one advertisement and one connected device, its battery is copied onto the saved endpoint anyway. |
-| Sony README | Battery "available for v2" | v1 and name-only devices also report battery as `available`, then fail on `get`. |
-| packaging/windows | "Signing credentials are described in the root README" | They aren't. |
-| packaging/windows | "Tag releases enforce both" MSIs | The Advanced MSI is skipped when its secret is unset. |
-| packaging/homebrew | The tap "lives in" `homebrew-tap` | The roadmap says it hasn't been created. |
-| COMPATIBILITY | Driver matrix | ✓ The header has 9 columns and the delimiter row 10, so GitHub won't render the table. |
-| FUTURE_WORK | Sony "route v2 battery through get" is unchecked | Already done. |
+| Apple README | A nearby advertisement "is not proof" of identity | **Corrected.** With one advertisement and one connected device, its battery is copied onto the saved endpoint anyway. |
+| Sony README | Battery "available for v2" | **Corrected.** v1 and name-only devices also report battery as `available`, then fail on `get`. |
+| packaging/windows | "Signing credentials are described in the root README" | **Corrected.** They aren't. |
+| packaging/windows | "Tag releases enforce both" MSIs | **Corrected.** The Advanced MSI is skipped when its secret is unset. |
+| packaging/homebrew | The tap "lives in" `homebrew-tap` | **Corrected.** The roadmap says it hasn't been created. |
+| COMPATIBILITY | Driver matrix | **Corrected.** ✓ The header has 9 columns and the delimiter row 10, so GitHub won't render the table. |
+| FUTURE_WORK | Sony "route v2 battery through get" is unchecked | **Corrected.** Already done. |
 
 Four of these are mine, from the driver-SDK work: the Apple reference-driver
 claim, the watch cadence, `official/` "reserved", and the missing

@@ -31,7 +31,7 @@ Run:
 
 Use `-BaseOnly` to build only `betty-windows-x64.msi`; this path does not compile or require the Apple Audio userspace driver, setup helper, WDK project, or kernel package.
 
-Release signing credentials are described in the root README. Windows 10/11 requires Microsoft Hardware Dev Center signing for new kernel drivers. Prepare the submission with:
+The release workflow signs with the `BETTY_SIGNING_PFX_BASE64` and `BETTY_SIGNING_PFX_PASSWORD` secrets; see `sign.ps1`. Windows 10/11 requires Microsoft Hardware Dev Center signing for new kernel drivers. Prepare the submission with:
 
 ```powershell
 ./packaging/windows/build-driver-submission.ps1 -Version 1.0.0
@@ -45,7 +45,7 @@ Upload the signed CAB to Hardware Dev Center for attestation or WHCP signing. Af
   -RequireMicrosoftDriverSignature -RequireSigning
 ```
 
-The first requirement verifies the returned catalog using kernel signing policy. The second requires Authenticode credentials for Betty's executables and MSI. Tag releases enforce both and fetch the Microsoft-signed package from the protected `BETTY_MICROSOFT_SIGNED_DRIVER_URL` secret.
+The first requirement verifies the returned catalog using kernel signing policy. The second requires Authenticode credentials for Betty's executables and MSI. Tag releases always enforce Authenticode signing of the base MSI. They build the Advanced Support MSI only when the protected `BETTY_MICROSOFT_SIGNED_DRIVER_URL` secret provides a Microsoft-signed driver package, and skip it otherwise.
 
 ## Lifecycle
 

@@ -61,7 +61,10 @@ func (a *application) readProperty(ctx context.Context, devices []domain.Device,
 	if a.drivers != nil {
 		updated, _, err := a.drivers.Property(ctx, devices, "get", d.ID, name, nil)
 		if err != nil {
-			return propertyResult{}, err
+			// A driver may need devices that only a scan reports, such as
+			// the advertisements macOS Apple Audio battery readings come
+			// from, so a failed read is tried once more after a scan.
+			return propertyResult{}, needsDiscovery(err)
 		}
 		if found, ok := findByID(updated, d.ID); ok {
 			d = found
