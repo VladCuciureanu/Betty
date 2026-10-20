@@ -8,6 +8,7 @@ controller on the same virtual link that has inquiry scan enabled.
 """
 
 import asyncio
+import sys
 
 from bumble import hci
 from bumble.controller import Controller
@@ -75,6 +76,12 @@ class InquiryController(Controller):
             for name in _CLASSIC_COMMANDS
             if (opcode := getattr(hci, f"HCI_{name}_COMMAND", None)) is not None
         }
+
+    def on_hci_command(self, command):
+        # Name the controller: the kernel and the scripted devices' hosts
+        # talk to different controllers on the same link.
+        print(f"betty_peer: controller {self.name} does not implement {command.name}", file=sys.stderr, flush=True)
+        return super().on_hci_command(command)
 
     def on_hci_write_class_of_device_command(self, command):
         self.class_of_device = command.class_of_device
