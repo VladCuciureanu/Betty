@@ -35,7 +35,10 @@ dbus-daemon --system --fork
 /usr/libexec/bluetooth/bluetoothd --nodetach >/tmp/bluetoothd.log 2>&1 &
 # An HCI trace of every controller, printed if the suite fails.
 btmon >/tmp/btmon.log 2>&1 &
-trap 'status=$?; if [[ $status -ne 0 ]]; then echo "--- bluetoothd log"; tail -n 100 /tmp/bluetoothd.log; echo "--- HCI trace"; tail -n "${BETTY_E2E_TRACE_LINES:-400}" /tmp/btmon.log; fi' EXIT
+# On failure, print the end of bluetoothd's log and the discovery, pairing,
+# and connection traffic from the HCI trace.
+trace_filter='Inquiry|Scan|Advertising Report|Discovery|Device Found|Connect|Pair|Authentication|IO Capability|Link Key|Disconnect|Status: [^S]|Unknown'
+trap 'status=$?; if [[ $status -ne 0 ]]; then echo "--- bluetoothd log"; tail -n 60 /tmp/bluetoothd.log; echo "--- HCI trace (filtered)"; grep -E "$trace_filter" /tmp/btmon.log | tail -n "${BETTY_E2E_TRACE_LINES:-600}"; fi' EXIT
 
 cd "$repo/e2e"
 BETTY_E2E_TRANSPORT=virtual \
