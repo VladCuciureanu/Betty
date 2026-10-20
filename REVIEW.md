@@ -118,7 +118,8 @@ High, beyond the "Fix first" items:
 Medium:
 
 - **Fixed** (Linux L2CAP and RFCOMM). Sub-millisecond deadlines round down to 0. A socket that is still connecting can then be registered as open.
-- Windows uses `SO_RCVTIMEO` and retries, but the socket is in an indeterminate state after such a timeout.
+- **Fixed** (the socket stays non-blocking and waits with `select`; Close waits for in-flight reads and writes). Windows used `SO_RCVTIMEO` and retried, but the socket is in an indeterminate state after such a timeout.
+- **Fixed**, found while testing the above against a real socket: every Winsock call that returns an `int` was checked against `^uintptr(0)`, but `SOCKET_ERROR` arrives as `0xFFFFFFFF` in a 64-bit register, so on 64-bit Windows every failed or would-block `recv`, `send`, `connect` and `select` read as success. A non-blocking RFCOMM connect, which always starts with would-block, looked connected at once.
 - Windows L2CAP reads ignore the context and hold the channel lock for up to 5s.
 - **Fixed** (the host reads each instance's bound address and connects only through the matching one). The Go side sends `CONNECT` to every kernel-driver instance, so it can connect through an instance bound to a different headset.
 - **Fixed** (a channel is held open for the whole read or write; Close shuts the socket down to wake it, waits, then closes). On Linux, the fd was read outside the lock, a latent reuse race.
