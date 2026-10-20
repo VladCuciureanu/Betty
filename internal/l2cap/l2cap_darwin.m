@@ -1,3 +1,9 @@
+// Manual retain/release: cgo compiles Objective-C without ARC, and every
+// Betty .m file follows the same convention.
+#if __has_feature(objc_arc)
+#error "this file uses manual retain/release"
+#endif
+
 #import <Foundation/Foundation.h>
 #import <IOBluetooth/IOBluetooth.h>
 #include "l2cap_darwin.h"
@@ -9,7 +15,7 @@
 @property BOOL closed;
 @end
 @implementation BettyL2CAPRecord
-- (id)init { if ((self=[super init])) { self.condition=[NSCondition new]; self.buffer=[NSMutableData data]; } return self; }
+- (id)init { if ((self=[super init])) { self.condition=[[NSCondition new] autorelease]; self.buffer=[NSMutableData data]; } return self; }
 - (void)dealloc { [_channel release]; [_condition release]; [_buffer release]; [super dealloc]; }
 - (void)l2capChannelData:(IOBluetoothL2CAPChannel *)channel data:(void *)data length:(size_t)length { [self.condition lock]; [self.buffer appendBytes:data length:length]; [self.condition signal]; [self.condition unlock]; }
 - (void)l2capChannelClosed:(IOBluetoothL2CAPChannel *)channel { [self.condition lock]; self.closed=YES; [self.condition broadcast]; [self.condition unlock]; }

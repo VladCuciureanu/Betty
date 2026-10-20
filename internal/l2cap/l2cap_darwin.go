@@ -27,14 +27,16 @@ func (*darwinHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16) (
 	if !ok {
 		return "", domain.NewError(domain.CodeUnsupported, "device %q has no macOS Classic address", deviceID)
 	}
-	cAddress := C.CString(address)
-	defer C.free(unsafe.Pointer(cAddress))
 	type result struct {
 		id   int64
 		code int
 	}
 	done := make(chan result, 1)
 	go func() {
+		// The goroutine owns the C string: on cancel the caller returns while
+		// betty_l2cap_open may still be reading it.
+		cAddress := C.CString(address)
+		defer C.free(unsafe.Pointer(cAddress))
 		var code C.int
 		id := C.betty_l2cap_open(cAddress, C.ushort(psm), &code)
 		done <- result{int64(id), int(code)}
@@ -120,7 +122,25 @@ func nativeError(operation string, code int) error {
 	if name == "" {
 		name = "unknown IOReturn"
 	}
-	return fmt.Errorf("macOS L2CAP %s failed: %s (0x%08x)", operation, name, value)
+	return domain.NewError(ioReturnCode(value), "macOS L2CAP %s failed: %s (0x%08x)", operation, name, value)
+}
+
+func ioReturnCode(value uint32) domain.ErrorCode {
+	switch value {
+	case 0xe00002c0, 0xe00002f0: // kIOReturnNoDevice, kIOReturnNotFound
+		return domain.CodeNotFound
+	case 0xe00002c1, 0xe00002e2: // kIOReturnNotPrivileged, kIOReturnNotPermitted
+		return domain.CodePermission
+	case 0xe00002c7: // kIOReturnUnsupported
+		return domain.CodeUnsupported
+	case 0xe00002d6: // kIOReturnTimeout
+		return domain.CodeTimeout
+	case 0xe00002cd, 0xe00002d7: // kIOReturnNotOpen, kIOReturnOffline
+		return domain.CodeDisconnected
+	case 0xe00002c2: // kIOReturnBadArgument
+		return domain.CodeUsage
+	}
+	return domain.CodeUnavailable
 }
 
 const ioReturnError uint32 = 0xe00002bc
@@ -132,6 +152,7 @@ var ioReturnNames = map[uint32]string{
 	0xe00002c2:    "kIOReturnBadArgument",
 	0xe00002c5:    "kIOReturnExclusiveAccess",
 	0xe00002c7:    "kIOReturnUnsupported",
+	0xe00002cd:    "kIOReturnNotOpen",
 	0xe00002d5:    "kIOReturnBusy",
 	0xe00002d6:    "kIOReturnTimeout",
 	0xe00002d7:    "kIOReturnOffline",

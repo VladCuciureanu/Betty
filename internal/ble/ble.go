@@ -3,7 +3,7 @@ package ble
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,12 +35,18 @@ type TinyGo struct {
 	adapter   *bluetooth.Adapter
 	once      sync.Once
 	enableErr error
+
+	mu          sync.Mutex
+	disconnects map[string][]chan struct{}
 }
 
 func New() Client { return &TinyGo{adapter: bluetooth.DefaultAdapter} }
 
 func (b *TinyGo) enable() error {
-	b.once.Do(func() { b.enableErr = b.adapter.Enable() })
+	b.once.Do(func() {
+		b.adapter.SetConnectHandler(b.connectionChanged)
+		b.enableErr = b.adapter.Enable()
+	})
 	if b.enableErr != nil {
 		return domain.NewError(domain.CodeUnavailable, "Bluetooth adapter unavailable: %v", b.enableErr)
 	}
@@ -58,39 +64,83 @@ func (b *TinyGo) enableContext(ctx context.Context) error {
 	}
 }
 
+// advertisement accumulates every advertisement and scan response seen for
+// one device. Advertising packets often carry only part of the data, so a
+// later packet without a name or services must not erase an earlier one.
+type advertisement struct {
+	address      string
+	name         string
+	rssi         int16
+	services     []string
+	manufacturer map[uint16]string
+	serviceData  map[string]string
+	lastSeen     time.Time
+}
+
+func (a *advertisement) merge(result bluetooth.ScanResult, now time.Time) {
+	if name := result.LocalName(); name != "" {
+		a.name = name
+	}
+	a.rssi = result.RSSI
+	a.lastSeen = now
+	for _, uuid := range result.ServiceUUIDs() {
+		if value := uuid.String(); !slices.Contains(a.services, value) {
+			a.services = append(a.services, value)
+		}
+	}
+	for _, item := range result.ManufacturerData() {
+		a.manufacturer[item.CompanyID] = hex.EncodeToString(item.Data)
+	}
+	for _, item := range result.ServiceData() {
+		a.serviceData[item.UUID.String()] = hex.EncodeToString(item.Data)
+	}
+}
+
+func (a *advertisement) device() domain.Device {
+	name := a.name
+	if name == "" {
+		name = a.address
+	}
+	rssi, lastSeen := a.rssi, a.lastSeen
+	d := domain.Device{ID: "ble:" + a.address, Name: name, RSSI: &rssi, Services: slices.Clone(a.services), LastSeenAt: &lastSeen,
+		Endpoints: []domain.Endpoint{{ID: a.address, Address: a.address, Transport: domain.TransportBLE}}}
+	for _, id := range sortedKeys(a.manufacturer) {
+		d.ManufacturerData = append(d.ManufacturerData, domain.ManufacturerData{CompanyID: id, Data: a.manufacturer[id]})
+	}
+	for _, uuid := range sortedKeys(a.serviceData) {
+		d.ServiceData = append(d.ServiceData, domain.ServiceData{UUID: uuid, Data: a.serviceData[uuid]})
+	}
+	return d
+}
+
+func sortedKeys[K uint16 | string, V any](m map[K]V) []K {
+	keys := make([]K, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 func (b *TinyGo) Scan(ctx context.Context) ([]domain.Device, error) {
 	if err := b.enableContext(ctx); err != nil {
 		return nil, err
 	}
 	var mu sync.Mutex
-	byID := map[string]domain.Device{}
+	byAddress := map[string]*advertisement{}
 	done := make(chan error, 1)
 	go func() {
 		done <- b.adapter.Scan(func(_ *bluetooth.Adapter, result bluetooth.ScanResult) {
-			id := "ble:" + result.Address.String()
-			name := result.LocalName()
-			if name == "" {
-				name = result.Address.String()
-			}
-			rssi := result.RSSI
-			services := make([]string, 0, len(result.ServiceUUIDs()))
-			for _, uuid := range result.ServiceUUIDs() {
-				services = append(services, uuid.String())
-			}
+			address := result.Address.String()
 			now := time.Now().UTC()
-			manufacturer := make([]domain.ManufacturerData, 0, len(result.ManufacturerData()))
-			for _, item := range result.ManufacturerData() {
-				copied := append([]byte(nil), item.Data...)
-				manufacturer = append(manufacturer, domain.ManufacturerData{CompanyID: item.CompanyID, Data: hex.EncodeToString(copied)})
-			}
-			serviceData := make([]domain.ServiceData, 0, len(result.ServiceData()))
-			for _, item := range result.ServiceData() {
-				serviceData = append(serviceData, domain.ServiceData{UUID: item.UUID.String(), Data: hex.EncodeToString(append([]byte(nil), item.Data...))})
-			}
 			mu.Lock()
-			byID[id] = domain.Device{ID: id, Name: name, RSSI: &rssi, Services: services, ManufacturerData: manufacturer, ServiceData: serviceData, LastSeenAt: &now,
-				Endpoints: []domain.Endpoint{{ID: result.Address.String(), Address: result.Address.String(), Transport: domain.TransportBLE}}}
-			mu.Unlock()
+			defer mu.Unlock()
+			a, ok := byAddress[address]
+			if !ok {
+				a = &advertisement{address: address, manufacturer: map[uint16]string{}, serviceData: map[string]string{}}
+				byAddress[address] = a
+			}
+			a.merge(result, now)
 		})
 	}()
 	select {
@@ -99,24 +149,26 @@ func (b *TinyGo) Scan(ctx context.Context) ([]domain.Device, error) {
 		<-done
 	case err := <-done:
 		if err != nil {
-			return nil, fmt.Errorf("BLE scan: %w", err)
+			return nil, translate("scan", err, domain.CodeUnavailable)
 		}
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	out := make([]domain.Device, 0, len(byID))
-	for _, d := range byID {
-		out = append(out, d)
+	out := make([]domain.Device, 0, len(byAddress))
+	for _, a := range byAddress {
+		out = append(out, a.device())
 	}
 	return out, nil
 }
 
 func (b *TinyGo) connect(ctx context.Context, address string) (bluetooth.Device, error) {
+	addr, ok := parseAddress(address)
+	if !ok {
+		return bluetooth.Device{}, domain.NewError(domain.CodeUsage, "invalid BLE address %q", address)
+	}
 	if err := b.enableContext(ctx); err != nil {
 		return bluetooth.Device{}, err
 	}
-	var addr bluetooth.Address
-	addr.Set(address)
 	type result struct {
 		device bluetooth.Device
 		err    error
@@ -125,9 +177,19 @@ func (b *TinyGo) connect(ctx context.Context, address string) (bluetooth.Device,
 	go func() { d, err := b.adapter.Connect(addr, bluetooth.ConnectionParams{}); ch <- result{d, err} }()
 	select {
 	case <-ctx.Done():
+		// tinygo's Connect cannot be interrupted. If it still succeeds, nobody
+		// owns the connection, so close it as soon as it arrives.
+		go func() {
+			if r := <-ch; r.err == nil {
+				_ = r.device.Disconnect()
+			}
+		}()
 		return bluetooth.Device{}, ctx.Err()
 	case r := <-ch:
-		return r.device, r.err
+		if r.err != nil {
+			return bluetooth.Device{}, translate("connect", r.err, domain.CodeDisconnected)
+		}
+		return r.device, nil
 	}
 }
 
@@ -139,7 +201,7 @@ func (b *TinyGo) Services(ctx context.Context, address string) ([]Service, error
 	defer d.Disconnect()
 	services, err := d.DiscoverServices(nil)
 	if err != nil {
-		return nil, err
+		return nil, translate("service discovery", err, domain.CodeInternal)
 	}
 	out := make([]Service, 0, len(services))
 	for _, s := range services {
@@ -149,24 +211,24 @@ func (b *TinyGo) Services(ctx context.Context, address string) ([]Service, error
 }
 
 func (b *TinyGo) Characteristics(ctx context.Context, address, serviceUUID string) ([]Characteristic, error) {
+	filter, err := uuidFilter(serviceUUID)
+	if err != nil {
+		return nil, err
+	}
 	d, err := b.connect(ctx, address)
 	if err != nil {
 		return nil, err
 	}
 	defer d.Disconnect()
-	filter, err := uuidFilter(serviceUUID)
-	if err != nil {
-		return nil, err
-	}
 	services, err := d.DiscoverServices(filter)
 	if err != nil {
-		return nil, err
+		return nil, translate("service discovery", err, domain.CodeInternal)
 	}
 	var out []Characteristic
 	for _, s := range services {
 		chars, e := s.DiscoverCharacteristics(nil)
 		if e != nil {
-			return nil, e
+			return nil, translate("characteristic discovery", e, domain.CodeInternal)
 		}
 		for _, c := range chars {
 			out = append(out, Characteristic{ServiceUUID: s.UUID().String(), UUID: c.UUID().String()})
@@ -176,27 +238,31 @@ func (b *TinyGo) Characteristics(ctx context.Context, address, serviceUUID strin
 }
 
 func (b *TinyGo) find(ctx context.Context, address, characteristicUUID string) (bluetooth.Device, bluetooth.DeviceCharacteristic, error) {
+	uuid, err := bluetooth.ParseUUID(characteristicUUID)
+	if err != nil {
+		return bluetooth.Device{}, bluetooth.DeviceCharacteristic{}, domain.NewError(domain.CodeUsage, "invalid characteristic UUID %q", characteristicUUID)
+	}
 	d, err := b.connect(ctx, address)
 	if err != nil {
 		return d, bluetooth.DeviceCharacteristic{}, err
 	}
-	uuid, err := bluetooth.ParseUUID(characteristicUUID)
-	if err != nil {
-		d.Disconnect()
-		return d, bluetooth.DeviceCharacteristic{}, domain.NewError(domain.CodeUsage, "invalid characteristic UUID %q", characteristicUUID)
-	}
 	services, err := d.DiscoverServices(nil)
 	if err != nil {
 		d.Disconnect()
-		return d, bluetooth.DeviceCharacteristic{}, err
+		return d, bluetooth.DeviceCharacteristic{}, translate("service discovery", err, domain.CodeInternal)
 	}
+	// Discover every characteristic and match locally: with a UUID filter,
+	// tinygo reports "not found" as an error, which would hide real failures.
 	for _, s := range services {
-		chars, e := s.DiscoverCharacteristics([]bluetooth.UUID{uuid})
+		chars, e := s.DiscoverCharacteristics(nil)
 		if e != nil {
-			continue
+			d.Disconnect()
+			return d, bluetooth.DeviceCharacteristic{}, translate("characteristic discovery", e, domain.CodeInternal)
 		}
-		if len(chars) > 0 {
-			return d, chars[0], nil
+		for _, c := range chars {
+			if c.UUID() == uuid {
+				return d, c, nil
+			}
 		}
 	}
 	d.Disconnect()
@@ -211,7 +277,10 @@ func (b *TinyGo) Read(ctx context.Context, address, uuid string) ([]byte, error)
 	defer d.Disconnect()
 	buf := make([]byte, 512)
 	n, err := c.Read(buf)
-	return buf[:n], err
+	if err != nil {
+		return nil, translate("read", err, domain.CodeInternal)
+	}
+	return buf[:n], nil
 }
 
 func (b *TinyGo) Write(ctx context.Context, address, uuid string, value []byte, withoutResponse bool) error {
@@ -225,7 +294,7 @@ func (b *TinyGo) Write(ctx context.Context, address, uuid string, value []byte, 
 	} else {
 		_, err = c.Write(value)
 	}
-	return err
+	return translate("write", err, domain.CodeInternal)
 }
 
 func (b *TinyGo) Watch(ctx context.Context, address, uuid string, emit func([]byte) error) error {
@@ -234,6 +303,8 @@ func (b *TinyGo) Watch(ctx context.Context, address, uuid string, emit func([]by
 		return err
 	}
 	defer d.Disconnect()
+	lost, stopWatching := b.watchDisconnect(d.Address.String())
+	defer stopWatching()
 	errCh := make(chan error, 1)
 	if err := c.EnableNotifications(func(value []byte) {
 		copied := append([]byte(nil), value...)
@@ -244,7 +315,7 @@ func (b *TinyGo) Watch(ctx context.Context, address, uuid string, emit func([]by
 			}
 		}
 	}); err != nil {
-		return err
+		return translate("enable notifications", err, domain.CodeInternal)
 	}
 	defer stopNotifications(c)
 	select {
@@ -252,6 +323,50 @@ func (b *TinyGo) Watch(ctx context.Context, address, uuid string, emit func([]by
 		return nil
 	case err := <-errCh:
 		return err
+	case <-lost:
+		return domain.NewError(domain.CodeDisconnected, "BLE device %s disconnected", address)
+	}
+}
+
+// watchDisconnect returns a channel that is closed when the device at address
+// disconnects. tinygo reports disconnects through the adapter's connect
+// handler on macOS and Windows; Linux needs a D-Bus property watch.
+func (b *TinyGo) watchDisconnect(address string) (<-chan struct{}, func()) {
+	key := strings.ToUpper(address)
+	lost := make(chan struct{})
+	b.mu.Lock()
+	if b.disconnects == nil {
+		b.disconnects = map[string][]chan struct{}{}
+	}
+	b.disconnects[key] = append(b.disconnects[key], lost)
+	b.mu.Unlock()
+	stopPlatform := watchLinkLoss(address, func() { b.notifyDisconnect(key) })
+	return lost, func() {
+		stopPlatform()
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		b.disconnects[key] = slices.DeleteFunc(b.disconnects[key], func(ch chan struct{}) bool { return ch == lost })
+		if len(b.disconnects[key]) == 0 {
+			delete(b.disconnects, key)
+		}
+	}
+}
+
+func (b *TinyGo) connectionChanged(device bluetooth.Device, connected bool) {
+	if !connected {
+		b.notifyDisconnect(strings.ToUpper(device.Address.String()))
+	}
+}
+
+func (b *TinyGo) notifyDisconnect(key string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.disconnects[key] {
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
 	}
 }
 
@@ -264,11 +379,11 @@ func (b *TinyGo) DeviceInformation(ctx context.Context, address string) (map[str
 	serviceUUID, _ := bluetooth.ParseUUID("180a")
 	services, err := d.DiscoverServices([]bluetooth.UUID{serviceUUID})
 	if err != nil || len(services) == 0 {
-		return nil, err
+		return nil, translate("service discovery", err, domain.CodeInternal)
 	}
 	chars, err := services[0].DiscoverCharacteristics(nil)
 	if err != nil {
-		return nil, err
+		return nil, translate("characteristic discovery", err, domain.CodeInternal)
 	}
 	names := map[string]string{"2a29": "manufacturer", "2a24": "model", "2a25": "serial_number", "2a27": "hardware_revision", "2a26": "firmware_revision", "2a28": "software_revision"}
 	out := map[string]string{}

@@ -42,10 +42,10 @@ than rough.
 | 1 | **Fixed** (legacy IDs removed entirely). ✓ **A driver can read another driver's private storage.** A manifest may claim any `legacy_ids`; the host then serves that driver's storage as a fallback and hides the real driver. A third-party driver declaring `"legacy_ids":["official/apple-audio"]` reads the AirPods encryption keys. | `internal/driver/manager.go` `storageGet`, `storageSet`, `List`, `validateManifest` |
 | 2 | **Fixed** (INF security descriptor allowing only SYSTEM, administrators and interactive users; read/write IOCTL access bits; CONNECT limited to the PDO's BTHENUM address; needs hardware validation). ✓ **The Windows kernel driver has no access control.** All IOCTLs are `FILE_ANY_ACCESS`, there's no SDDL, and `IOCTL_BETTY_CONNECT` accepts any address. Any local user can send raw AAP traffic to any device in range. Don't ship it as is. | `packaging/windows/driver/BettyAAP.h`, `Driver.c` |
 | 3 | ✓ **Same-name devices resolve at random.** The exact-name pass returns the first match and never reports ambiguity. The scan merge never joins a device's OS entry with its BLE entry, so on this machine `55" OLED` appears as both `windows:04:E4:…` and `ble:04:E4:…`. Which one `bt get`/`connect` acts on depends on goroutine timing. | `internal/resolver/resolver.go:19`, `internal/app/app.go` `merge`/`sameEndpoint` |
-| 4 | ✓ **Windows RFCOMM uses the wrong socket-address layout.** `SOCKADDR_BTH` is a packed 30-byte struct with the address at offset 2. The Go struct pads the address to offset 8, and a unit test locks that in. Every connect goes to the wrong address. (hw) | `internal/rfcomm/rfcomm_windows.go:61` |
-| 5 | ✓ **The macOS transports have a use-after-free on cancel.** `defer C.free(cAddress)` runs while the open goroutine is still inside the C call that reads the string. | `internal/l2cap/l2cap_darwin.go:30`, `internal/rfcomm/rfcomm_darwin.go` |
-| 6 | ✓ **macOS pairing can spin forever.** The run-loop wait has no timeout and never calls `[pair stop]`. A nil device makes `start` return success and the loop never ends. Passkey/confirmation callbacks aren't implemented. (hw) | `internal/backend/bridge_darwin.m:27` |
-| 7 | ✓ **A cancelled BLE connect leaks a live connection.** The connect goroutine keeps running and nobody disconnects its result. | `internal/ble/ble.go:124` |
+| 4 | **Fixed** (hw: the packed layout is unit-tested, a real connect is not). ✓ **Windows RFCOMM uses the wrong socket-address layout.** `SOCKADDR_BTH` is a packed 30-byte struct with the address at offset 2. The Go struct pads the address to offset 8, and a unit test locks that in. Every connect goes to the wrong address. (hw) | `internal/rfcomm/rfcomm_windows.go:61` |
+| 5 | **Fixed.** ✓ **The macOS transports have a use-after-free on cancel.** `defer C.free(cAddress)` runs while the open goroutine is still inside the C call that reads the string. | `internal/l2cap/l2cap_darwin.go:30`, `internal/rfcomm/rfcomm_darwin.go` |
+| 6 | **Fixed** (hw): the loop honors the deadline and cancellation and calls `[pair stop]`, a nil device reports `device_not_found`, and PIN, confirmation and passkey callbacks prompt through the pairing agent. ✓ **macOS pairing can spin forever.** The run-loop wait has no timeout and never calls `[pair stop]`. A nil device makes `start` return success and the loop never ends. Passkey/confirmation callbacks aren't implemented. (hw) | `internal/backend/bridge_darwin.m:27` |
+| 7 | **Fixed.** ✓ **A cancelled BLE connect leaks a live connection.** The connect goroutine keeps running and nobody disconnects its result. | `internal/ble/ble.go:124` |
 | 8 | **Fixed.** ✓ **The driver host can leak or hang child processes.** Early returns skip `cmd.Wait()`. The host never drains stdout or sets `WaitDelay`. There's no per-driver timeout, so one slow driver uses up the whole command's time. Reads from drivers have no size limit. (A reviewer also said `bt watch` has no deadline; that was wrong, because each watch round runs under `--timeout`.) | `internal/driver/manager.go` `call` |
 | 9 | **Fixed.** ✓ **The driver host accepts any non-host message as the final response.** `type` and `id` are never checked, so a stray line ends the session as an empty success. | `internal/driver/manager.go` `call` |
 | 10 | ✓ **Apple encrypted-battery decryption accepts wrong keys** about 2 times in 256 per key. Keys saved with `ModelID` 0 match every model, so a nearby stranger's AirPods can show an "exact" random battery value. | `cmd/bt-driver-apple-audio/keys.go:83` |
@@ -90,34 +90,34 @@ Tests miss the resolver's duplicate exact names, `mutate`, `set`, `watch`, `gatt
 
 High:
 
-- ✓ Windows classifies errors from a possibly stale `GetLastError` instead of the API's return code. For example, unpairing an unknown device reports `bluetooth_unavailable`.
-- ✓ A malformed BLE address is silently parsed as `00:00:00:00:00:00`, because `addr.Set` reports no error and none is checked.
-- tinygo errors are never mapped to domain codes, so every BLE failure becomes `internal`.
-- On macOS, messages to a nil device return 0, which reads as success. `disconnect` "succeeds" on a nonexistent device.
-- Most BlueZ/D-Bus errors fall through to `internal`: bluetoothd not running, stale object, access denied, "host is down". Cancelling pairing doesn't call `CancelPairing`, so BlueZ keeps going.
+- **Fixed.** ✓ Windows classifies errors from a possibly stale `GetLastError` instead of the API's return code. For example, unpairing an unknown device reports `bluetooth_unavailable`.
+- **Fixed** (now a `usage` error). ✓ A malformed BLE address is silently parsed as `00:00:00:00:00:00`, because `addr.Set` reports no error and none is checked.
+- **Fixed.** tinygo errors are never mapped to domain codes, so every BLE failure becomes `internal`.
+- **Fixed.** On macOS, messages to a nil device return 0, which reads as success. `disconnect` "succeeds" on a nonexistent device.
+- **Fixed** (hw: the table is unit-tested against error names, not a live bluetoothd). Most BlueZ/D-Bus errors fall through to `internal`: bluetoothd not running, stale object, access denied, "host is down". Cancelling pairing doesn't call `CancelPairing`, so BlueZ keeps going.
 
 Medium:
 
-- macOS `Scan` only lists paired devices, yet `Capabilities` says scan is supported.
-- `hidbattery/provider_darwin.m` is compiled without ARC and leaks `+1` objects; `bridge_darwin.m` uses manual release, so memory management is inconsistent across files.
+- **Fixed** (`Capabilities` now reports scan as unsupported). macOS `Scan` only lists paired devices, yet `Capabilities` says scan is supported.
+- **Fixed** (every `.m` file now uses manual retain/release and refuses to build under ARC). `hidbattery/provider_darwin.m` is compiled without ARC and leaks `+1` objects; `bridge_darwin.m` uses manual release, so memory management is inconsistent across files.
 - Opening `IOHIDManager` with NULL matching may trigger the macOS Input Monitoring prompt on a plain `bt list`. (hw)
-- Windows `Pair` blocks with no way to cancel. `bthprops.cpl` is loaded lazily and panics if missing. The struct padding is only correct on 64-bit. `Paired` is set from `Remembered`, which doesn't mean paired.
-- BLE scan keeps only the last advertisement per device, so a packet without a name resets the name to the address. GATT `watch` never notices a disconnect.
-- On Linux, the retry branch in the state-polling loop can never run, and `errorAs` reimplements `errors.As`. The adapter is chosen in random map order.
+- **Partly fixed:** `bthprops.cpl` now loads without panicking, the search parameters are laid out correctly on 32-bit, and `Paired` comes from `Authenticated` only. Still open: `Pair` can't be cancelled, and `BLUETOOTH_DEVICE_INFO` is misaligned on 32-bit x86, where Go aligns `uint64` to 4. Windows `Pair` blocks with no way to cancel. `bthprops.cpl` is loaded lazily and panics if missing. The struct padding is only correct on 64-bit. `Paired` is set from `Remembered`, which doesn't mean paired.
+- **Fixed** (hw for the disconnect watch). BLE scan keeps only the last advertisement per device, so a packet without a name resets the name to the address. GATT `watch` never notices a disconnect.
+- **Fixed.** On Linux, the retry branch in the state-polling loop can never run, and `errorAs` reimplements `errors.As`. The adapter is chosen in random map order.
 
 ### Transports and kernel driver (`internal/l2cap`, `rfcomm`, `packaging/windows/driver`)
 
 High, beyond the "Fix first" items:
 
-- Windows RFCOMM detects connect failure only through `writefds`, but Winsock reports a failed non-blocking connect in `exceptfds`. A refused connect hangs until the deadline.
-- Windows RFCOMM reads `WSAGetLastError` in a separate call, so the goroutine can move to another OS thread and get a stale value.
-- ✓ On Linux, L2CAP treats a zero-byte read (the peer closed) as an empty packet, so the AAP driver spins. RFCOMM handles this case correctly.
+- **Fixed** (hw). Windows RFCOMM detects connect failure only through `writefds`, but Winsock reports a failed non-blocking connect in `exceptfds`. A refused connect hangs until the deadline.
+- **Fixed.** Windows RFCOMM reads `WSAGetLastError` in a separate call, so the goroutine can move to another OS thread and get a stale value.
+- **Fixed** (now `device_disconnected`). ✓ On Linux, L2CAP treats a zero-byte read (the peer closed) as an empty packet, so the AAP driver spins. RFCOMM handles this case correctly.
 - macOS RFCOMM probably always fails its first SDP lookup, because `performSDPQuery:` is asynchronous. Delegates may dangle after close, and nothing pumps the run loop for data callbacks. (hw)
 - **Fixed** (a passive-level work item closes the channel with `BRB_L2CA_CLOSE_CHANNEL` under the lock). The kernel driver leaks the L2CAP channel on remote disconnect and clears it without taking the lock. (hw)
 
 Medium:
 
-- Sub-millisecond deadlines round down to 0. A socket that is still connecting can then be registered as open.
+- **Fixed** (Linux L2CAP and RFCOMM). Sub-millisecond deadlines round down to 0. A socket that is still connecting can then be registered as open.
 - Windows uses `SO_RCVTIMEO` and retries, but the socket is in an indeterminate state after such a timeout.
 - Windows L2CAP reads ignore the context and hold the channel lock for up to 5s.
 - **Fixed** (the host reads each instance's bound address and connects only through the matching one). The Go side sends `CONNECT` to every kernel-driver instance, so it can connect through an instance bound to a different headset.
@@ -139,6 +139,20 @@ Beyond the "Fix first" items:
 - The Apple driver duplicates its AAP handshake across two functions. It isn't on the SDK yet; the port is done in a separate session.
 - The darwin build needs cgo: the stub for `systemAppleAudioKeys` should be tagged `!darwin || !cgo`.
 - The storage-key regex is recompiled on every call. The number of storage keys is unlimited. `ImportState` reads the whole file before checking its size.
+
+### Still open after the backend fixes
+
+- On Windows, tinygo's connection-status handler already calls
+  `Disconnect`, which releases the device's COM objects, when the link
+  drops. A GATT `watch` that ends that way then calls `Disconnect` again.
+  (hw)
+- On Linux, tinygo's `Connect` waits for the `Connected` property with no
+  timeout, so the goroutine of a cancelled BLE connect can stay blocked.
+  Betty now disconnects the result if it ever arrives, but can't abort the
+  attempt itself.
+- This pass didn't touch the `IOHIDManager` Input Monitoring prompt, the
+  Windows `SO_RCVTIMEO` retries, macOS RFCOMM's asynchronous SDP query or
+  the duplicated `waitFD` helpers. They remain as listed above.
 
 ## Documentation claims
 
