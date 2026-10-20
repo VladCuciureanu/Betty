@@ -6,6 +6,7 @@ import (
 	"context"
 	"path"
 	"slices"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 
@@ -92,9 +93,29 @@ func (b *linuxBackend) SetAdapter(ctx context.Context, change domain.AdapterChan
 			return domain.Adapter{}, err
 		}
 	}
-	var props map[string]dbus.Variant
-	if err := object.CallWithContext(ctx, "org.freedesktop.DBus.Properties.GetAll", 0, "org.bluez.Adapter1").Store(&props); err != nil {
-		return domain.Adapter{}, translateDBus(err)
+	// BlueZ applies some settings, such as the name, a moment after the
+	// property write returns, so read until they show or 3 seconds pass.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var props map[string]dbus.Variant
+		if err := object.CallWithContext(ctx, "org.freedesktop.DBus.Properties.GetAll", 0, "org.bluez.Adapter1").Store(&props); err != nil {
+			return domain.Adapter{}, translateDBus(err)
+		}
+		adapter := adapterFromProperties(objectPath, props, true)
+		if applied(adapter, change) || time.Now().After(deadline) {
+			return adapter, nil
+		}
+		select {
+		case <-ctx.Done():
+			return adapter, nil
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-	return adapterFromProperties(objectPath, props, true), nil
+}
+
+// applied reports whether adapter shows every setting in change.
+func applied(adapter domain.Adapter, change domain.AdapterChange) bool {
+	same := func(want, have *bool) bool { return want == nil || (have != nil && *have == *want) }
+	return same(change.Powered, adapter.Powered) && same(change.Discoverable, adapter.Discoverable) &&
+		(change.Name == nil || adapter.Name == *change.Name)
 }
