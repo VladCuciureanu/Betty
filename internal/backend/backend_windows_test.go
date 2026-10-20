@@ -29,6 +29,17 @@ func TestWindowsErrorUsesReturnedCode(t *testing.T) {
 	}
 }
 
+func TestDeviceInfoLayout(t *testing.T) {
+	// BLUETOOTH_DEVICE_INFO is 560 bytes with its 8-byte-aligned address at
+	// offset 8, on 32-bit and 64-bit Windows alike.
+	if got := unsafe.Offsetof(bluetoothDeviceInfo{}.Address); got != 8 {
+		t.Fatalf("Address offset=%d want=8", got)
+	}
+	if got := unsafe.Sizeof(bluetoothDeviceInfo{}); got != 560 {
+		t.Fatalf("size=%d want=560", got)
+	}
+}
+
 func TestDeviceSearchParamsLayout(t *testing.T) {
 	// BLUETOOTH_DEVICE_SEARCH_PARAMS: six DWORD-sized fields, a UCHAR, then a
 	// pointer-aligned HANDLE.
