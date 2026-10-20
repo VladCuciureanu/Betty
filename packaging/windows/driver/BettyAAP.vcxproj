@@ -13,12 +13,16 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <!--
     The WDK comes from NuGet, but the build agent's installed driver toolset
-    resolves WDK tools against its own kit, which lacks this SDK version, so
-    stampinf.exe and Inf2Cat.exe are not found. Point the tool directory at
-    the NuGet WDK. WDKContentRoot has no trailing separator in NuGet builds.
+    can supply older WDK targets that look for tools in the wrong folders of
+    the NuGet package, so stampinf.exe is not found. Point each WDK tool at
+    its folder in the package. WDKContentRoot has no trailing separator in
+    NuGet builds.
   -->
   <PropertyGroup Condition="'$(WDK_NuGet)' == 'true'">
     <WDKBinRoot>$(WDKContentRoot)\bin\$(WindowsTargetPlatformVersion)</WDKBinRoot>
+    <InfToolPath>$(WDKBinRoot)\x64\</InfToolPath>
+    <DrvCatToolPath>$(WDKBinRoot)\x64\</DrvCatToolPath>
+    <Inf2CatToolPath>$(WDKBinRoot)\x86\</Inf2CatToolPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Driver</ConfigurationType>
@@ -28,6 +32,10 @@
     <TargetVersion>Windows10</TargetVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(WDK_NuGet)' == 'true'">
+    <!-- infverif.exe lives in the package's tools folder. -->
+    <ExecutablePath>$(WDKContentRoot)\tools\$(WindowsTargetPlatformVersion)\x64;$(ExecutablePath)</ExecutablePath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetName>BettyAAP</TargetName>
     <OutDir>$(SolutionDir)artifacts\driver\</OutDir>
