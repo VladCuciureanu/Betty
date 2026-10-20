@@ -38,7 +38,7 @@ jobs:
           msbuild-architecture: x64
       - name: Build unsigned validation MSI
         shell: pwsh
-        run: ./packaging/windows/build.ps1 -Version 0.0.0
+        run: ./packaging/windows/build.ps1 -Version 0.0.1
       - name: Smoke-test MSI install and clean uninstall
         shell: pwsh
         run: |

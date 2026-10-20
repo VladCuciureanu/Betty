@@ -21,6 +21,10 @@ if ($msiVersion -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') {
 }
 $driverVersion = $msiVersion
 while ($driverVersion.Split('.').Count -lt 4) { $driverVersion += ".0" }
+if (-not $BaseOnly -and -not $MicrosoftSignedDriverDir -and $driverVersion -eq "0.0.0.0") {
+    # InfVerif rejects an all-zero DriverVer.
+    throw "Version 0.0.0 cannot be stamped into the driver INF; use 0.0.1 or later"
+}
 
 New-Item -ItemType Directory -Force $payload, $driverOutput, $obj, $msiOutput | Out-Null
 Get-ChildItem $msiOutput -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force
