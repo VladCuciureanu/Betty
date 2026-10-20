@@ -154,7 +154,7 @@ Third-party drivers are a first-class extension point. The protocol in [docs/DRI
 - [x] Surface driver stderr and skipped-inspect failures under `--verbose`. Inspect failures are warnings in every mode.
 - Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
 - Bound message sizes and test malformed, oversized, crashing, and hanging drivers.
-- Reuse one driver process across requests within a command once the per-request loop is proven by every official driver.
+- [x] Reuse one driver process across requests within a command once the per-request loop is proven by every official driver.
 
 ## Optional driver work required for supported claims
 

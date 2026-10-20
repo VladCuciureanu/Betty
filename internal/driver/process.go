@@ -70,49 +70,170 @@ func (m *Manager) call(ctx context.Context, item protocol.Manifest, request prot
 	return response, err
 }
 
-func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request protocol.Request) (protocol.Response, error) {
-	var response protocol.Response
-	cmd := exec.CommandContext(ctx, m.driverPath(item.ID))
+// driverProcess is a running driver. Without reuse it serves one request;
+// with reuse it serves every request of the command until Close.
+type driverProcess struct {
+	cmd     *exec.Cmd
+	stdin   io.WriteCloser
+	encoder *json.Encoder
+	reader  *bufio.Reader
+	log     *lineLog
+	exited  chan error // receives Wait's result once
+	served  int
+}
+
+func (m *Manager) start(item protocol.Manifest) (*driverProcess, error) {
+	// Not CommandContext: a reused process outlives each request's context.
+	// exchange kills it when a request's context ends.
+	cmd := exec.Command(m.driverPath(item.ID))
 	// Without a log, stderr is left nil (the null device) rather than
 	// io.Discard, so no copy goroutine runs at all. With one, WaitDelay stops
 	// a pipe inherited by a grandchild from keeping Wait blocked.
 	cmd.WaitDelay = m.exitBudget()
+	p := &driverProcess{cmd: cmd, exited: make(chan error, 1)}
 	if m.OnDriverLog != nil {
-		log := newLineLog(func(line string) { m.OnDriverLog(item.ID, line) })
-		cmd.Stderr = log
-		// Deferred first, so it runs after the process has been waited for.
-		defer log.flush()
+		p.log = newLineLog(func(line string) { m.OnDriverLog(item.ID, line) })
+		cmd.Stderr = p.log
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return response, domain.NewError(domain.CodeInternal, "start driver %s: %v", item.ID, err)
+		return nil, domain.NewError(domain.CodeInternal, "start driver %s: %v", item.ID, err)
 	}
-	waited := false
-	defer func() {
-		if !waited {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-		}
-	}()
+	go func() { p.exited <- cmd.Wait() }()
+	p.stdin, p.encoder, p.reader = stdin, json.NewEncoder(stdin), bufio.NewReader(stdout)
+	return p, nil
+}
 
+// stop asks the driver to exit by closing its input, kills it if it doesn't
+// exit within grace, and returns its exit error.
+func (p *driverProcess) stop(grace time.Duration) error {
+	_ = p.stdin.Close()
+	var err error
+	select {
+	case err = <-p.exited:
+	case <-time.After(grace):
+		_ = p.cmd.Process.Kill()
+		<-p.exited
+	}
+	if p.log != nil {
+		p.log.flush()
+	}
+	return err
+}
+
+func (p *driverProcess) kill() {
+	_ = p.cmd.Process.Kill()
+	_ = p.stop(0)
+}
+
+// SetReuse makes the manager keep each driver's process for later requests
+// until Close, instead of starting one per request. Every official driver
+// serves requests until its input ends, as the protocol requires.
+func (m *Manager) SetReuse(reuse bool) { m.reuse = reuse }
+
+// Close stops every driver process kept for reuse.
+func (m *Manager) Close() {
+	m.procsMu.Lock()
+	procs := m.procs
+	m.procs = nil
+	m.procsMu.Unlock()
+	for _, p := range procs {
+		_ = p.stop(m.exitBudget())
+	}
+}
+
+func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request protocol.Request) (protocol.Response, error) {
+	if !m.reuse {
+		p, err := m.start(item)
+		if err != nil {
+			return protocol.Response{}, err
+		}
+		response, err := m.serve(ctx, p, item, request)
+		if err != nil {
+			p.kill()
+			return response, err
+		}
+		// The response is complete. Ask the driver to exit, and kill it if it
+		// doesn't exit promptly; its answer still stands.
+		if exitErr := p.stop(m.exitBudget()); exitErr != nil && ctx.Err() == nil && !isKilled(exitErr) {
+			return response, driverFailure(item, "exited with an error after responding: %v", exitErr)
+		}
+		return checkResponse(item, response)
+	}
+	for attempt := 0; ; attempt++ {
+		m.procsMu.Lock()
+		p := m.procs[item.ID]
+		m.procsMu.Unlock()
+		fresh := p == nil
+		if fresh {
+			var err error
+			if p, err = m.start(item); err != nil {
+				return protocol.Response{}, err
+			}
+		}
+		response, err := m.serve(ctx, p, item, request)
+		if err != nil {
+			p.kill()
+			m.forget(item.ID, p)
+			// A reused driver that has exited since its last request gets one
+			// fresh start.
+			if !fresh && attempt == 0 && ctx.Err() == nil && errors.Is(err, errDriverGone) {
+				continue
+			}
+			return response, err
+		}
+		m.procsMu.Lock()
+		if m.procs == nil {
+			m.procs = map[string]*driverProcess{}
+		}
+		m.procs[item.ID] = p
+		m.procsMu.Unlock()
+		return checkResponse(item, response)
+	}
+}
+
+func (m *Manager) forget(id string, p *driverProcess) {
+	m.procsMu.Lock()
+	defer m.procsMu.Unlock()
+	if m.procs[id] == p {
+		delete(m.procs, id)
+	}
+}
+
+// errDriverGone marks a driver that exited, or closed its output, before it
+// answered a request.
+var errDriverGone = errors.New("exited without responding")
+
+// gone reports a driver that is no longer serving requests.
+func gone(item protocol.Manifest, format string, args ...any) error {
+	err := domain.NewError(domain.CodeInternal, "driver %s: %s", item.ID, fmt.Sprintf(format, args...))
+	err.Cause = errDriverGone
+	return err
+}
+
+// serve sends one request to a running driver and returns its response,
+// answering host calls on the way. It kills the process if ctx ends first.
+func (m *Manager) serve(ctx context.Context, p *driverProcess, item protocol.Manifest, request protocol.Request) (protocol.Response, error) {
+	var response protocol.Response
+	stop := context.AfterFunc(ctx, func() { _ = p.cmd.Process.Kill() })
+	defer stop()
 	session := newHostSession(request.Devices)
 	defer m.closeSession(session)
-	encoder := json.NewEncoder(stdin)
-	reader := bufio.NewReader(stdout)
-	if err := encoder.Encode(request); err != nil {
-		return response, driverFailure(item, "write request: %v", err)
+	if err := p.encoder.Encode(request); err != nil {
+		return response, gone(item, "write request: %v", err)
 	}
+	p.served++
 	for {
-		raw, err := readMessage(reader, maxMessageSize)
+		raw, err := readMessage(p.reader, maxMessageSize)
 		if errors.Is(err, io.EOF) {
-			return response, driverFailure(item, "exited without responding")
+			return response, gone(item, "exited without responding")
 		}
 		if err != nil {
 			return response, driverFailure(item, "%v", err)
@@ -122,7 +243,7 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 			return response, driverFailure(item, "invalid message: %v", err)
 		}
 		if header.Type == protocol.TypeHostRequest {
-			if err := encoder.Encode(m.hostReply(ctx, item, header, session)); err != nil {
+			if err := p.encoder.Encode(m.hostReply(ctx, item, header, session)); err != nil {
 				return response, driverFailure(item, "write host response: %v", err)
 			}
 			continue
@@ -136,29 +257,18 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 		if err := json.Unmarshal(raw, &response); err != nil {
 			return response, driverFailure(item, "invalid response: %v", err)
 		}
-		break
+		return response, nil
 	}
+}
 
-	// The response is complete. Ask the driver to exit by closing its input,
-	// and kill it if it doesn't exit promptly; its answer still stands.
-	_ = stdin.Close()
-	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
-	select {
-	case err := <-exited:
-		waited = true
-		if err != nil && ctx.Err() == nil {
-			return response, driverFailure(item, "exited with an error after responding: %v", err)
-		}
-		if err != nil {
-			return response, ctx.Err()
-		}
-	case <-time.After(m.exitBudget()):
-		_ = cmd.Process.Kill()
-		<-exited
-		waited = true
-	}
+// isKilled reports whether a driver's exit error is Betty's own kill after
+// the exit grace period.
+func isKilled(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && !exit.Exited()
+}
 
+func checkResponse(item protocol.Manifest, response protocol.Response) (protocol.Response, error) {
 	if response.Protocol != protocol.Version {
 		return response, driverFailure(item, "returned protocol %d", response.Protocol)
 	}

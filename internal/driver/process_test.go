@@ -86,6 +86,8 @@ func runTestDriver(modes string) {
 		respond("not-" + request.ID)
 	case "unknown-type":
 		_ = out.Encode(protocol.Message{Protocol: protocol.Version, Type: "surprise", ID: request.ID})
+	case "once":
+		respond(request.ID) // and exit, ignoring further requests
 	case "silent-exit":
 	}
 }
@@ -276,5 +278,57 @@ func TestConcurrentInstallsInstallOnce(t *testing.T) {
 	}
 	if installed != 1 {
 		t.Fatalf("%d installs succeeded, want 1", installed)
+	}
+}
+
+func TestReusedDriversServeSeveralRequestsInOneProcess(t *testing.T) {
+	m := newTestManager(t)
+	m.SetReuse(true)
+	manifest := protocol.Manifest{ID: "example/reused", Name: "Reused", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=sdk")
+	var pids []int
+	for range 3 {
+		if _, err := m.call(context.Background(), manifest, inspectRequest(), m.inspectBudget()); err != nil {
+			t.Fatal(err)
+		}
+		pids = append(pids, m.procs[manifest.ID].cmd.Process.Pid)
+	}
+	if pids[0] != pids[1] || pids[1] != pids[2] {
+		t.Fatalf("pids=%v, want one process", pids)
+	}
+	m.Close()
+	if len(m.procs) != 0 {
+		t.Fatalf("Close left %d processes", len(m.procs))
+	}
+}
+
+func TestAReusedDriverThatExitedIsStartedAgain(t *testing.T) {
+	m := newTestManager(t)
+	m.SetReuse(true)
+	manifest := protocol.Manifest{ID: "example/once", Name: "Once", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=once")
+	defer m.Close()
+	for i := range 2 {
+		if _, err := m.call(context.Background(), manifest, inspectRequest(), m.inspectBudget()); err != nil {
+			t.Fatalf("request %d: %v", i+1, err)
+		}
+	}
+}
+
+func TestATimedOutReusedDriverIsDiscarded(t *testing.T) {
+	m := newTestManager(t)
+	m.SetReuse(true)
+	m.inspectTimeout = 300 * time.Millisecond
+	manifest := protocol.Manifest{ID: "example/slow", Name: "Slow", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=hang")
+	defer m.Close()
+	if _, err := m.call(context.Background(), manifest, inspectRequest(), m.inspectBudget()); domain.AsError(err).Code != domain.CodeTimeout {
+		t.Fatalf("err=%v", err)
+	}
+	if _, kept := m.procs[manifest.ID]; kept {
+		t.Fatal("a driver that timed out was kept for reuse")
 	}
 }

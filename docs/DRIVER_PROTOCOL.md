@@ -170,10 +170,13 @@ A session is strictly sequential:
    still counts. A non-zero exit status after a response is reported as an
    `internal` error.
 
-Betty currently sends one request per process and starts a new process for the
-next one. Drivers MUST still be written as a loop that handles requests until
-end-of-file, because Betty may reuse a process for several requests in a later
-release without changing the protocol version.
+Betty starts each driver at most once per command and sends it every request
+of that command, for example the `inspect` that finds a device and the `get`
+that reads it, closing stdin when the command ends. Drivers MUST therefore
+handle requests in a loop until end-of-file. A driver that exits after one
+response still works, because Betty starts it again for the next request, but
+it is slower; `bt driver check` reports it. When a request misses its deadline,
+Betty kills that driver and starts it afresh for the next request.
 
 Deadlines:
 
