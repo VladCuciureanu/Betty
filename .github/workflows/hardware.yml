@@ -26,8 +26,8 @@ jobs:
       BETTY_HARDWARE_APPLE_AUDIO: ${{ vars.BETTY_HARDWARE_APPLE_AUDIO }}
       BETTY_VALIDATE_APPLE_AUDIO_CONTROLS: ${{ vars.BETTY_VALIDATE_APPLE_AUDIO_CONTROLS }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.24.x'
       - name: Build Betty natively

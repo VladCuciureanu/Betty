@@ -211,3 +211,28 @@ func TestReadMessage(t *testing.T) {
 		t.Fatal("expected size error")
 	}
 }
+
+func TestConcurrentInstallsInstallOnce(t *testing.T) {
+	m := newTestManager(t)
+	manifest := protocol.Manifest{ID: "example/racy", Name: "Racy", Version: "1"}
+	source := writeTestDriver(t, t.TempDir(), manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=ok")
+	errs := make(chan error, 4)
+	for range cap(errs) {
+		go func() {
+			_, err := m.Install(context.Background(), source)
+			errs <- err
+		}()
+	}
+	installed := 0
+	for range cap(errs) {
+		if err := <-errs; err == nil {
+			installed++
+		} else if !strings.Contains(err.Error(), "already installed") {
+			t.Fatal(err)
+		}
+	}
+	if installed != 1 {
+		t.Fatalf("%d installs succeeded, want 1", installed)
+	}
+}

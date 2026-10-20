@@ -13,6 +13,8 @@ The optional Advanced Support package contains:
 - `BettyAAP.sys`, its INF, and signed catalog;
 - a small elevated setup helper that stages/binds the driver during install and unbinds/removes it during uninstall.
 
+**AirPods control is unsupported on Windows.** The kernel driver is unsigned, so it loads only with test signing enabled, and the Apple Audio driver no longer uses it: on Windows it reads battery from advertisements only. Whether to keep this package is tracked in [#8](https://github.com/VladCuciureanu/Betty/issues/8).
+
 The KMDF driver is a narrow bridge. It binds only to the Apple AAP SDP service UUID, opens the requested encrypted/authenticated Classic L2CAP channel, and exposes connect, disconnect, send, and bounded receive operations through a Betty-owned device-interface GUID. All AAP parsing and feature behavior remains in the optional Go driver.
 
 ## Build requirements

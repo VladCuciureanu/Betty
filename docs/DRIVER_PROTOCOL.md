@@ -361,10 +361,11 @@ Notes:
 - L2CAP channels are Classic, connection-oriented channels. Availability
   depends on the platform; an unavailable transport fails with `unsupported`.
 - Storage is private to the driver ID and written with user-only permissions.
-  Keys are 1–128 characters from `[A-Za-z0-9._/-]`. Users can move a store
-  between machines with `bt driver export-state` and `bt driver import-state`;
-  an import larger than 1 MiB is refused, so keep the whole store below that. Store keys and other
-  secrets only here.
+  Keys are 1–128 characters from `[A-Za-z0-9._/-]`. A store holds at most 256
+  keys and 1 MiB of JSON; a `storage.set` past either limit fails with `usage`.
+  Writes from concurrent `bt` processes are serialized, so none is lost. Users
+  can move a store between machines with `bt driver export-state` and
+  `bt driver import-state`. Store keys and other secrets only here.
 
 BLE GATT is not available through host calls in protocol version 1.
 
