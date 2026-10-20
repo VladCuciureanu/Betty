@@ -194,7 +194,7 @@ func wireDevices(devices []domain.Device) []protocol.Device {
 func domainProperties(properties map[string]protocol.Property) map[string]domain.Property {
 	out := map[string]domain.Property{}
 	for name, p := range properties {
-		out[name] = domain.Property{Value: p.Value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution}
+		out[name] = domain.Property{Value: p.Value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution, Verified: p.Verified}
 	}
 	return out
 }

@@ -302,6 +302,7 @@ What a driver tells Betty about a device. Every field is optional.
 | `display` | string | Short human rendering for terminals. Clients must not parse it. |
 | `estimated` | boolean | The value is approximate. |
 | `resolution` | integer | Step size of an estimated value, in the value's unit. |
+| `verified` | boolean | In a `set` response: the value was read back from the device after the write. Omit it when the value is only the one requested. |
 
 ### Capability
 

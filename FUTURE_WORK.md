@@ -46,7 +46,7 @@ The earlier `bt <device>` and `bt <device> battery` aliases were removed: they t
 - [x] Keep capability descriptions small: type, readable, writable, accepted values or numeric range, and availability.
 - Normalize shared properties such as `battery`, `noise_control`, `ambient_level`, `wear_detection`, `microphone_mute`, `codec`, and `firmware_version`.
 - Namespace only genuinely vendor-specific properties, for example `sony.speak_to_chat`.
-- Verify writes by reading state back when the protocol supports it; distinguish requested from verified state.
+- [x] Verify writes by reading state back when the protocol supports it; distinguish requested from verified state.
 - [x] Initially support one property per watch process. Multi-property subscriptions can wait for a demonstrated need.
 
 ### 2. Stable automation behavior

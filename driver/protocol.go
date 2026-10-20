@@ -132,6 +132,9 @@ type Property struct {
 	Display    string          `json:"display,omitempty"`
 	Estimated  bool            `json:"estimated,omitempty"`
 	Resolution int             `json:"resolution,omitempty"`
+	// Verified marks a set result as read back from the device after the
+	// write, rather than the value that was requested.
+	Verified bool `json:"verified,omitempty"`
 }
 
 // BatteryValue is the schema-version-1 object form of the standard battery

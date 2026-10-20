@@ -92,6 +92,13 @@ func controlProperty(host *protocol.Session, request protocol.PropertyRequest, w
 		}
 	}
 	enrichment := sonyControlEnrichment(device, model, protocolVersion, state)
+	if write {
+		// writeAndVerifySonyNoiseStateV2 read this state back.
+		for name, property := range enrichment.Properties {
+			property.Verified = true
+			enrichment.Properties[name] = property
+		}
+	}
 	return &enrichment, nil
 }
 
