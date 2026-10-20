@@ -15,6 +15,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/vladcuciureanu/betty/internal/btsock"
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/driver"
 )
@@ -316,7 +317,7 @@ func pollTimeout(ctx context.Context) time.Duration {
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
 		if remaining < wait {
-			return maxDuration(remaining, time.Millisecond)
+			return max(remaining, time.Millisecond)
 		}
 	}
 	return wait
@@ -330,16 +331,8 @@ func contextError(err error) error {
 }
 
 func windowsAddress(deviceID string) (uint64, error) {
-	value := strings.TrimPrefix(deviceID, "windows:")
-	value = strings.NewReplacer(":", "", "-", "").Replace(value)
-	if len(value) != 12 {
-		return 0, domain.NewError(domain.CodeUsage, "device %q has no Windows Classic address", deviceID)
-	}
-	address, err := strconv.ParseUint(value, 16, 48)
-	if err != nil {
-		return 0, domain.NewError(domain.CodeUsage, "device %q has an invalid Bluetooth address", deviceID)
-	}
-	return address, nil
+	address, err := btsock.ParseAddress(deviceID, "windows:")
+	return btsock.Uint64(address), err
 }
 
 func parseWindowsGUID(value string) (windowsGUID, error) {
@@ -374,9 +367,3 @@ func winsockError(operation string, err error) error {
 	return domain.NewError(domain.CodeUnavailable, "%s: %v", operation, err)
 }
 
-func maxDuration(a, b time.Duration) time.Duration {
-	if a > b {
-		return a
-	}
-	return b
-}
