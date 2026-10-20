@@ -51,6 +51,89 @@ void betty_free_devices(betty_device *devices, int count) {
 	free(devices);
 }
 
+@interface BettyInquiryDelegate : NSObject <IOBluetoothDeviceInquiryDelegate>
+@property(retain) NSMutableArray<IOBluetoothDevice *> *found;
+@property(assign) BOOL finished;
+@property(assign) IOReturn result;
+@end
+
+@implementation BettyInquiryDelegate
+- (id)init {
+	if ((self = [super init])) {
+		self.found = [NSMutableArray array];
+	}
+	return self;
+}
+
+- (void)dealloc {
+	[_found release];
+	[super dealloc];
+}
+
+- (void)deviceInquiryDeviceFound:(IOBluetoothDeviceInquiry *)sender device:(IOBluetoothDevice *)device {
+	if (![self.found containsObject:device]) {
+		[self.found addObject:device];
+	}
+}
+
+- (void)deviceInquiryComplete:(IOBluetoothDeviceInquiry *)sender error:(IOReturn)error aborted:(BOOL)aborted {
+	self.result = error;
+	self.finished = YES;
+}
+@end
+
+betty_device *betty_inquiry(int timeout_ms, int *cancel, int *count, int *status) {
+	@autoreleasepool {
+		*count = 0;
+		*status = kIOReturnSuccess;
+		BettyInquiryDelegate *delegate = [[BettyInquiryDelegate new] autorelease];
+		IOBluetoothDeviceInquiry *inquiry = [IOBluetoothDeviceInquiry inquiryWithDelegate:delegate];
+		if (!inquiry) {
+			*status = kIOReturnNoMemory;
+			return NULL;
+		}
+		// Inquiry length is in seconds; Betty's own deadline ends it sooner.
+		inquiry.inquiryLength = (uint8_t)MIN(MAX(timeout_ms / 1000, 1), 30);
+		inquiry.updateNewDeviceNames = YES;
+		IOReturn started = [inquiry start];
+		if (started != kIOReturnSuccess) {
+			*status = started;
+			return NULL;
+		}
+		NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:timeout_ms / 1000.0];
+		while (!delegate.finished && !__atomic_load_n(cancel, __ATOMIC_SEQ_CST) && [deadline timeIntervalSinceNow] > 0) {
+			@autoreleasepool {
+				[[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+			}
+		}
+		if (delegate.finished) {
+			*status = delegate.result;
+		} else {
+			[inquiry stop];
+		}
+		inquiry.delegate = nil;
+		NSArray<IOBluetoothDevice *> *found = delegate.found;
+		if (found.count == 0) {
+			return NULL;
+		}
+		betty_device *out = calloc(found.count, sizeof(betty_device));
+		if (!out) {
+			*status = kIOReturnNoMemory;
+			return NULL;
+		}
+		int n = 0;
+		for (IOBluetoothDevice *device in found) {
+			out[n].name = bettyCopyString(device.nameOrAddress);
+			out[n].address = bettyCopyString(device.addressString);
+			out[n].connected = device.isConnected ? 1 : 0;
+			out[n].paired = device.isPaired ? 1 : 0;
+			n++;
+		}
+		*count = n;
+		return out;
+	}
+}
+
 int betty_connect(const char *address) {
 	@autoreleasepool {
 		IOBluetoothDevice *device = bettyDevice(address);

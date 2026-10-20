@@ -137,8 +137,6 @@ Expect Windows to show its own pairing notifications during the pairing tests.
   On Windows, `ipconfig /all` shows it as the physical address of the
   Bluetooth network adapter; on macOS, `system_profiler SPBluetoothDataType`
   shows it.
-- macOS skips the Classic pairing tests: Betty cannot yet discover new Classic
-  devices there.
 - Windows expects `connect` and `disconnect` to fail with `unsupported`.
 - The isolation test, which traces `bt` and its drivers with `strace` to check
   that ordinary commands open no network socket and leave no process behind,

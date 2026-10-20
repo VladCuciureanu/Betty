@@ -34,26 +34,73 @@ type darwinBackend struct{ pairing PairingIO }
 
 func newPlatformBackend(pairing PairingIO) Backend { return &darwinBackend{pairing: pairing} }
 
-// Capabilities reports Scan as unsupported: IOBluetooth discovery of
-// unpaired Classic devices is not implemented, so Scan only lists paired
-// devices. Nearby BLE devices still come from the BLE client.
 func (*darwinBackend) Capabilities() domain.Capabilities {
-	return domain.Capabilities{Scan: domain.Unsupported, Pair: domain.Supported, Unpair: domain.Unsupported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
+	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Unsupported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
 }
-func (b *darwinBackend) Scan(ctx context.Context) ([]domain.Device, error) { return b.List(ctx) }
+
+// Scan runs a Classic device inquiry until ctx ends and adds the paired
+// devices. Nearby BLE devices come from the BLE client.
+func (b *darwinBackend) Scan(ctx context.Context) ([]domain.Device, error) {
+	timeout := timeoutMillis(ctx)
+	if timeout == 0 {
+		timeout = 10000 // an inquiry's usual length
+	}
+	cancel := new(int32)
+	type result struct {
+		devices []domain.Device
+		status  int
+	}
+	done := make(chan result, 1)
+	go func() {
+		var count, status C.int
+		devices := C.betty_inquiry(C.int(timeout), (*C.int)(unsafe.Pointer(cancel)), &count, &status)
+		defer C.betty_free_devices(devices, count)
+		done <- result{darwinDevices(devices, count), int(status)}
+	}()
+	var found result
+	select {
+	case <-ctx.Done():
+		// The inquiry stops within one run-loop pass; what it found counts.
+		atomic.StoreInt32(cancel, 1)
+		found = <-done
+	case found = <-done:
+	}
+	if found.status != 0 && len(found.devices) == 0 {
+		return nil, darwinError("scan", uint32(found.status))
+	}
+	paired, err := b.List(ctx)
+	if err != nil {
+		return found.devices, nil
+	}
+	seen := map[string]bool{}
+	for _, d := range found.devices {
+		seen[d.ID] = true
+	}
+	for _, d := range paired {
+		if !seen[d.ID] {
+			found.devices = append(found.devices, d)
+		}
+	}
+	return found.devices, nil
+}
+
 func (*darwinBackend) List(context.Context) ([]domain.Device, error) {
 	var count C.int
 	devices := C.betty_copy_paired_devices(&count)
 	defer C.betty_free_devices(devices, count)
+	return darwinDevices(devices, count), nil
+}
+
+func darwinDevices(devices *C.betty_device, count C.int) []domain.Device {
 	if devices == nil || count == 0 {
-		return nil, nil
+		return nil
 	}
 	out := make([]domain.Device, 0, int(count))
 	for _, d := range unsafe.Slice(devices, int(count)) {
 		address := C.GoString(d.address)
 		out = append(out, domain.Device{ID: "macos:" + address, Name: C.GoString(d.name), Paired: d.paired != 0, Connected: d.connected != 0, Endpoints: []domain.Endpoint{{ID: address, Address: address, Transport: domain.TransportClassic}}})
 	}
-	return out, nil
+	return out
 }
 func (b *darwinBackend) Pair(ctx context.Context, d domain.Device) error {
 	agent := newPairingAgent(b.pairing)

@@ -15,6 +15,12 @@ typedef struct {
 betty_device *betty_copy_paired_devices(int *count);
 void betty_free_devices(betty_device *devices, int count);
 
+// betty_inquiry runs a Classic device inquiry on the calling thread's run
+// loop until it completes, timeout_ms elapses or *cancel becomes non-zero, and
+// returns a malloc'd array of the devices found, like
+// betty_copy_paired_devices. *status receives the inquiry's IOReturn.
+betty_device *betty_inquiry(int timeout_ms, int *cancel, int *count, int *status);
+
 int betty_connect(const char *address);
 int betty_disconnect(const char *address);
 int betty_is_connected(const char *address);

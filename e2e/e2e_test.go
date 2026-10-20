@@ -144,9 +144,6 @@ func TestDuplicateNamesAreAmbiguous(t *testing.T) {
 }
 
 func TestClassicPairingLifecycle(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
-	}
 	// A keyboard, because BlueZ connects only profiles it knows, and HID
 	// needs no other daemon.
 	p := startPeer(t, "keyboard:Betty Keyboard")
@@ -182,18 +179,12 @@ func TestClassicPairingLifecycle(t *testing.T) {
 }
 
 func TestRefusedPairingIsAnAuthenticationFailure(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
-	}
 	p := startPeer(t, "speaker:Betty Speaker")
 	p.do(map[string]any{"cmd": "accept_pairing", "device": 0, "accept": false})
 	fails(t, domain.CodeAuthentication, "pair", p.device(0).Name)
 }
 
 func TestSonyBatteryThroughTheDriver(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
-	}
 	if virtual() {
 		t.Skip(reauthenticationLimit)
 	}
