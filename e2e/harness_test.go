@@ -367,7 +367,7 @@ type prefixWriter struct {
 
 func (w *prefixWriter) Write(p []byte) (int, error) {
 	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
-		if line != "" && !strings.Contains(line, "[") && !strings.Contains(line, "secure_connections_host_support") {
+		if line != "" && !strings.Contains(line, "\x1b[") && !strings.Contains(line, "secure_connections_host_support") {
 			w.t.Log(w.prefix + line)
 		}
 	}
