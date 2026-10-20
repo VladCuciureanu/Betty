@@ -25,6 +25,9 @@ type Manager struct {
 	// Zero values select the defaults in process.go; tests shorten them.
 	inspectTimeout time.Duration
 	exitGrace      time.Duration
+	// OnInspectError, when set, receives each driver failure during inspect.
+	// Inspect failures never fail the command, so this is how they surface.
+	OnInspectError func(driverID string, err error)
 	host           Host
 	rfcomm         RFCOMMHost
 }
@@ -62,6 +65,9 @@ func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpo
 	for _, item := range installed {
 		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)}, m.inspectBudget())
 		if err != nil {
+			if m.OnInspectError != nil {
+				m.OnInspectError(item.ID, err)
+			}
 			continue
 		}
 		devices = applyEnrichments(devices, response.Enrichments)
@@ -132,7 +138,7 @@ func applyEnrichments(devices []domain.Device, enrichments map[string]protocol.E
 func domainCapabilities(capabilities map[string]protocol.Capability) map[string]domain.DeviceCapability {
 	out := map[string]domain.DeviceCapability{}
 	for name, capability := range capabilities {
-		out[name] = domain.DeviceCapability{Status: capability.Status, Kind: capability.Kind, Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason}
+		out[name] = domain.DeviceCapability{Status: domain.CapabilityStatus(capability.Status), Kind: domain.ValueKind(capability.Kind), Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason}
 	}
 	return out
 }

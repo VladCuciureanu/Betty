@@ -19,6 +19,7 @@ const (
 	CodeDisconnected   ErrorCode = "device_disconnected"
 	CodeDriverRequired ErrorCode = "driver_required"
 	CodeTimeout        ErrorCode = "timeout"
+	CodeCanceled       ErrorCode = "canceled"
 	CodeInternal       ErrorCode = "internal"
 )
 
@@ -37,7 +38,12 @@ func NewError(code ErrorCode, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...), Retryable: retryable(code)}
 }
 
+// AsError returns err as an *Error, classifying anything else as internal.
+// It returns nil for a nil error.
 func AsError(err error) *Error {
+	if err == nil {
+		return nil
+	}
 	var e *Error
 	if errors.As(err, &e) {
 		return e
@@ -54,7 +60,11 @@ func retryable(code ErrorCode) bool {
 	}
 }
 
+// ExitCode maps err to the process exit status. A nil error exits 0.
 func ExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
 	switch AsError(err).Code {
 	case CodeUsage:
 		return 2
@@ -72,6 +82,9 @@ func ExitCode(err error) int {
 		return 8
 	case CodeTimeout:
 		return 9
+	case CodeCanceled:
+		// The shell convention for termination by SIGINT.
+		return 130
 	default:
 		return 1
 	}
