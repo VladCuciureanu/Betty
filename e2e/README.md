@@ -38,7 +38,8 @@ built-in radio over the air.
 | Persona | What it is |
 | --- | --- |
 | `sensor` | A BLE peripheral: Battery Service (87%), Device Information (firmware 1.2.3), and a test service with a writable characteristic and a notifying one. |
-| `speaker` | A Classic device that pairs with Just Works and accepts connections. It can be told to refuse pairing. |
+| `speaker` | A Classic device that pairs with Just Works. It can be told to refuse pairing. |
+| `keyboard` | A Classic HID keyboard. BlueZ connects it with its own input plugin, so it exercises `connect` and `disconnect`. |
 | `sony` | A Classic Sony v2 headset: SDP record and RFCOMM control channel, answering session setup and battery queries (73%). |
 
 The tests start `python -m betty_peer` and control it with one JSON command
@@ -63,7 +64,30 @@ e2e/linux/run-vm.sh -v
 
 The VM keeps the test run away from your own Bluetooth adapter and from the
 host's BlueZ. Arguments after `run-vm.sh` go to `go test`, for example
-`-run TestGATT`.
+`-run TestGATT`. When the suite fails, the script prints the end of
+bluetoothd's log and the discovery, pairing, and connection traffic from an
+HCI trace. Set `BETTY_PEER_LOG=DEBUG` to also trace the scripted devices' own
+Bluetooth stack.
+
+### What the virtual link cannot do
+
+Bumble's software controller, which the virtual link is built on, implements
+LE and Classic pairing, but not re-authenticating a paired Classic device with
+its stored link key. Linux needs that whenever it opens a new connection to a
+device it has paired with. So on the virtual link:
+
+- the Classic lifecycle test covers pairing and unpairing, but skips
+  `connect` and `disconnect`;
+- the Sony test is skipped.
+
+Both run in full over the air, where real controllers handle
+re-authentication.
+
+The scripted devices also run on a patched controller
+(`peer/betty_peer/controller.py`). It reports dual-mode support, answers Classic
+inquiry and the setup commands Linux sends, reports Classic encryption, and
+keeps the link working when Linux changes its private address. Each patch is
+commented with the gap it fills.
 
 ## Running on Windows or macOS
 
@@ -106,6 +130,8 @@ Expect Windows to show its own pairing notifications during the pairing tests.
 
 - Tests that need several scripted devices at once, such as duplicate names,
   run only on Linux, because a dongle is one device.
+- Classic `connect`, `disconnect`, and the Sony test run only over the air;
+  see [what the virtual link cannot do](#what-the-virtual-link-cannot-do).
 - The Sony test needs the headset to connect back to the computer. Over the
   air, set `BETTY_E2E_HOST_ADDRESS` to the computer's own Bluetooth address.
   On Windows, `ipconfig /all` shows it as the physical address of the

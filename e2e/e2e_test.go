@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -17,6 +16,12 @@ import (
 
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
+
+// reauthenticationLimit explains the Classic scenarios the virtual link
+// cannot run: once a paired device's link drops, a new connection must
+// re-authenticate with the stored link key, which Bumble's virtual controller
+// does not implement. Real controllers do, so these run over the air.
+const reauthenticationLimit = "the virtual controller cannot re-authenticate a paired Classic device; run over the air to cover this"
 
 const (
 	notifyCharacteristic = "b0e7e2e0-0000-4000-8000-000000000002"
@@ -38,10 +43,8 @@ type mutation struct {
 
 func TestScanFindsABLEDevice(t *testing.T) {
 	p := startPeer(t, "sensor:Betty Sensor")
-	r := bt(t, nil, "--verbose", "scan")
-	t.Logf("scan diagnostics:\n%s", r.stderr)
 	var devices []domain.Device
-	decodeData(t, r, &devices)
+	ok(t, &devices, "scan")
 	for _, d := range devices {
 		if d.Name == p.device(0).Name {
 			return
@@ -157,12 +160,12 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	// The link may stay up for a while after pairing, as with real devices.
 	assertPaired(t, p.device(0).Address)
 
-	if runtime.GOOS == "windows" {
+	switch {
+	case virtual():
+		t.Log("skipping connect and disconnect: " + reauthenticationLimit)
+	case runtime.GOOS == "windows":
 		fails(t, domain.CodeUnsupported, "connect", name)
-	} else {
-		// Let the link left over from pairing drop first; connecting while
-		// the stack tears it down races.
-		waitDisconnected(t, p.device(0).Address)
+	default:
 		ok(t, &m, "connect", name)
 		if !m.Connected {
 			t.Fatalf("connect=%+v", m)
@@ -191,31 +194,20 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
 	}
-	if !virtual() && os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
+	if virtual() {
+		t.Skip(reauthenticationLimit)
+	}
+	if os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
 		t.Skip("set BETTY_E2E_HOST_ADDRESS so the headset can connect to this computer")
 	}
 	drivers := t.TempDir()
 	t.Setenv("BETTY_DRIVER_DIR", drivers)
 	ok(t, nil, "driver", "install", filepath.Join(binDir, executable("bt-driver-sony")))
 
-	t.Setenv("BETTY_PEER_LOG", "DEBUG")
 	p := startPeer(t, "sony:WH-1000XM5")
 	address := p.device(0).Address
-	if !virtual() {
-		// Bumble's virtual controller cannot re-authenticate a bonded Classic
-		// link, which the driver's RFCOMM connection would need, so on the
-		// virtual link the headset connects without pairing.
-		ok(t, nil, "pair", address)
-		t.Cleanup(func() { bt(t, nil, "unpair", address) })
-	} else {
-		var devices []domain.Device
-		ok(t, &devices, "scan")
-		// BlueZ accepts connections from unknown devices only while
-		// discoverable.
-		if output, err := exec.Command("bluetoothctl", "discoverable", "on").CombinedOutput(); err != nil {
-			t.Fatalf("bluetoothctl discoverable on: %v\n%s", err, output)
-		}
-	}
+	ok(t, nil, "pair", address)
+	t.Cleanup(func() { bt(t, nil, "unpair", address) })
 	// The driver reads battery only from a connected device. Headphones
 	// connect to the computer themselves; the link may also still be up
 	// from pairing, and a second connection would confuse both sides.
@@ -224,14 +216,6 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	}
 	waitConnected(t, address)
 
-	if virtual() {
-		t.Cleanup(func() {
-			if t.Failed() {
-				output, _ := exec.Command("bluetoothctl", "info", address).CombinedOutput()
-				t.Logf("BlueZ's view of the headset:\n%s", output)
-			}
-		})
-	}
 	var battery property
 	ok(t, &battery, "get", address, "battery")
 	if string(battery.Value) != `{"headset":{"level":73}}` {
@@ -253,17 +237,6 @@ func connected(t *testing.T, address string) bool {
 	var d domain.Device
 	ok(t, &d, "inspect", address)
 	return d.Connected
-}
-
-func waitDisconnected(t *testing.T, address string) {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for connected(t, address) {
-		if time.Now().After(deadline) {
-			t.Fatalf("%s stayed connected", address)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
 }
 
 func waitConnected(t *testing.T, address string) {
