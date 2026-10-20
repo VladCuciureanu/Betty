@@ -46,6 +46,9 @@ func newPropertyResult(d domain.Device, name string, p domain.Property) (propert
 }
 
 func (a *application) get(ctx context.Context, args []string) error {
+	if a.opts.all {
+		return a.getAll(ctx, args[0])
+	}
 	return a.withDevice(ctx, args[0], func(devices []domain.Device, d domain.Device) error {
 		result, err := a.readProperty(ctx, devices, d, args[1])
 		if err != nil {
@@ -53,6 +56,72 @@ func (a *application) get(ctx context.Context, args []string) error {
 		}
 		return a.render.Data(result)
 	})
+}
+
+// propertyEntry is one device's result in get --all: the property, or the
+// error that kept Betty from reading it.
+type propertyEntry struct {
+	DeviceID   string          `json:"device_id"`
+	Name       string          `json:"name"`
+	Property   string          `json:"property"`
+	Value      json.RawMessage `json:"value,omitempty"`
+	Unit       string          `json:"unit,omitempty"`
+	Estimated  bool            `json:"estimated,omitempty"`
+	Resolution int             `json:"resolution,omitempty"`
+	Error      *domain.Error   `json:"error,omitempty"`
+	display    string
+}
+
+type propertyEntries []propertyEntry
+
+func (entries propertyEntries) WriteHuman(w io.Writer) error {
+	for _, entry := range entries {
+		text := entry.display
+		switch {
+		case entry.Error != nil:
+			text = "(" + entry.Error.Message + ")"
+		case text == "":
+			text = string(entry.Value)
+		}
+		if entry.Estimated && entry.Resolution > 0 {
+			text += fmt.Sprintf(" (estimated, ±%d)", entry.Resolution)
+		}
+		if _, err := fmt.Fprintf(w, "%s: %s\n", entry.Name, text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// getAll reads name from every known device, one at a time. Each device gets
+// an equal share of the time left, so one that doesn't answer can't starve
+// the rest.
+func (a *application) getAll(ctx context.Context, name string) error {
+	devices, err := a.known(ctx)
+	if err != nil {
+		return err
+	}
+	entries := make(propertyEntries, 0, len(devices))
+	for i, d := range devices {
+		readCtx, cancel, budget := ctx, context.CancelFunc(func() {}), time.Duration(0)
+		if deadline, ok := ctx.Deadline(); ok {
+			budget = max(time.Until(deadline)/time.Duration(len(devices)-i), time.Second)
+			readCtx, cancel = context.WithTimeout(ctx, budget)
+		}
+		result, err := a.readProperty(readCtx, devices, d, name)
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		entry := propertyEntry{DeviceID: d.ID, Name: d.Name, Property: name}
+		if err != nil {
+			entry.Error = domain.AsError(classifyContextError(err, ctx, budget))
+		} else {
+			entry.Value, entry.Unit, entry.Estimated, entry.Resolution, entry.display = result.Value, result.Unit, result.Estimated, result.Resolution, result.display
+		}
+		entries = append(entries, entry)
+	}
+	return a.render.Data(entries)
 }
 
 // readProperty reads name from d, asking drivers first and then standard

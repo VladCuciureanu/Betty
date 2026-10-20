@@ -342,3 +342,49 @@ func TestClassifyContextError(t *testing.T) {
 		t.Fatalf("interrupt: %v", got)
 	}
 }
+
+func TestGetAllReadsEveryKnownDevice(t *testing.T) {
+	h := newHarness()
+	h.backend.known = []domain.Device{
+		bleDevice("AA:BB:CC:DD:EE:01", "Sensor"),
+		classicDevice("os:1", "Speaker", "AA:BB:CC:DD:EE:02"),
+	}
+	h.ble.battery = []byte{89}
+	if code := h.run("--json", "get", "--all", "battery"); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, h.stderr.String())
+	}
+	var entries []struct {
+		DeviceID string          `json:"device_id"`
+		Value    json.RawMessage `json:"value"`
+		Error    *domain.Error   `json:"error"`
+	}
+	h.data(t, &entries)
+	if len(entries) != 2 {
+		t.Fatalf("entries=%+v", entries)
+	}
+	for _, entry := range entries {
+		switch entry.DeviceID {
+		case "ble:AA:BB:CC:DD:EE:01":
+			if !strings.Contains(string(entry.Value), "89") || entry.Error != nil {
+				t.Errorf("sensor=%+v", entry)
+			}
+		default:
+			// A Classic device without a driver has no battery to read.
+			if entry.Value != nil || entry.Error == nil {
+				t.Errorf("speaker=%+v", entry)
+			}
+		}
+	}
+	if h.backend.scans.Load() != 0 {
+		t.Fatal("get --all scanned")
+	}
+}
+
+func TestGetAllTakesOnePropertyAndNoDevice(t *testing.T) {
+	h := newHarness()
+	for _, args := range [][]string{{"get", "--all"}, {"get", "--all", "Sensor", "battery"}, {"get", "Sensor"}, {"list", "--all"}} {
+		if code := h.run(args...); code != 2 {
+			t.Errorf("bt %v: code=%d, want a usage error", args, code)
+		}
+	}
+}

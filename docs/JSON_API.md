@@ -102,6 +102,12 @@ when nothing is found. `inspect` returns one device.
 `set` returns the value read back from the device after writing, not the value
 requested.
 
+`get --all <property>` returns an array with one entry per known device: the
+fields above plus `name`, or, for a device whose property couldn't be read,
+`device_id`, `name`, `property`, and an `error` object shaped like the
+[error envelope](#errors)'s. The command itself succeeds unless listing the
+devices fails.
+
 #### Standard battery value
 
 `battery.value` is either an integer percentage for a single battery, or an
