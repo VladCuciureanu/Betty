@@ -43,10 +43,19 @@ func (b *linuxBackend) Scan(ctx context.Context) ([]domain.Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	if call := b.conn.Object(bluezService, adapter).CallWithContext(ctx, "org.bluez.Adapter1.StartDiscovery", 0); call.Err != nil {
+	object := b.conn.Object(bluezService, adapter)
+	call := object.CallWithContext(ctx, "org.bluez.Adapter1.StartDiscovery", 0)
+	switch {
+	case call.Err == nil:
+		defer object.Call("org.bluez.Adapter1.StopDiscovery", 0)
+	case ctx.Err() != nil || dbusName(call.Err) == "org.bluez.Error.InProgress":
+		// StartDiscovery can stall while BlueZ serves another client's
+		// discovery, such as the BLE scan running beside this one. BlueZ
+		// shares one device tree between clients, so what that discovery
+		// finds is listed below all the same.
+	default:
 		return nil, translateDBus(call.Err)
 	}
-	defer b.conn.Object(bluezService, adapter).Call("org.bluez.Adapter1.StopDiscovery", 0)
 	<-ctx.Done()
 	listCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
