@@ -17,12 +17,6 @@ import (
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
-// reauthenticationLimit explains the Classic scenarios the virtual link
-// cannot run: once a paired device's link drops, a new connection must
-// re-authenticate with the stored link key, which Bumble's virtual controller
-// does not implement. Real controllers do, so these run over the air.
-const reauthenticationLimit = "the virtual controller cannot re-authenticate a paired Classic device; run over the air to cover this"
-
 const (
 	notifyCharacteristic = "b0e7e2e0-0000-4000-8000-000000000002"
 	writeCharacteristic  = "b0e7e2e0-0000-4000-8000-000000000003"
@@ -161,8 +155,6 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	assertPaired(t, p.device(0).Address)
 
 	switch {
-	case virtual():
-		t.Log("skipping connect and disconnect: " + reauthenticationLimit)
 	case runtime.GOOS == "windows":
 		fails(t, domain.CodeUnsupported, "connect", name)
 	default:
@@ -194,10 +186,8 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
 	}
-	if virtual() {
-		t.Skip(reauthenticationLimit)
-	}
-	if os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
+	// On the virtual link the peer knows the computer's address itself.
+	if !virtual() && os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
 		t.Skip("set BETTY_E2E_HOST_ADDRESS so the headset can connect to this computer")
 	}
 	drivers := t.TempDir()
