@@ -78,17 +78,17 @@ func TestParseDeviceRejectsUnknownAppleAudioModel(t *testing.T) {
 	}
 }
 
-func TestSingleBeatsBatteryUsesHeadsetShape(t *testing.T) {
+func TestSingleBeatsBatteryUsesTheSingleBatteryShape(t *testing.T) {
 	device := protocol.Device{ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "07190117202b998f110004446263ff09d489000000061e82f24d93"}}}
 	ad, ok := parseDevice(device)
 	if !ok {
 		t.Fatal("Beats Studio Pro was not recognized")
 	}
-	if got := batteryDisplay(ad); got != "headset ~90%" {
+	if got := batteryDisplay(ad); got != "~90%" {
 		t.Fatalf("battery=%q", got)
 	}
 	battery := passiveBattery(ad)
-	if battery.Headset == nil || battery.Headset.Level != 90 || battery.Left != nil || battery.Right != nil || battery.Case != nil {
+	if battery.Level == nil || *battery.Level != 90 || battery.Left != nil || battery.Right != nil || battery.Case != nil {
 		t.Fatalf("battery=%#v", battery)
 	}
 }
@@ -130,7 +130,7 @@ func TestParseExactBattery(t *testing.T) {
 	if battery.Case == nil || battery.Case.Level != 42 || !battery.Case.Charging {
 		t.Fatalf("case=%#v", battery.Case)
 	}
-	if got := exactBatteryDisplay(battery); got != "left 89% · right 88% · case 42% charging" {
+	if got := battery.Display(); got != "left 89% · right 88% · case 42% charging" {
 		t.Fatalf("display=%q", got)
 	}
 }
@@ -469,5 +469,14 @@ func TestNoiseControlWriteWaitsForTheRequestedMode(t *testing.T) {
 	host.Close()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAMissingEarbudIsNotReportedAsASingleBattery(t *testing.T) {
+	key := mustHex("00112233445566778899aabbccddeeff")
+	oneBud := append([]byte{0x04, 0xd9, 0x00, 0xaa}, make([]byte, 12)...) // left 89% charging, right missing
+	battery, ok := decryptAdvertisement(encryptedAdvertisement(key, oneBud, ""), 0x2420, appleAudioKeyring{Keys: []appleAudioKeys{{ENC: hex.EncodeToString(key)}}})
+	if !ok || battery.Level != nil || battery.Left == nil || battery.Left.Level != 89 || battery.Right != nil {
+		t.Fatalf("battery=%#v ok=%t", battery, ok)
 	}
 }

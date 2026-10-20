@@ -8,7 +8,7 @@ data is linked into the base `bt` binary.
 
 | Property | State | Values / shape | Requirements |
 | --- | --- | --- | --- |
-| `battery` | Available | headset or left/right/case percentage, including charging state when reported | A recognized Continuity advertisement for an estimated reading, or keys/AAP transport for an exact reading |
+| `battery` | Available | one percentage, or left/right/case percentages, including charging state when reported | A recognized Continuity advertisement for an estimated reading, or keys/AAP transport for an exact reading |
 | `noise_control` | Implemented, validation-gated | `off`, `anc`, `transparency`; `adaptive` only for profiles known to support it | Connected ANC-capable device and AAP transport |
 | `heart_rate` | Planned | beats per minute | Powerbeats Pro 2 in its fitness-equipment pairing mode; standard GATT path still needs hardware validation |
 

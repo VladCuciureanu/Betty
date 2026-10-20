@@ -12,7 +12,7 @@ func TestApplyCorrelatesAddressWithoutUsingName(t *testing.T) {
 		{ID: "same-name", Name: "Vlad’s Magic Trackpad", Endpoints: []domain.Endpoint{{Address: "11:22:33:44:55:66"}}},
 	}
 	Apply(devices, []Observation{{Address: "00:81:2A:F1:46:01", Percentage: 90}})
-	if got := string(devices[0].Properties["battery"].Value); got != "90" {
+	if got := string(devices[0].Properties["battery"].Value); got != `{"level":90}` {
 		t.Fatalf("battery=%s", got)
 	}
 	if _, guessed := devices[1].Properties["battery"]; guessed {

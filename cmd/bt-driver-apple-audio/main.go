@@ -139,7 +139,7 @@ func getBattery(host *protocol.Session, request protocol.PropertyRequest) (*prot
 		properties = map[string]protocol.Property{}
 	}
 	raw, _ := json.Marshal(battery)
-	properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: exactBatteryDisplay(battery)}
+	properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: battery.Display()}
 	enrichment.Properties = properties
 	return &enrichment, nil
 }
@@ -200,7 +200,7 @@ func enrich(found appleAudioDevices, keyring appleAudioKeyring) map[string]proto
 		e := protocol.Enrichment{Identification: &ad.identification, Properties: map[string]protocol.Property{}, Capabilities: appleAudioCapabilities(ad.profile)}
 		if ad.exact != nil {
 			raw, _ := json.Marshal(ad.exact)
-			e.Properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: exactBatteryDisplay(*ad.exact)}
+			e.Properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: ad.exact.Display()}
 		} else {
 			battery := passiveBattery(ad)
 			raw, _ := json.Marshal(battery)
@@ -292,11 +292,14 @@ func batteryDisplay(ad appleAudioAdvertisement) string {
 		return fmt.Sprintf("%s ~%d%%", name, *v)
 	}
 	if !ad.profile.Dual {
-		headset := ad.left
-		if headset == nil {
-			headset = ad.right
+		battery := ad.left
+		if battery == nil {
+			battery = ad.right
 		}
-		return part("headset", headset)
+		if battery == nil {
+			return "—"
+		}
+		return fmt.Sprintf("~%d%%", *battery)
 	}
 	parts := []string{part("left", ad.left), part("right", ad.right)}
 	if ad.profile.Case {
@@ -378,11 +381,14 @@ func passiveBattery(ad appleAudioAdvertisement) protocol.BatteryValue {
 		}
 		return battery
 	}
-	headset := ad.left
-	if headset == nil {
-		headset = ad.right
+	battery := ad.left
+	if battery == nil {
+		battery = ad.right
 	}
-	return protocol.BatteryValue{Headset: component(headset)}
+	if battery == nil {
+		return protocol.BatteryValue{}
+	}
+	return protocol.SingleBattery(protocol.BatteryComponent{Level: *battery})
 }
 
 func connectedAppleAudioCapabilities(device protocol.Device, ads []appleAudioAdvertisement) map[string]protocol.Capability {

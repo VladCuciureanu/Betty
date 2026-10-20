@@ -42,7 +42,7 @@ func TestSonyFrameRejectsChecksum(t *testing.T) {
 
 func TestParseSonyBattery(t *testing.T) {
 	single, err := parseSonyBattery(0x00, []byte{0x23, 0x00, 89, 1})
-	if err != nil || single.Headset == nil || single.Headset.Level != 89 || !single.Headset.Charging {
+	if err != nil || single.Level == nil || *single.Level != 89 || !single.Charging {
 		t.Fatalf("single=%#v err=%v", single, err)
 	}
 	buds, err := parseSonyBattery(0x09, []byte{0x23, 0x09, 88, 0, 76, 1})

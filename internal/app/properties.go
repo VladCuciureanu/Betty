@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	protocol "github.com/vladcuciureanu/betty/driver"
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
@@ -100,7 +101,7 @@ func (a *application) readGATTBattery(ctx context.Context, d domain.Device) (pro
 	if len(value) != 1 || value[0] > 100 {
 		return propertyResult{}, domain.NewError(domain.CodeUnsupported, "%s returned an invalid Battery Level", d.Name)
 	}
-	raw, _ := json.Marshal(int(value[0]))
+	raw, _ := json.Marshal(protocol.SingleBattery(protocol.BatteryComponent{Level: int(value[0])}))
 	return newPropertyResult(d, "battery", domain.Property{Value: raw, Unit: "%", Display: fmt.Sprintf("%d%%", value[0])})
 }
 

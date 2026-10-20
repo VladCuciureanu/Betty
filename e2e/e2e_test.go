@@ -58,7 +58,7 @@ func TestStandardGATTProperties(t *testing.T) {
 	name := p.device(0).Name
 	var battery property
 	ok(t, &battery, "get", name, "battery")
-	if string(battery.Value) != "87" {
+	if string(battery.Value) != `{"level":87}` {
 		t.Fatalf("battery=%s", battery.Value)
 	}
 	var firmware property
@@ -108,7 +108,7 @@ func TestWatchReportsPropertyChanges(t *testing.T) {
 	nextLine(t, lines, `"event":"snapshot"`, 30*time.Second)
 	p.do(map[string]any{"cmd": "set_battery", "device": 0, "level": 42})
 	line := nextLine(t, lines, `"event":"changed"`, 30*time.Second)
-	if !strings.Contains(string(line), `"value":42`) {
+	if !strings.Contains(string(line), `"value":{"level":42}`) {
 		t.Fatalf("change=%s", line)
 	}
 	cancel()
@@ -138,7 +138,7 @@ func TestDuplicateNamesAreAmbiguous(t *testing.T) {
 	fails(t, domain.CodeAmbiguous, "get", p.device(0).Name, "battery")
 	var battery property
 	ok(t, &battery, "get", p.device(1).Address, "battery")
-	if string(battery.Value) != "87" {
+	if string(battery.Value) != `{"level":87}` {
 		t.Fatalf("battery=%s", battery.Value)
 	}
 }
@@ -218,7 +218,7 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 
 	var battery property
 	ok(t, &battery, "get", address, "battery")
-	if string(battery.Value) != `{"headset":{"level":73}}` {
+	if string(battery.Value) != `{"level":73}` {
 		t.Fatalf("battery=%s", battery.Value)
 	}
 }

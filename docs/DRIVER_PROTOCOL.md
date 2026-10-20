@@ -217,7 +217,7 @@ JSON strings.
 Success:
 
 ```json
-{"protocol":1,"type":"response","id":"1","enrichments":{"opaque-id":{"properties":{"battery":{"value":80,"unit":"%"}}}}}
+{"protocol":1,"type":"response","id":"1","enrichments":{"opaque-id":{"properties":{"battery":{"value":{"level":80},"unit":"%"}}}}}
 ```
 
 Failure:
@@ -304,7 +304,7 @@ vendors:
 
 | Name | Type | Value |
 | --- | --- | --- |
-| `battery` | `battery` | An integer percentage, or an object with optional `headset`, `left`, `right`, and `case` components, each `{"level": 0-100, "charging": bool, "status": string}`. Omit unavailable components; never report them as 0. |
+| `battery` | `battery` | An object. A device with one battery sets `level` (0–100), with optional `charging` (boolean) and `status` (string). A device with independently reported parts sets `left`, `right`, and `case` components instead, each `{"level": 0-100, "charging": bool, "status": string}`. Omit unavailable parts; never report them as 0. Betty turns a bare integer percentage into `{"level": n}`. |
 | `noise_control` | `enum` | `off`, `anc`, `ambient`, `transparency`, `adaptive`, as supported by the model. |
 | `ambient_level` | `integer` | Model-specific range. |
 | `wear_detection` | `boolean` | `off`, `on`. |
@@ -493,7 +493,7 @@ some fields omitted. `>` is Betty to driver, `<` is driver to Betty.
   ... more reads and writes ...
 < {"protocol":1,"type":"host_request","id":"host-9","method":"rfcomm.close","params":{"channel_id":"rfcomm-1"}}
 > {"protocol":1,"type":"host_response","id":"host-9","result":{"closed":true}}
-< {"protocol":1,"type":"response","id":"1","enrichments":{"dev-7":{"identification":{"vendor":"Sony","family":"Headphones","model":"WH-1000XM5","confidence":"protocol"},"properties":{"battery":{"value":{"headset":{"level":80}},"unit":"%","display":"headset 80%"}}}}}
+< {"protocol":1,"type":"response","id":"1","enrichments":{"dev-7":{"identification":{"vendor":"Sony","family":"Headphones","model":"WH-1000XM5","confidence":"protocol"},"properties":{"battery":{"value":{"level":80},"unit":"%","display":"80%"}}}}}
   (Betty closes stdin; the driver exits 0)
 ```
 
@@ -535,7 +535,7 @@ def handle(request):
     if method in ("get", "set"):
         device = devices.get(request.get("device_id"))
         if method == "get" and device and ours(device) and request.get("property") == "battery":
-            return {"enrichments": {device["id"]: {"properties": {"battery": {"value": 80, "unit": "%"}}}}}
+            return {"enrichments": {device["id"]: {"properties": {"battery": {"value": {"level": 80}, "unit": "%"}}}}}
         return {}  # not ours: let another driver answer
     return {"error": f"unsupported method {method!r}", "error_code": "unsupported"}
 

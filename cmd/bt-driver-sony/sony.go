@@ -38,17 +38,7 @@ const (
 	protocolV2
 )
 
-type batteryComponent struct {
-	Level    int  `json:"level"`
-	Charging bool `json:"charging"`
-}
-
-type sonyBattery struct {
-	Headset *batteryComponent `json:"headset,omitempty"`
-	Left    *batteryComponent `json:"left,omitempty"`
-	Right   *batteryComponent `json:"right,omitempty"`
-	Case    *batteryComponent `json:"case,omitempty"`
-}
+type sonyBattery = protocol.BatteryValue
 
 type sonyNoiseState struct {
 	Mode         string `json:"mode"`
@@ -62,25 +52,6 @@ const (
 	sonyNoiseStandard sonyNoiseLayout = iota
 	sonyNoiseReservedByte
 )
-
-func (b sonyBattery) display() string {
-	var values []string
-	add := func(name string, component *batteryComponent) {
-		if component == nil {
-			return
-		}
-		value := fmt.Sprintf("%s %d%%", name, component.Level)
-		if component.Charging {
-			value += " charging"
-		}
-		values = append(values, value)
-	}
-	add("headset", b.Headset)
-	add("left", b.Left)
-	add("right", b.Right)
-	add("case", b.Case)
-	return strings.Join(values, " · ")
-}
 
 type sonyFrame struct {
 	DataType byte
@@ -435,11 +406,11 @@ func parseSonyBattery(subtype byte, payload []byte) (sonyBattery, error) {
 	if len(payload) < 2 || payload[0] != 0x23 || payload[1] != subtype {
 		return sonyBattery{}, fmt.Errorf("not a Sony battery response")
 	}
-	component := func(level, charging byte) (*batteryComponent, error) {
+	component := func(level, charging byte) (*protocol.BatteryComponent, error) {
 		if level > 100 || charging > 1 {
 			return nil, fmt.Errorf("invalid Sony battery component")
 		}
-		return &batteryComponent{Level: int(level), Charging: charging == 1}, nil
+		return &protocol.BatteryComponent{Level: int(level), Charging: charging == 1}, nil
 	}
 	var result sonyBattery
 	var err error
@@ -448,7 +419,10 @@ func parseSonyBattery(subtype byte, payload []byte) (sonyBattery, error) {
 		if len(payload) < 4 {
 			return result, fmt.Errorf("truncated Sony headset battery response")
 		}
-		result.Headset, err = component(payload[2], payload[3])
+		var single *protocol.BatteryComponent
+		if single, err = component(payload[2], payload[3]); err == nil {
+			result = protocol.SingleBattery(*single)
+		}
 	case 0x09:
 		if len(payload) < 6 {
 			return result, fmt.Errorf("truncated Sony earbud battery response")

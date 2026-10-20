@@ -8,7 +8,7 @@ not linked into the base `bt` binary.
 
 | Property | State | Values / shape | Current scope |
 | --- | --- | --- | --- |
-| `battery` | Available for v2 | headset percentage or left/right/case percentages, including charging state when reported | Connected device exposing Sony protocol v2 |
+| `battery` | Available for v2 | one percentage, or left/right/case percentages, including charging state when reported | Connected device exposing Sony protocol v2 |
 | `noise_control` | Implemented, validation-gated | `off`, `anc`, `ambient` | WH-CH720N and ULT Wear v2 layouts only |
 | `ambient_level` | Implemented, validation-gated | integer `1` through `20` | WH-CH720N v2 layout only |
 | `equalizer` | Planned | model-specific presets | Packet layout and hardware validation required |

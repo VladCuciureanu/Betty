@@ -69,7 +69,7 @@ when nothing is found. `inspect` returns one device.
     {"id": "04:E4:B6:1F:F5:8D", "transport": "ble", "address": "04:E4:B6:1F:F5:8D"}
   ],
   "identification": {"vendor": "Sony", "family": "Headphones", "model": "WH-1000XM5", "confidence": "protocol"},
-  "properties": {"battery": {"value": 80, "unit": "%", "display": "80%"}},
+  "properties": {"battery": {"value": {"level": 80}, "unit": "%", "display": "80%"}},
   "capabilities": {"noise_control": {"status": "planned", "type": "enum", "readable": true, "writable": true, "values": ["off", "anc", "ambient"], "reason": "..."}}
 }
 ```
@@ -88,7 +88,7 @@ when nothing is found. `inspect` returns one device.
 ### Properties: `get`, `set`, `watch`
 
 ```json
-{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":80,"unit":"%","estimated":false}
+{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":{"level":80},"unit":"%","estimated":false}
 ```
 
 | Field | Meaning |
@@ -104,17 +104,23 @@ requested.
 
 #### Standard battery value
 
-`battery.value` is either an integer percentage for a single battery, or an
-object for devices with independently reported components:
+`battery.value` is always an object. A device with one battery reports its
+`level` directly:
+
+```json
+{"level":80,"charging":true}
+```
+
+A device with independently reported parts reports them as `left`, `right`,
+and `case` components instead:
 
 ```json
 {"left":{"level":89,"status":"discharging"},"right":{"level":88,"charging":true,"status":"charging"},"case":{"level":42}}
 ```
 
-The component keys are `headset`, `left`, `right`, and `case`. Each has an
-integer `level` from 0 through 100 and may include `charging` and a
-protocol-specific `status`. Unavailable components are omitted; never treat an
-omitted component as 0%.
+Each `level` is an integer from 0 through 100, with optional `charging` and a
+protocol-specific `status` beside it. Unavailable parts are omitted; never
+treat an omitted part as 0%.
 
 ### Pairing and connections: `pair`, `unpair`, `connect`, `disconnect`
 
