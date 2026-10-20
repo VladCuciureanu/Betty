@@ -1,0 +1,29 @@
+name: Linux packages
+
+on:
+  push:
+    paths:
+      - 'packaging/linux/**'
+      - 'cmd/**'
+      - '.github/workflows/packages-linux.yml'
+  pull_request:
+    paths:
+      - 'packaging/linux/**'
+      - 'cmd/**'
+      - '.github/workflows/packages-linux.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - name: Install, upgrade, and remove on Debian and Ubuntu
+        run: ./packaging/linux/test-packages.sh debian:stable ubuntu:24.04
