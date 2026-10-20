@@ -71,4 +71,11 @@
     <PackageReference Include="Microsoft.Windows.WDK.x64" Version="10.0.28000.2526" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <!--
+    The NuGet WDK packages only the INF, so Inf2Cat cannot find the driver
+    binary the INF copies. Add it to the package explicitly.
+  -->
+  <ItemGroup>
+    <FilesToPackage Include="$(TargetPath)" />
+  </ItemGroup>
 </Project>

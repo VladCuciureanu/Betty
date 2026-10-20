@@ -63,6 +63,13 @@ if (-not $BaseOnly) {
         }
         & $msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
         if ($LASTEXITCODE -ne 0) { throw "WDK driver build failed" }
+        # The WDK writes the driver package, with its catalog, to a subfolder.
+        $package = Join-Path $driverOutput "BettyAAP"
+        foreach ($name in @("BettyAAP.inf", "BettyAAP.sys", "BettyAAP.cat")) {
+            $source = Join-Path $package $name
+            if (-not (Test-Path $source)) { throw "WDK driver package is missing $name" }
+            Copy-Item $source (Join-Path $driverOutput $name) -Force
+        }
     }
 }
 
