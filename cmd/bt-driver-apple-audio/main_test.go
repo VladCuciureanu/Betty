@@ -26,6 +26,7 @@ func inspectDevices(t *testing.T, purpose string, devices ...protocol.Device) ma
 }
 
 func TestInspectRecognizesAndCorrelatesUniqueAirPods(t *testing.T) {
+	withAAP(t, "")
 	devices := []protocol.Device{{ID: "classic", Name: "AirPods Pro", Connected: true}, {ID: "ble", Name: "uuid", ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "07190124202b998f110004446263ff09d489000000061e82f24d93"}}}}
 	enrichments := inspectDevices(t, protocol.PurposeScan, devices...)
 	classic := enrichments["classic"]
@@ -250,6 +251,7 @@ func TestKeysMustResolveTheAdvertisersAddress(t *testing.T) {
 }
 
 func TestAnUnreadableKeyringIsNotOverwritten(t *testing.T) {
+	withAAP(t, "")
 	host, child := net.Pipe()
 	done := make(chan error, 1)
 	go func() {
@@ -300,6 +302,7 @@ type fakeBetty struct {
 	decoder  *json.Decoder
 	storage  map[string]string
 	packets  []string
+	opened   bool
 	deniedID string
 	calls    []string
 }
@@ -353,6 +356,7 @@ func (b *fakeBetty) hostCall(call protocol.Message) (any, string) {
 		b.storage[params.Key] = params.Value
 		return map[string]any{}, ""
 	case protocol.HostL2CAPOpen:
+		b.opened = true
 		var params protocol.L2CAPOpenParams
 		_ = json.Unmarshal(call.Params, &params)
 		if params.DeviceID == b.deniedID || params.PSM != airPodsPSM {
@@ -377,6 +381,7 @@ func (b *fakeBetty) hostCall(call protocol.Message) (any, string) {
 }
 
 func TestAppleAudioDriverServesOverProtocol(t *testing.T) {
+	withAAP(t, "")
 	t.Setenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS", "")
 	host, child := net.Pipe()
 	done := make(chan error, 1)
@@ -446,6 +451,7 @@ func TestAppleAudioDriverServesOverProtocol(t *testing.T) {
 }
 
 func TestNoiseControlWriteWaitsForTheRequestedMode(t *testing.T) {
+	withAAP(t, "")
 	t.Setenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS", "1")
 	host, child := net.Pipe()
 	done := make(chan error, 1)
@@ -465,6 +471,49 @@ func TestNoiseControlWriteWaitsForTheRequestedMode(t *testing.T) {
 	got := betty.request(protocol.Request{ID: "1", Method: protocol.MethodSet, DeviceID: "classic", Property: "noise_control", Value: json.RawMessage(`"anc"`), Devices: devices})
 	if property := got.Enrichments["classic"].Properties["noise_control"]; got.Error != "" || string(property.Value) != `"anc"` {
 		t.Fatalf("set=%+v", got)
+	}
+	host.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+// withAAP sets the reason this platform can't open the AAP channel for one
+// test; an empty reason makes the channel available.
+func withAAP(t *testing.T, unavailable string) {
+	t.Helper()
+	previous := aapUnavailable
+	aapUnavailable = unavailable
+	t.Cleanup(func() { aapUnavailable = previous })
+}
+
+func TestWithoutAAPNoiseControlIsUnsupportedAndBatteryComesFromAdvertisements(t *testing.T) {
+	withAAP(t, "no AAP here")
+	t.Setenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS", "1")
+	host, child := net.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		defer child.Close()
+		done <- protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set}.Run(nil, child, child)
+	}()
+	betty := &fakeBetty{t: t, encoder: json.NewEncoder(host), decoder: json.NewDecoder(host), storage: map[string]string{}}
+	devices := []protocol.Device{
+		{ID: "classic", Name: "AirPods Pro", Connected: true},
+		{ID: "ble", ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: "0719010e20209904000000"}}},
+	}
+	got := betty.request(protocol.Request{ID: "1", Method: protocol.MethodGet, DeviceID: "classic", Property: "battery", Devices: devices})
+	enrichment := got.Enrichments["classic"]
+	if battery, ok := enrichment.Properties["battery"]; got.Error != "" || !ok || !battery.Estimated {
+		t.Fatalf("get=%+v", got)
+	}
+	if capability := enrichment.Capabilities["noise_control"]; capability.Status != protocol.StatusUnsupported || capability.Reason != "no AAP here" {
+		t.Fatalf("noise_control=%+v", capability)
+	}
+	if got := betty.request(protocol.Request{ID: "2", Method: protocol.MethodSet, DeviceID: "classic", Property: "noise_control", Value: json.RawMessage(`"anc"`), Devices: devices}); len(got.Enrichments) != 0 {
+		t.Fatalf("set=%+v", got)
+	}
+	if betty.opened {
+		t.Fatal("the driver opened an AAP channel")
 	}
 	host.Close()
 	if err := <-done; err != nil {
