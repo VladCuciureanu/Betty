@@ -54,6 +54,10 @@
       <TimeStamp Condition="'$(DriverVersion)' == ''">1.0.0.0</TimeStamp>
       <DateStamp>*</DateStamp>
     </Inf>
+    <!-- The WDK test-signs the build output; only its arm64 props pick a digest. -->
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Driver.c" />
