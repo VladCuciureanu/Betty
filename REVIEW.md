@@ -40,7 +40,7 @@ than rough.
 | # | Problem | Where |
 | --- | --- | --- |
 | 1 | **Fixed** (legacy IDs removed entirely). ✓ **A driver can read another driver's private storage.** A manifest may claim any `legacy_ids`; the host then serves that driver's storage as a fallback and hides the real driver. A third-party driver declaring `"legacy_ids":["official/apple-audio"]` reads the AirPods encryption keys. | `internal/driver/manager.go` `storageGet`, `storageSet`, `List`, `validateManifest` |
-| 2 | ✓ **The Windows kernel driver has no access control.** All IOCTLs are `FILE_ANY_ACCESS`, there's no SDDL, and `IOCTL_BETTY_CONNECT` accepts any address. Any local user can send raw AAP traffic to any device in range. Don't ship it as is. | `packaging/windows/driver/BettyAAP.h`, `Driver.c` |
+| 2 | **Fixed** (INF security descriptor allowing only SYSTEM, administrators and interactive users; read/write IOCTL access bits; CONNECT limited to the PDO's BTHENUM address; needs hardware validation). ✓ **The Windows kernel driver has no access control.** All IOCTLs are `FILE_ANY_ACCESS`, there's no SDDL, and `IOCTL_BETTY_CONNECT` accepts any address. Any local user can send raw AAP traffic to any device in range. Don't ship it as is. | `packaging/windows/driver/BettyAAP.h`, `Driver.c` |
 | 3 | ✓ **Same-name devices resolve at random.** The exact-name pass returns the first match and never reports ambiguity. The scan merge never joins a device's OS entry with its BLE entry, so on this machine `55" OLED` appears as both `windows:04:E4:…` and `ble:04:E4:…`. Which one `bt get`/`connect` acts on depends on goroutine timing. | `internal/resolver/resolver.go:19`, `internal/app/app.go` `merge`/`sameEndpoint` |
 | 4 | **Fixed** (hw: the packed layout is unit-tested, a real connect is not). ✓ **Windows RFCOMM uses the wrong socket-address layout.** `SOCKADDR_BTH` is a packed 30-byte struct with the address at offset 2. The Go struct pads the address to offset 8, and a unit test locks that in. Every connect goes to the wrong address. (hw) | `internal/rfcomm/rfcomm_windows.go:61` |
 | 5 | **Fixed.** ✓ **The macOS transports have a use-after-free on cancel.** `defer C.free(cAddress)` runs while the open goroutine is still inside the C call that reads the string. | `internal/l2cap/l2cap_darwin.go:30`, `internal/rfcomm/rfcomm_darwin.go` |
@@ -113,14 +113,14 @@ High, beyond the "Fix first" items:
 - **Fixed.** Windows RFCOMM reads `WSAGetLastError` in a separate call, so the goroutine can move to another OS thread and get a stale value.
 - **Fixed** (now `device_disconnected`). ✓ On Linux, L2CAP treats a zero-byte read (the peer closed) as an empty packet, so the AAP driver spins. RFCOMM handles this case correctly.
 - macOS RFCOMM probably always fails its first SDP lookup, because `performSDPQuery:` is asynchronous. Delegates may dangle after close, and nothing pumps the run loop for data callbacks. (hw)
-- The kernel driver leaks the L2CAP channel on remote disconnect and clears it without taking the lock. (hw)
+- **Fixed** (a passive-level work item closes the channel with `BRB_L2CA_CLOSE_CHANNEL` under the lock). The kernel driver leaks the L2CAP channel on remote disconnect and clears it without taking the lock. (hw)
 
 Medium:
 
 - **Fixed** (Linux L2CAP and RFCOMM). Sub-millisecond deadlines round down to 0. A socket that is still connecting can then be registered as open.
 - Windows uses `SO_RCVTIMEO` and retries, but the socket is in an indeterminate state after such a timeout.
 - Windows L2CAP reads ignore the context and hold the channel lock for up to 5s.
-- The Go side sends `CONNECT` to every kernel-driver instance, so it can connect through an instance bound to a different headset.
+- **Fixed** (the host reads each instance's bound address and connects only through the matching one). The Go side sends `CONNECT` to every kernel-driver instance, so it can connect through an instance bound to a different headset.
 - On Linux, the fd is read outside the lock; this is a latent reuse race.
 - The `.m` files are written as single lines of 400–900 characters.
 - `waitFD`, the address parsers and `maxDuration` are copied between packages.

@@ -30,10 +30,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.24.x'
+      # The WDK's InfVerif task loads InfVerif.dll for the MSBuild process's
+      # architecture, and the x64 WDK package ships no x86 build of it, so
+      # the default x86 MSBuild cannot verify the driver INF.
       - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
       - name: Build unsigned validation MSI
         shell: pwsh
-        run: ./packaging/windows/build.ps1 -Version 0.0.0
+        run: ./packaging/windows/build.ps1 -Version 0.0.1
       - name: Smoke-test MSI install and clean uninstall
         shell: pwsh
         run: |
