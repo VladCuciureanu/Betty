@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"time"
 
@@ -74,6 +75,9 @@ func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain
 func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpose string) []domain.Device {
 	installed, _ := m.List()
 	for _, item := range installed {
+		if !matchesAny(item.Match, devices) {
+			continue
+		}
 		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)}, m.inspectBudget())
 		if err != nil {
 			if m.OnInspectError != nil {
@@ -93,9 +97,26 @@ func (m *Manager) Property(ctx context.Context, devices []domain.Device, method,
 	if err != nil {
 		return devices, false, err
 	}
+	// The selected device and its possible matches decide which drivers
+	// may own it.
+	related := []string{deviceID}
+	for _, d := range devices {
+		if d.ID == deviceID {
+			related = append(related, d.PossibleMatches...)
+		}
+	}
+	var candidates []domain.Device
+	for _, d := range devices {
+		if slices.Contains(related, d.ID) || slices.Contains(d.PossibleMatches, deviceID) {
+			candidates = append(candidates, d)
+		}
+	}
 	handled := false
 	var operationErr error
 	for _, item := range installed {
+		if !matchesAny(item.Match, candidates) {
+			continue
+		}
 		response, callErr := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: method, DeviceID: deviceID, Property: property, Value: value, Devices: wireDevices(devices)}, 0)
 		if callErr != nil {
 			operationErr = callErr
@@ -509,6 +530,13 @@ func validateManifest(m protocol.Manifest) error {
 	}
 	if !protocol.ValidID(m.ID) {
 		return domain.NewError(domain.CodeUsage, "invalid driver ID")
+	}
+	if m.Match != nil {
+		for _, uuid := range m.Match.ServiceUUIDs {
+			if !validUUID(uuid) {
+				return domain.NewError(domain.CodeUsage, "invalid service UUID %q in the manifest's match hints", uuid)
+			}
+		}
 	}
 	return nil
 }
