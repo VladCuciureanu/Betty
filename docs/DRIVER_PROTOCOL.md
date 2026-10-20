@@ -70,7 +70,7 @@ A driver is a single executable file.
   ([section 4](#4-framing-and-session-lifecycle)).
 - Stdout is reserved for protocol messages. A driver MUST NOT write anything
   else to stdout.
-- A driver MAY write diagnostics to stderr. Betty currently discards them.
+- A driver MAY write diagnostics to stderr. Betty discards them unless `bt` runs with `--verbose`, which relays each line as a diagnostic prefixed with the driver ID, up to 64 KiB per driver process.
 - Betty sets no particular working directory or environment. A driver MUST NOT
   rely on one.
 

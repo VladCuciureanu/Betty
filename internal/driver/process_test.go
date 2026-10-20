@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -72,6 +73,9 @@ func runTestDriver(modes string) {
 		_, _ = io.Copy(io.Discard, in)
 	case "hang":
 		time.Sleep(time.Hour)
+	case "chatty":
+		fmt.Fprint(os.Stderr, "first line\nsecond line\r\nno newline")
+		respond(request.ID)
 	case "linger":
 		respond(request.ID)
 		time.Sleep(time.Hour)
@@ -216,6 +220,37 @@ func TestReadMessage(t *testing.T) {
 	}
 	if _, err := readMessage(bufio.NewReaderSize(strings.NewReader(strings.Repeat("x", 100)+"\n"), 16), 64); err == nil {
 		t.Fatal("expected size error")
+	}
+}
+
+func TestDriverStderrReachesTheLogLineByLine(t *testing.T) {
+	m := newTestManager(t)
+	manifest := protocol.Manifest{ID: "example/chatty", Name: "chatty", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=chatty")
+	var lines []string
+	m.OnDriverLog = func(id, line string) { lines = append(lines, id+": "+line) }
+	if _, err := m.call(context.Background(), manifest, inspectRequest(), m.inspectBudget()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"example/chatty: first line", "example/chatty: second line", "example/chatty: no newline"}
+	if strings.Join(lines, "|") != strings.Join(want, "|") {
+		t.Fatalf("lines=%q", lines)
+	}
+}
+
+func TestLineLogStopsAtItsLimit(t *testing.T) {
+	var lines []string
+	log := newLineLog(func(line string) { lines = append(lines, line) })
+	chunk := strings.Repeat("x", 1023) + "\n"
+	for range maxStderrBytes/len(chunk) + 4 {
+		if n, err := log.Write([]byte(chunk)); n != len(chunk) || err != nil {
+			t.Fatalf("n=%d err=%v", n, err)
+		}
+	}
+	log.flush()
+	if len(lines) != maxStderrBytes/len(chunk)+1 || lines[len(lines)-1] != "(further stderr output dropped)" {
+		t.Fatalf("%d lines, last %q", len(lines), lines[len(lines)-1])
 	}
 }
 

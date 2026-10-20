@@ -73,9 +73,16 @@ func (m *Manager) call(ctx context.Context, item protocol.Manifest, request prot
 func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request protocol.Request) (protocol.Response, error) {
 	var response protocol.Response
 	cmd := exec.CommandContext(ctx, m.driverPath(item.ID))
-	// Stderr is left nil (the null device) rather than io.Discard, so no copy
-	// goroutine can keep Wait blocked on a pipe inherited by a grandchild.
+	// Without a log, stderr is left nil (the null device) rather than
+	// io.Discard, so no copy goroutine runs at all. With one, WaitDelay stops
+	// a pipe inherited by a grandchild from keeping Wait blocked.
 	cmd.WaitDelay = m.exitBudget()
+	if m.OnDriverLog != nil {
+		log := newLineLog(func(line string) { m.OnDriverLog(item.ID, line) })
+		cmd.Stderr = log
+		// Deferred first, so it runs after the process has been waited for.
+		defer log.flush()
+	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return response, err
