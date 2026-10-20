@@ -5,8 +5,10 @@ package hidbattery
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
+	protocol "github.com/vladcuciureanu/betty/driver"
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
@@ -64,8 +66,8 @@ func Apply(devices []domain.Device, observations []Observation) []domain.Device 
 		if devices[i].Capabilities == nil {
 			devices[i].Capabilities = map[string]domain.DeviceCapability{}
 		}
-		raw, _ := json.Marshal(observation.Percentage)
-		devices[i].Properties["battery"] = domain.Property{Value: raw, Unit: "%", Display: strings.TrimSpace(string(raw)) + "%"}
+		raw, _ := json.Marshal(protocol.SingleBattery(protocol.BatteryComponent{Level: observation.Percentage}))
+		devices[i].Properties["battery"] = domain.Property{Value: raw, Unit: "%", Display: strconv.Itoa(observation.Percentage) + "%"}
 		devices[i].Capabilities["battery"] = domain.DeviceCapability{Status: "available", Kind: "battery", Readable: true}
 	}
 	return devices

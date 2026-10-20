@@ -141,7 +141,7 @@ bt get headphones battery --json --timeout 15s
 Every result uses the same envelope:
 
 ```json
-{"schema_version":1,"data":{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":80,"unit":"%","estimated":false}}
+{"schema_version":1,"data":{"device_id":"windows:AA:BB:CC:DD:EE:FF","property":"battery","value":{"level":80},"unit":"%","estimated":false}}
 ```
 
 Failures use the same envelope with an `error` holding a stable `code`, a

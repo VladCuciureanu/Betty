@@ -159,7 +159,7 @@ func getBattery(host *protocol.Session, device protocol.Device) (*protocol.Enric
 	return &protocol.Enrichment{
 		Identification: sonyIdentification(device, model),
 		Capabilities:   sonyCapabilitiesFor(model, protocolVersion),
-		Properties:     map[string]protocol.Property{"battery": {Value: raw, Unit: "%", Display: battery.display()}},
+		Properties:     map[string]protocol.Property{"battery": {Value: raw, Unit: "%", Display: battery.Display()}},
 	}, nil
 }
 

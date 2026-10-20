@@ -144,7 +144,7 @@ func TestGetUsesKnownDevicesWithoutScanning(t *testing.T) {
 	}
 	var result propertyResult
 	h.data(t, &result)
-	if result.Property != "battery" || string(result.Value) != "89" || result.Unit != "%" {
+	if result.Property != "battery" || string(result.Value) != `{"level":89}` || result.Unit != "%" {
 		t.Fatalf("result=%+v", result)
 	}
 	if h.backend.scans.Load() != 0 {
@@ -162,7 +162,7 @@ func TestGetScansWhenTheKnownDeviceLacksABLEEndpoint(t *testing.T) {
 	}
 	var result propertyResult
 	h.data(t, &result)
-	if result.DeviceID != "os:1" || string(result.Value) != "70" {
+	if result.DeviceID != "os:1" || string(result.Value) != `{"level":70}` {
 		t.Fatalf("the BLE endpoint was not merged into the OS device: %+v", result)
 	}
 }
@@ -297,7 +297,7 @@ func TestListIncludesCorrelatedHIDBattery(t *testing.T) {
 	if code := h.run("--json", "list"); code != 0 {
 		t.Fatalf("code=%d", code)
 	}
-	if !strings.Contains(h.stdout.String(), `"battery":{"value":90,"unit":"%","display":"90%"}`) {
+	if !strings.Contains(h.stdout.String(), `"battery":{"value":{"level":90},"unit":"%","display":"90%"}`) {
 		t.Fatalf("stdout=%s", h.stdout.String())
 	}
 }

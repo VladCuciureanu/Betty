@@ -1,7 +1,11 @@
 // Package driver defines Betty's versioned external-driver wire protocol.
 package driver
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+)
 
 const Version = 1
 
@@ -134,13 +138,52 @@ type Property struct {
 	Resolution int             `json:"resolution,omitempty"`
 }
 
-// BatteryValue is the schema-version-1 object form of the standard battery
-// property. A single-component device may instead expose a JSON number.
+// BatteryValue is the value of the standard battery property. A device with
+// one battery sets Level, and optionally Charging and Status, which mean the
+// same as in a BatteryComponent. A device with independently reported parts
+// sets Left, Right and Case instead. Unavailable parts are left nil; never
+// report them as 0%.
 type BatteryValue struct {
-	Headset *BatteryComponent `json:"headset,omitempty"`
-	Left    *BatteryComponent `json:"left,omitempty"`
-	Right   *BatteryComponent `json:"right,omitempty"`
-	Case    *BatteryComponent `json:"case,omitempty"`
+	Level    *int              `json:"level,omitempty"`
+	Charging bool              `json:"charging,omitempty"`
+	Status   string            `json:"status,omitempty"`
+	Left     *BatteryComponent `json:"left,omitempty"`
+	Right    *BatteryComponent `json:"right,omitempty"`
+	Case     *BatteryComponent `json:"case,omitempty"`
+}
+
+// SingleBattery returns the value of a device with one battery.
+func SingleBattery(component BatteryComponent) BatteryValue {
+	level := component.Level
+	return BatteryValue{Level: &level, Charging: component.Charging, Status: component.Status}
+}
+
+// Display renders the value for people, for example "80% charging" or
+// "left 89% · right 88% · case 42%".
+func (v BatteryValue) Display() string {
+	part := func(name string, level int, charging bool) string {
+		value := fmt.Sprintf("%d%%", level)
+		if name != "" {
+			value = name + " " + value
+		}
+		if charging {
+			value += " charging"
+		}
+		return value
+	}
+	var parts []string
+	if v.Level != nil {
+		parts = append(parts, part("", *v.Level, v.Charging))
+	}
+	for _, component := range []struct {
+		name  string
+		value *BatteryComponent
+	}{{"left", v.Left}, {"right", v.Right}, {"case", v.Case}} {
+		if component.value != nil {
+			parts = append(parts, part(component.name, component.value.Level, component.value.Charging))
+		}
+	}
+	return strings.Join(parts, " · ")
 }
 
 type BatteryComponent struct {
