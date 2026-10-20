@@ -36,11 +36,13 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 			pairingInput = nil
 		}
 		a.backend = backend.New(backend.PairingIO{In: pairingInput, Out: stderr})
-		a.ble = ble.New()
+		client := ble.New()
+		a.ble = client
 		a.hid = hidbattery.New()
 		a.drivers = driver.New()
 		a.drivers.SetHost(l2cap.New())
 		a.drivers.SetRFCOMMHost(rfcomm.New())
+		a.drivers.SetGATTHost(gattHost{client})
 		a.drivers.OnInspectError = func(id string, err error) {
 			a.render.Warn("driver %s failed to inspect devices: %v", id, err)
 		}

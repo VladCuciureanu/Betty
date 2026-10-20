@@ -101,6 +101,72 @@ func (s *Session) SetState(key, value string) error {
 	return s.CallHost(HostStorageSet, StorageSetParams{Key: key, Value: value}, nil)
 }
 
+// GATTServices lists the GATT services and characteristics of a BLE device
+// Betty supplied in the current request. It requires PermissionGATT. Betty
+// connects on the first GATT call for a device and keeps the connection until
+// the request finishes.
+func (s *Session) GATTServices(deviceID string) ([]GATTService, error) {
+	var result struct {
+		Services []GATTService `json:"services"`
+	}
+	err := s.CallHost(HostGATTServices, GATTServicesParams{DeviceID: deviceID}, &result)
+	return result.Services, err
+}
+
+// ReadGATT reads a characteristic. serviceUUID may be empty unless the
+// characteristic UUID appears in several services.
+func (s *Session) ReadGATT(deviceID, serviceUUID, characteristicUUID string) ([]byte, error) {
+	var result struct {
+		Data string `json:"data"`
+	}
+	params := GATTCharacteristicParams{DeviceID: deviceID, ServiceUUID: serviceUUID, CharacteristicUUID: characteristicUUID}
+	if err := s.CallHost(HostGATTRead, params, &result); err != nil {
+		return nil, err
+	}
+	return decodeHostData(result.Data)
+}
+
+// WriteGATT writes a characteristic, with a response unless withoutResponse
+// is set.
+func (s *Session) WriteGATT(deviceID, serviceUUID, characteristicUUID string, data []byte, withoutResponse bool) error {
+	params := GATTWriteParams{
+		GATTCharacteristicParams: GATTCharacteristicParams{DeviceID: deviceID, ServiceUUID: serviceUUID, CharacteristicUUID: characteristicUUID},
+		Data:                     hex.EncodeToString(data),
+		WithoutResponse:          withoutResponse,
+	}
+	return s.CallHost(HostGATTWrite, params, nil)
+}
+
+// SubscribeGATT enables notifications on a characteristic and returns a
+// subscription ID for NextGATT. Betty queues up to 64 values per
+// subscription and drops the oldest beyond that.
+func (s *Session) SubscribeGATT(deviceID, serviceUUID, characteristicUUID string) (string, error) {
+	var result struct {
+		SubscriptionID string `json:"subscription_id"`
+	}
+	params := GATTCharacteristicParams{DeviceID: deviceID, ServiceUUID: serviceUUID, CharacteristicUUID: characteristicUUID}
+	err := s.CallHost(HostGATTSubscribe, params, &result)
+	return result.SubscriptionID, err
+}
+
+// NextGATT returns the next value a subscription received. A zero timeout
+// waits for the request deadline; otherwise it must not exceed 30 seconds.
+func (s *Session) NextGATT(subscriptionID string, timeout time.Duration) ([]byte, error) {
+	var result struct {
+		Data string `json:"data"`
+	}
+	if err := s.CallHost(HostGATTNext, GATTNextParams{SubscriptionID: subscriptionID, TimeoutMS: milliseconds(timeout)}, &result); err != nil {
+		return nil, err
+	}
+	return decodeHostData(result.Data)
+}
+
+// UnsubscribeGATT stops a subscription. Betty also stops every subscription
+// left open when the request finishes.
+func (s *Session) UnsubscribeGATT(subscriptionID string) error {
+	return s.CallHost(HostGATTUnsubscribe, GATTSubscriptionParams{SubscriptionID: subscriptionID}, nil)
+}
+
 func milliseconds(timeout time.Duration) int {
 	if timeout <= 0 {
 		return 0

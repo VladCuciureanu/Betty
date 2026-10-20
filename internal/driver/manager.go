@@ -3,7 +3,6 @@ package driver
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -30,17 +29,18 @@ type Manager struct {
 	OnInspectError func(driverID string, err error)
 	host           Host
 	rfcomm         RFCOMMHost
+	gattHost       GATTHost
 }
 
 func New() *Manager {
 	if root := os.Getenv("BETTY_DRIVER_DIR"); root != "" {
-		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
 	}
 	root, _ := os.UserConfigDir()
-	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
 }
 func NewAt(root string) *Manager {
-	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
 }
 func (m *Manager) SetHost(host Host) {
 	if host == nil {
@@ -55,6 +55,14 @@ func (m *Manager) SetRFCOMMHost(host RFCOMMHost) {
 		return
 	}
 	m.rfcomm = host
+}
+
+func (m *Manager) SetGATTHost(host GATTHost) {
+	if host == nil {
+		m.gattHost = UnsupportedGATTHost{}
+		return
+	}
+	m.gattHost = host
 }
 
 func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain.Device {
@@ -365,183 +373,6 @@ func driverErrorCode(value string) domain.ErrorCode {
 	}
 }
 
-func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, message protocol.Message, allowedDevices map[string]bool, channels map[string]string) (json.RawMessage, error) {
-	marshal := func(value any) (json.RawMessage, error) { bytes, err := json.Marshal(value); return bytes, err }
-	required := ""
-	if len(message.Method) >= 6 && message.Method[:6] == "l2cap." {
-		required = protocol.PermissionL2CAP
-	}
-	if len(message.Method) >= 8 && message.Method[:8] == "storage." {
-		required = protocol.PermissionStorage
-	}
-	if len(message.Method) >= 7 && message.Method[:7] == "rfcomm." {
-		required = protocol.PermissionRFCOMM
-	}
-	if required != "" && !hasPermission(driver, required) {
-		return nil, domain.NewError(domain.CodePermission, "driver %s lacks %s permission", driver.ID, required)
-	}
-	switch message.Method {
-	case protocol.HostL2CAPOpen:
-		var p protocol.L2CAPOpenParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if !allowedDevices[p.DeviceID] {
-			return nil, domain.NewError(domain.CodePermission, "driver cannot access device %q", p.DeviceID)
-		}
-		channel, err := m.host.OpenL2CAP(ctx, p.DeviceID, p.PSM)
-		if err != nil {
-			return nil, err
-		}
-		channels[channel] = "l2cap"
-		return marshal(map[string]string{"channel_id": channel})
-	case protocol.HostL2CAPRead:
-		var p protocol.L2CAPReadParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "l2cap" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
-		}
-		if p.MaxBytes < 1 || p.MaxBytes > 65535 {
-			return nil, domain.NewError(domain.CodeUsage, "max_bytes must be between 1 and 65535")
-		}
-		readCtx := ctx
-		cancel := func() {}
-		if p.TimeoutMS > 0 {
-			if p.TimeoutMS > 30000 {
-				return nil, domain.NewError(domain.CodeUsage, "timeout_ms must not exceed 30000")
-			}
-			readCtx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
-		}
-		defer cancel()
-		data, err := m.host.ReadL2CAP(readCtx, p.ChannelID, p.MaxBytes)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]string{"data": hex.EncodeToString(data)})
-	case protocol.HostL2CAPWrite:
-		var p protocol.L2CAPWriteParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "l2cap" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
-		}
-		data, err := hex.DecodeString(p.Data)
-		if err != nil {
-			return nil, domain.NewError(domain.CodeUsage, "invalid hexadecimal L2CAP data")
-		}
-		written, err := m.host.WriteL2CAP(ctx, p.ChannelID, data)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]int{"written": written})
-	case protocol.HostL2CAPClose:
-		var p protocol.L2CAPChannelParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "l2cap" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
-		}
-		if err := m.host.CloseL2CAP(ctx, p.ChannelID); err != nil {
-			return nil, err
-		}
-		delete(channels, p.ChannelID)
-		return marshal(map[string]bool{"closed": true})
-	case protocol.HostRFCOMMOpen:
-		var p protocol.RFCOMMOpenParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if !allowedDevices[p.DeviceID] {
-			return nil, domain.NewError(domain.CodePermission, "driver cannot access device %q", p.DeviceID)
-		}
-		channel, err := m.rfcomm.OpenRFCOMM(ctx, p.DeviceID, p.ServiceUUID)
-		if err != nil {
-			return nil, err
-		}
-		channels[channel] = "rfcomm"
-		return marshal(map[string]string{"channel_id": channel})
-	case protocol.HostRFCOMMRead:
-		var p protocol.RFCOMMReadParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "rfcomm" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
-		}
-		if p.MaxBytes < 1 || p.MaxBytes > 65535 {
-			return nil, domain.NewError(domain.CodeUsage, "max_bytes must be between 1 and 65535")
-		}
-		readCtx := ctx
-		cancel := func() {}
-		if p.TimeoutMS > 0 {
-			if p.TimeoutMS > 30000 {
-				return nil, domain.NewError(domain.CodeUsage, "timeout_ms must not exceed 30000")
-			}
-			readCtx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
-		}
-		defer cancel()
-		data, err := m.rfcomm.ReadRFCOMM(readCtx, p.ChannelID, p.MaxBytes)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]string{"data": hex.EncodeToString(data)})
-	case protocol.HostRFCOMMWrite:
-		var p protocol.RFCOMMWriteParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "rfcomm" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
-		}
-		data, err := hex.DecodeString(p.Data)
-		if err != nil {
-			return nil, domain.NewError(domain.CodeUsage, "invalid hexadecimal RFCOMM data")
-		}
-		written, err := m.rfcomm.WriteRFCOMM(ctx, p.ChannelID, data)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]int{"written": written})
-	case protocol.HostRFCOMMClose:
-		var p protocol.RFCOMMChannelParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "rfcomm" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
-		}
-		if err := m.rfcomm.CloseRFCOMM(ctx, p.ChannelID); err != nil {
-			return nil, err
-		}
-		delete(channels, p.ChannelID)
-		return marshal(map[string]bool{"closed": true})
-	case protocol.HostStorageGet:
-		var p protocol.StorageGetParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		value, found, err := m.storageGet(driver, p.Key)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]any{"value": value, "found": found})
-	case protocol.HostStorageSet:
-		var p protocol.StorageSetParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if err := m.storageSet(driver, p.Key, p.Value); err != nil {
-			return nil, err
-		}
-		return marshal(map[string]bool{"stored": true})
-	default:
-		return nil, domain.NewError(domain.CodeUnsupported, "unsupported host method %q", message.Method)
-	}
-}
 func hasPermission(driver protocol.Manifest, want string) bool {
 	for _, permission := range driver.Permissions {
 		if permission == want {
