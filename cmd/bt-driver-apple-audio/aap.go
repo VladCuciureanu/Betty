@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -133,7 +132,8 @@ func readAAP(host *protocol.Session, deviceID string, requestKeys bool) (exactBa
 		case startsWith(packet, aapBatteryHeader):
 			parsed, err := parseExactBattery(packet)
 			if err != nil {
-				return false, err
+				// A corrupt report is skipped: the device sends another.
+				return false, nil
 			}
 			battery = &parsed
 			if !requestKeys || keys != nil {
@@ -293,7 +293,8 @@ func parseExactBattery(packet []byte) (exactBattery, error) {
 		component := &batteryComponent{Level: int(packet[offset+2]), Charging: status == 0x01, Status: batteryStatusName(status)}
 		switch packet[offset] {
 		case 0x01:
-			battery.Headset = component
+			single := protocol.SingleBattery(*component)
+			battery.Level, battery.Charging, battery.Status = single.Level, single.Charging, single.Status
 		case 0x02:
 			battery.Right = component
 		case 0x04:
@@ -303,25 +304,6 @@ func parseExactBattery(packet []byte) (exactBattery, error) {
 		}
 	}
 	return battery, nil
-}
-
-func exactBatteryDisplay(battery exactBattery) string {
-	var parts []string
-	add := func(name string, component *batteryComponent) {
-		if component == nil {
-			return
-		}
-		value := fmt.Sprintf("%s %d%%", name, component.Level)
-		if component.Charging {
-			value += " charging"
-		}
-		parts = append(parts, value)
-	}
-	add("headset", battery.Headset)
-	add("left", battery.Left)
-	add("right", battery.Right)
-	add("case", battery.Case)
-	return strings.Join(parts, " · ")
 }
 
 func batteryStatusName(value byte) string {

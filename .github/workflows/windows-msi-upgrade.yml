@@ -1,0 +1,37 @@
+name: Windows MSI upgrade
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-msi-upgrade.yml'
+      - 'packaging/windows/**'
+  push:
+    branches: ['main']
+    paths:
+      - '.github/workflows/windows-msi-upgrade.yml'
+      - 'packaging/windows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade:
+    runs-on: windows-2025-vs2026
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.24.x'
+      - name: Build two base MSIs
+        shell: pwsh
+        run: |
+          foreach ($version in @("0.0.1", "0.0.2")) {
+            ./packaging/windows/build.ps1 -Version $version -BaseOnly
+            $msi = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
+            New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/$version" | Out-Null
+            Copy-Item $msi "$env:RUNNER_TEMP/$version/"
+          }
+      - name: Upgrade, repair, refuse a downgrade, and uninstall
+        shell: pwsh
+        run: ./packaging/windows/test-upgrade.ps1 -OldMsi "$env:RUNNER_TEMP/0.0.1/betty-windows-x64.msi" -NewMsi "$env:RUNNER_TEMP/0.0.2/betty-windows-x64.msi" -NewVersion 0.0.2

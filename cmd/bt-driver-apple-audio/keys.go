@@ -114,11 +114,14 @@ func decryptAdvertisement(device protocol.Device, modelID uint16, keyring appleA
 			battery := exactBattery{}
 			leftFirst := data[5]&0x20 != 0
 			first, second := privateComponent(plain[1]), privateComponent(plain[2])
-			if plain[1] == 0 || plain[2] == 0 {
+			// A missing earbud is reported as 0 like a single battery's
+			// unused slot, so only the model tells the two apart.
+			if !estimate.profile.Dual {
+				if first == nil {
+					first = second
+				}
 				if first != nil {
-					battery.Headset = first
-				} else {
-					battery.Headset = second
+					battery = protocol.SingleBattery(*first)
 				}
 			} else if leftFirst {
 				battery.Left, battery.Right = first, second

@@ -61,7 +61,7 @@ func TestMain(m *testing.M) {
 	}
 	binDir = dir
 	btPath = filepath.Join(binDir, executable("bt"))
-	for _, target := range []string{"bt", "bt-driver-sony"} {
+	for _, target := range []string{"bt", "bt-driver-sony", "bt-driver-apple-audio"} {
 		build := exec.Command("go", "build", "-o", filepath.Join(binDir, executable(target)), "./cmd/"+target)
 		build.Dir = ".."
 		if output, err := build.CombinedOutput(); err != nil {

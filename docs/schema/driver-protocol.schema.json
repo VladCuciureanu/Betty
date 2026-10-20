@@ -1,0 +1,710 @@
+{
+  "$defs": {
+    "BatteryComponent": {
+      "properties": {
+        "charging": {
+          "type": "boolean"
+        },
+        "level": {
+          "type": "integer"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object"
+    },
+    "BatteryValue": {
+      "properties": {
+        "case": {
+          "$ref": "#/$defs/BatteryComponent"
+        },
+        "charging": {
+          "type": "boolean"
+        },
+        "left": {
+          "$ref": "#/$defs/BatteryComponent"
+        },
+        "level": {
+          "type": "integer"
+        },
+        "right": {
+          "$ref": "#/$defs/BatteryComponent"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Capability": {
+      "properties": {
+        "maximum": {
+          "type": "number"
+        },
+        "minimum": {
+          "type": "number"
+        },
+        "readable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "planned",
+            "unsupported"
+          ],
+          "type": "string"
+        },
+        "step": {
+          "type": "number"
+        },
+        "type": {
+          "enum": [
+            "battery",
+            "enum",
+            "boolean",
+            "integer",
+            "number",
+            "string"
+          ],
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "writable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    },
+    "Device": {
+      "properties": {
+        "connected": {
+          "type": "boolean"
+        },
+        "endpoints": {
+          "items": {
+            "$ref": "#/$defs/Endpoint"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "manufacturer_data": {
+          "items": {
+            "$ref": "#/$defs/ManufacturerData"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "paired": {
+          "type": "boolean"
+        },
+        "possible_matches": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rssi": {
+          "type": "integer"
+        },
+        "service_data": {
+          "items": {
+            "$ref": "#/$defs/ServiceData"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "paired",
+        "connected",
+        "endpoints"
+      ],
+      "type": "object"
+    },
+    "Endpoint": {
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "transport": {
+          "enum": [
+            "os",
+            "classic",
+            "ble"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "transport"
+      ],
+      "type": "object"
+    },
+    "Enrichment": {
+      "properties": {
+        "capabilities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Capability"
+          },
+          "type": "object"
+        },
+        "identification": {
+          "$ref": "#/$defs/Identification"
+        },
+        "possible_matches": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "properties": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Property"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ErrorCode": {
+      "enum": [
+        "usage",
+        "device_not_found",
+        "device_ambiguous",
+        "unsupported",
+        "permission_denied",
+        "bluetooth_unavailable",
+        "authentication_failed",
+        "interaction_required",
+        "device_disconnected",
+        "driver_required",
+        "timeout",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "GATTCharacteristicParams": {
+      "properties": {
+        "characteristic_uuid": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "service_uuid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "characteristic_uuid"
+      ],
+      "type": "object"
+    },
+    "GATTNextParams": {
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "GATTServicesParams": {
+      "properties": {
+        "device_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id"
+      ],
+      "type": "object"
+    },
+    "GATTSubscriptionParams": {
+      "properties": {
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscription_id"
+      ],
+      "type": "object"
+    },
+    "GATTWriteParams": {
+      "properties": {
+        "characteristic_uuid": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        },
+        "device_id": {
+          "type": "string"
+        },
+        "service_uuid": {
+          "type": "string"
+        },
+        "without_response": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "device_id",
+        "characteristic_uuid",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Identification": {
+      "properties": {
+        "confidence": {
+          "enum": [
+            "name",
+            "model",
+            "protocol"
+          ],
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "vendor": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "vendor",
+        "family",
+        "confidence"
+      ],
+      "type": "object"
+    },
+    "L2CAPChannelParams": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id"
+      ],
+      "type": "object"
+    },
+    "L2CAPOpenParams": {
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "psm": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "device_id",
+        "psm"
+      ],
+      "type": "object"
+    },
+    "L2CAPReadParams": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        },
+        "max_bytes": {
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "channel_id",
+        "max_bytes"
+      ],
+      "type": "object"
+    },
+    "L2CAPWriteParams": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Manifest": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "match": {
+          "$ref": "#/$defs/Match"
+        },
+        "name": {
+          "type": "string"
+        },
+        "permissions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "protocol": {
+          "enum": [
+            1
+          ],
+          "type": "integer"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "id",
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
+    "ManufacturerData": {
+      "properties": {
+        "company_id": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "company_id",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Match": {
+      "properties": {
+        "company_ids": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "name_contains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "service_uuids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Message": {
+      "properties": {
+        "details": {},
+        "error": {
+          "type": "string"
+        },
+        "error_code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {},
+        "protocol": {
+          "enum": [
+            1
+          ],
+          "type": "integer"
+        },
+        "result": {},
+        "type": {
+          "enum": [
+            "host_request",
+            "host_response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "type",
+        "id"
+      ],
+      "type": "object"
+    },
+    "Property": {
+      "properties": {
+        "display": {
+          "type": "string"
+        },
+        "estimated": {
+          "type": "boolean"
+        },
+        "resolution": {
+          "type": "integer"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "value": {},
+        "verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "type": "object"
+    },
+    "RFCOMMChannelParams": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id"
+      ],
+      "type": "object"
+    },
+    "RFCOMMOpenParams": {
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "service_uuid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device_id",
+        "service_uuid"
+      ],
+      "type": "object"
+    },
+    "RFCOMMReadParams": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        },
+        "max_bytes": {
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "channel_id",
+        "max_bytes"
+      ],
+      "type": "object"
+    },
+    "RFCOMMWriteParams": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        },
+        "data": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Request": {
+      "properties": {
+        "device_id": {
+          "type": "string"
+        },
+        "devices": {
+          "items": {
+            "$ref": "#/$defs/Device"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "enum": [
+            "inspect",
+            "get",
+            "set"
+          ],
+          "type": "string"
+        },
+        "property": {
+          "type": "string"
+        },
+        "protocol": {
+          "enum": [
+            1
+          ],
+          "type": "integer"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "request"
+          ],
+          "type": "string"
+        },
+        "value": {}
+      },
+      "required": [
+        "protocol",
+        "method",
+        "devices"
+      ],
+      "type": "object"
+    },
+    "Response": {
+      "properties": {
+        "details": {},
+        "enrichments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Enrichment"
+          },
+          "type": "object"
+        },
+        "error": {
+          "type": "string"
+        },
+        "error_code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "id": {
+          "type": "string"
+        },
+        "protocol": {
+          "enum": [
+            1
+          ],
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "response"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol"
+      ],
+      "type": "object"
+    },
+    "ServiceData": {
+      "properties": {
+        "data": {
+          "type": "string"
+        },
+        "uuid": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "uuid",
+        "data"
+      ],
+      "type": "object"
+    },
+    "StorageGetParams": {
+      "properties": {
+        "key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "type": "object"
+    },
+    "StorageSetParams": {
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "value"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/VladCuciureanu/Betty/blob/main/docs/schema/driver-protocol.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Messages between Betty and a driver, and the values they carry. Generated from the Go SDK's types; see docs/DRIVER_PROTOCOL.md for their meaning.",
+  "title": "Betty driver protocol, version 1"
+}

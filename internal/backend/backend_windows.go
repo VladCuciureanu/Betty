@@ -54,7 +54,11 @@ func loadBthprops() error {
 
 type systemTime struct{ Year, Month, DayOfWeek, Day, Hour, Minute, Second, Milliseconds uint16 }
 type bluetoothDeviceInfo struct {
-	Size                                 uint32
+	Size uint32
+	// BLUETOOTH_ADDRESS holds a ULONGLONG, which MSVC aligns to 8 bytes even
+	// on 32-bit x86, where Go aligns uint64 to 4. The explicit pad puts
+	// Address at offset 8 everywhere.
+	_                                    uint32
 	Address                              uint64
 	ClassOfDevice                        uint32
 	Connected, Remembered, Authenticated int32
@@ -85,11 +89,23 @@ func (b *windowsBackend) Pair(ctx context.Context, d domain.Device) error {
 	if err != nil {
 		return err
 	}
-	// BluetoothAuthenticateDeviceEx returns its Win32 error code directly;
-	// GetLastError is not meaningful afterwards.
-	result, _, _ := authenticateDeviceEx.Call(0, 0, uintptr(unsafe.Pointer(&info)), 0, 2)
-	if result != 0 {
-		return windowsError("pair", syscall.Errno(result))
+	// BluetoothAuthenticateDeviceEx blocks, possibly behind Windows' own
+	// pairing dialog, and has no way to cancel it. Stop waiting when ctx
+	// ends; the call ends with the process.
+	done := make(chan uintptr, 1)
+	go func() {
+		// It returns its Win32 error code directly; GetLastError is not
+		// meaningful afterwards.
+		result, _, _ := authenticateDeviceEx.Call(0, 0, uintptr(unsafe.Pointer(&info)), 0, 2)
+		done <- result
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case result := <-done:
+		if result != 0 {
+			return windowsError("pair", syscall.Errno(result))
+		}
 	}
 	return b.waitPaired(ctx, info.Address, true)
 }

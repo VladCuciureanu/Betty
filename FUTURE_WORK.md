@@ -73,10 +73,7 @@ Validate on native macOS, Linux, and Windows:
 - standard Battery Service readings;
 - adapter disabled, permission denied, timeout, reset, and unexpected disconnect behavior.
 
-Document supported public-API limitations instead of working around them with private APIs:
-
-- macOS cannot currently provide supported generic unpairing;
-- Windows cannot reliably initiate every saved-device profile connection or disconnection.
+- [x] Document public-API limitations instead of working around them with private APIs. The README's platform section lists them.
 
 ### 4. Backend contracts and device identity
 
@@ -152,7 +149,7 @@ Third-party drivers are a first-class extension point. The protocol in [docs/DRI
 - [x] Add manifest match hints (company IDs, service UUIDs, names) so Betty starts only relevant drivers instead of every driver for every command.
 - [x] Ship a conformance checker that runs a driver against scripted requests and a fake host: `bt driver check <executable>`.
 - [x] Surface driver stderr and skipped-inspect failures under `--verbose`. Inspect failures are warnings in every mode.
-- Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
+- [x] Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
 - Bound message sizes and test malformed, oversized, crashing, and hanging drivers.
 - Reuse one driver process across requests within a command once the per-request loop is proven by every official driver.
 
@@ -205,7 +202,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 - Add cryptographic endpoint verification where supported by a protocol.
 - Review the pinned `tinygo.org/x/bluetooth` version before upgrades.
 - Test characteristics with duplicate UUIDs under different services and define deterministic selection.
-- Complete Device Information Service coverage and consistent field naming.
+- [x] Complete Device Information Service coverage and consistent field naming.
 - Expand native event consumption where it materially improves cancellation or state accuracy.
 
 ## Explicitly deferred

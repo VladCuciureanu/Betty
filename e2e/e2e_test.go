@@ -17,12 +17,6 @@ import (
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
-// reauthenticationLimit explains the Classic scenarios the virtual link
-// cannot run: once a paired device's link drops, a new connection must
-// re-authenticate with the stored link key, which Bumble's virtual controller
-// does not implement. Real controllers do, so these run over the air.
-const reauthenticationLimit = "the virtual controller cannot re-authenticate a paired Classic device; run over the air to cover this"
-
 const (
 	notifyCharacteristic = "b0e7e2e0-0000-4000-8000-000000000002"
 	writeCharacteristic  = "b0e7e2e0-0000-4000-8000-000000000003"
@@ -58,7 +52,7 @@ func TestStandardGATTProperties(t *testing.T) {
 	name := p.device(0).Name
 	var battery property
 	ok(t, &battery, "get", name, "battery")
-	if string(battery.Value) != "87" {
+	if string(battery.Value) != `{"level":87}` {
 		t.Fatalf("battery=%s", battery.Value)
 	}
 	var firmware property
@@ -108,7 +102,7 @@ func TestWatchReportsPropertyChanges(t *testing.T) {
 	nextLine(t, lines, `"event":"snapshot"`, 30*time.Second)
 	p.do(map[string]any{"cmd": "set_battery", "device": 0, "level": 42})
 	line := nextLine(t, lines, `"event":"changed"`, 30*time.Second)
-	if !strings.Contains(string(line), `"value":42`) {
+	if !strings.Contains(string(line), `"value":{"level":42}`) {
 		t.Fatalf("change=%s", line)
 	}
 	cancel()
@@ -138,7 +132,7 @@ func TestDuplicateNamesAreAmbiguous(t *testing.T) {
 	fails(t, domain.CodeAmbiguous, "get", p.device(0).Name, "battery")
 	var battery property
 	ok(t, &battery, "get", p.device(1).Address, "battery")
-	if string(battery.Value) != "87" {
+	if string(battery.Value) != `{"level":87}` {
 		t.Fatalf("battery=%s", battery.Value)
 	}
 }
@@ -161,8 +155,6 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	assertPaired(t, p.device(0).Address)
 
 	switch {
-	case virtual():
-		t.Log("skipping connect and disconnect: " + reauthenticationLimit)
 	case runtime.GOOS == "windows":
 		fails(t, domain.CodeUnsupported, "connect", name)
 	default:
@@ -195,7 +187,9 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
 	}
 	if virtual() {
-		t.Skip(reauthenticationLimit)
+		// Pairing, SDP, and the RFCOMM channel's L2CAP connection work, but
+		// the driver's read stalls after the channel is encrypted.
+		t.Skip("the Sony RFCOMM session stalls on the virtual link (#100); run over the air to cover this")
 	}
 	if os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
 		t.Skip("set BETTY_E2E_HOST_ADDRESS so the headset can connect to this computer")
@@ -218,7 +212,7 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 
 	var battery property
 	ok(t, &battery, "get", address, "battery")
-	if string(battery.Value) != `{"headset":{"level":73}}` {
+	if string(battery.Value) != `{"level":73}` {
 		t.Fatalf("battery=%s", battery.Value)
 	}
 }

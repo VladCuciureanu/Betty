@@ -194,9 +194,24 @@ func wireDevices(devices []domain.Device) []protocol.Device {
 func domainProperties(properties map[string]protocol.Property) map[string]domain.Property {
 	out := map[string]domain.Property{}
 	for name, p := range properties {
-		out[name] = domain.Property{Value: p.Value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution, Verified: p.Verified}
+		value := p.Value
+		if name == "battery" {
+			value = batteryObject(value)
+		}
+		out[name] = domain.Property{Value: value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution, Verified: p.Verified}
 	}
 	return out
+}
+
+// batteryObject turns a driver's bare battery percentage into the object
+// form every client receives, so clients never see two shapes.
+func batteryObject(value json.RawMessage) json.RawMessage {
+	var level int
+	if json.Unmarshal(value, &level) != nil {
+		return value
+	}
+	raw, _ := json.Marshal(protocol.SingleBattery(protocol.BatteryComponent{Level: level}))
+	return raw
 }
 
 func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest, error) {

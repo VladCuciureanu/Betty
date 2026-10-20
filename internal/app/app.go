@@ -148,7 +148,7 @@ var commands = []command{
 	{name: "scan", usage: "scan", summary: "discover nearby devices", maxArgs: 0, run: (*application).scan},
 	{name: "list", usage: "list", summary: "list devices the OS already knows, without scanning", maxArgs: 0, run: (*application).list},
 	{name: "inspect", usage: "inspect <device>", summary: "show a device's state, properties, and capabilities", minArgs: 1, maxArgs: 1, run: (*application).inspect},
-	{name: "get", usage: "get <device> <property>", summary: "read a property, such as battery", minArgs: 2, maxArgs: 2, run: (*application).get},
+	{name: "get", usage: "get <device> <property> | get --all <property>", summary: "read a property, such as battery, of one device or of every known device", minArgs: 1, maxArgs: 2, run: (*application).get},
 	{name: "set", usage: "set <device> <property> <value>", summary: "change a property and print the verified result", minArgs: 3, maxArgs: 3, run: (*application).set},
 	{name: "watch", usage: "watch <device> <property> [--interval 2s]", summary: "print a property whenever it changes, until interrupted", minArgs: 2, maxArgs: 2, run: (*application).watch, streams: streamsAlways},
 	{name: "pair", usage: "pair <device>", summary: "pair with a device", minArgs: 1, maxArgs: 1, run: mutation("pair")},
