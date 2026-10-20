@@ -164,7 +164,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 
 #### Battery
 
-- Validate exact AAP battery reports on real AirPods and Beats devices on Linux and Windows.
+- Validate exact AAP battery reports on real AirPods and Beats devices on Linux. Windows doesn't support the AAP channel: only a signed kernel-mode driver could open it.
 - Validate authorized System Keychain acquisition and encrypted BLE battery reports on macOS.
 - Compare headset, left, right, case, charging, disconnected, sleeping, and reconnect states against a trustworthy reference.
 - Add fixtures for fragmented packets, unrelated notifications, missing components, malformed lengths, invalid statuses, private-key responses, and timeouts.
