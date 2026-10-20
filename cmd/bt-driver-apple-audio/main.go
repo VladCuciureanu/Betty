@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -36,7 +37,7 @@ func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.En
 	case "battery":
 		return getBattery(host, request)
 	case "noise_control":
-		if appleAudioControlValidationEnabled() {
+		if aapUnavailable == "" && appleAudioControlValidationEnabled() {
 			return controlProperty(host, request, false)
 		}
 	}
@@ -44,11 +45,18 @@ func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.En
 }
 
 func set(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
-	if request.Property == "noise_control" && appleAudioControlValidationEnabled() {
+	if request.Property == "noise_control" && aapUnavailable == "" && appleAudioControlValidationEnabled() {
 		return controlProperty(host, request, true)
 	}
 	return nil, nil
 }
+
+// aapUnavailable explains why this platform can't open the AAP channel, and is
+// empty where it can. Windows exposes Classic L2CAP only to kernel-mode profile
+// drivers, and no signed driver for this channel exists.
+var aapUnavailable = map[string]string{
+	"windows": "Windows exposes Apple's AAP control channel only to kernel-mode drivers, and no signed driver for it exists",
+}[runtime.GOOS]
 
 func appleAudioControlValidationEnabled() bool {
 	return os.Getenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS") == "1"
@@ -115,7 +123,7 @@ func getBattery(host *protocol.Session, request protocol.PropertyRequest) (*prot
 	if !ok {
 		return nil, nil
 	}
-	if !device.Connected || !isAppleAudioName(device.Name) {
+	if !device.Connected || !isAppleAudioName(device.Name) || aapUnavailable != "" {
 		return &enrichment, nil
 	}
 	battery, keys, err := readAAP(host, device.ID, true)
@@ -241,7 +249,11 @@ func appleAudioCapabilities(profile appleAudioProfile) map[string]protocol.Capab
 		if profile.Adaptive {
 			values = append(values, "adaptive")
 		}
-		capabilities["noise_control"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation"}
+		capability := protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation"}
+		if aapUnavailable != "" {
+			capability.Status, capability.Reason = protocol.StatusUnsupported, aapUnavailable
+		}
+		capabilities["noise_control"] = capability
 	}
 	if profile.HeartRate {
 		capabilities["heart_rate"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindNumber, Readable: true, Reason: "Powerbeats Pro 2 exposes the standard BLE Heart Rate Service only while fitness-equipment pairing mode is active"}
@@ -388,7 +400,7 @@ func passiveBattery(ad appleAudioAdvertisement) protocol.BatteryValue {
 func connectedAppleAudioCapabilities(device protocol.Device, ads []appleAudioAdvertisement) map[string]protocol.Capability {
 	profile, _ := connectedAppleAudioProfile(device, ads)
 	capabilities := appleAudioCapabilities(profile)
-	if capability, ok := capabilities["noise_control"]; ok && appleAudioControlValidationEnabled() && device.Connected {
+	if capability, ok := capabilities["noise_control"]; ok && aapUnavailable == "" && appleAudioControlValidationEnabled() && device.Connected {
 		capability.Status = protocol.StatusAvailable
 		capability.Reason = ""
 		capabilities["noise_control"] = capability
