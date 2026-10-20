@@ -51,3 +51,14 @@ func TestDeviceSearchParamsLayout(t *testing.T) {
 		t.Fatalf("RadioHandle offset=%d want=%d", got, want)
 	}
 }
+
+func TestRadioInfoLayout(t *testing.T) {
+	// BLUETOOTH_RADIO_INFO is 520 bytes with its address at offset 8, on
+	// 32-bit and 64-bit Windows alike.
+	if got := unsafe.Offsetof(bluetoothRadioInfo{}.Address); got != 8 {
+		t.Fatalf("Address offset=%d want=8", got)
+	}
+	if got := unsafe.Sizeof(bluetoothRadioInfo{}); got != 520 {
+		t.Fatalf("size=%d want=520", got)
+	}
+}

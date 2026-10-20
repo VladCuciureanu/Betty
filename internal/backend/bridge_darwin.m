@@ -149,3 +149,18 @@ int betty_pair(const char *address, int timeout_ms, int *cancel, uintptr_t agent
 		return (int)result;
 	}
 }
+
+int betty_adapter(char **address, char **name, int *powered) {
+	@autoreleasepool {
+		IOBluetoothHostController *controller = [IOBluetoothHostController defaultController];
+		if (!controller) {
+			return kIOReturnNoDevice;
+		}
+		NSString *addressString = [controller addressAsString];
+		NSString *nameString = [controller nameAsString];
+		*address = addressString ? strdup([addressString UTF8String]) : NULL;
+		*name = nameString ? strdup([nameString UTF8String]) : NULL;
+		*powered = [controller powerState] == kBluetoothHCIPowerStateON;
+		return 0;
+	}
+}

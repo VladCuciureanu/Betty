@@ -25,4 +25,8 @@ int betty_is_paired(const char *address);
 // agent is passed back to the Go pairing callbacks.
 int betty_pair(const char *address, int timeout_ms, int *cancel, uintptr_t agent);
 
+// betty_adapter reports the default host controller: malloc'd address and
+// name strings, which the caller frees, and whether it is powered on.
+int betty_adapter(char **address, char **name, int *powered);
+
 #endif

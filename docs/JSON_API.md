@@ -151,6 +151,17 @@ when the device was already in the requested state and nothing was done.
 - `check` returns an array of `{"name":"...","passed":true}`, with `detail`
   on a failed check. When any check fails, it then fails with `unsupported`.
 
+### Adapter: `adapter`
+
+`adapter` returns an array of adapters, and a change returns the one changed:
+
+```json
+{"id":"hci0","name":"Desk PC","address":"AA:BB:CC:DD:EE:FF","powered":true,"discoverable":false,"pairable":true,"default":true}
+```
+
+`default` marks the adapter Betty uses. A field the platform cannot report is
+omitted.
+
 ### Other
 
 - `capabilities` returns the platform's supported operations, each
