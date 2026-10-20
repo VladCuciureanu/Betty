@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 
+	protocol "github.com/vladcuciureanu/betty/driver"
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
@@ -18,6 +19,30 @@ type RFCOMMHost interface {
 	ReadRFCOMM(context.Context, string, int) ([]byte, error)
 	WriteRFCOMM(context.Context, string, []byte) (int, error)
 	CloseRFCOMM(context.Context, string) error
+}
+
+// GATTHost opens BLE connections for GATT host calls.
+type GATTHost interface {
+	OpenGATT(ctx context.Context, address string) (GATTConnection, error)
+}
+
+// GATTConnection is one BLE connection a driver session shares across its
+// GATT host calls.
+type GATTConnection interface {
+	Services(context.Context) ([]protocol.GATTService, error)
+	Read(ctx context.Context, serviceUUID, characteristicUUID string) ([]byte, error)
+	Write(ctx context.Context, serviceUUID, characteristicUUID string, data []byte, withoutResponse bool) error
+	// Subscribe calls emit with each notified value until stop is called.
+	Subscribe(ctx context.Context, serviceUUID, characteristicUUID string, emit func([]byte)) (stop func(), err error)
+	// Lost is closed when the link drops.
+	Lost() <-chan struct{}
+	Close() error
+}
+
+type UnsupportedGATTHost struct{}
+
+func (UnsupportedGATTHost) OpenGATT(context.Context, string) (GATTConnection, error) {
+	return nil, domain.NewError(domain.CodeUnsupported, "GATT is not supported by this platform backend")
 }
 
 type UnsupportedHost struct{}

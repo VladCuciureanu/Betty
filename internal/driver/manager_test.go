@@ -57,25 +57,24 @@ func TestHostL2CAPIsScopedToSelectedDevicesAndChannels(t *testing.T) {
 	host := &fakeHost{}
 	m.SetHost(host)
 	manifest := protocol.Manifest{ID: "official/test", Permissions: []string{"l2cap"}}
-	allowed := map[string]bool{"device": true}
-	channels := map[string]string{}
+	session := newHostSession([]protocol.Device{{ID: "device"}})
 	params, _ := json.Marshal(protocol.L2CAPOpenParams{DeviceID: "device", PSM: 25})
-	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: params}, allowed, channels)
+	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: params}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.openedDevice != "device" || channels["channel-1"] != "l2cap" {
-		t.Fatalf("result=%s host=%#v channels=%v", result, host, channels)
+	if host.openedDevice != "device" || !session.channels[channelKey{"l2cap", "channel-1"}] {
+		t.Fatalf("result=%s host=%#v channels=%v", result, host, session.channels)
 	}
 	write, _ := json.Marshal(protocol.L2CAPWriteParams{ChannelID: "channel-1", Data: "aabb"})
-	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPWrite, Params: write}, allowed, channels); err != nil {
+	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPWrite, Params: write}, session); err != nil {
 		t.Fatal(err)
 	}
 	if hex.EncodeToString(host.written) != "aabb" {
 		t.Fatalf("written=%x", host.written)
 	}
 	foreign, _ := json.Marshal(protocol.L2CAPOpenParams{DeviceID: "other", PSM: 25})
-	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: foreign}, allowed, channels); err == nil {
+	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: foreign}, session); err == nil {
 		t.Fatal("expected device scope error")
 	}
 }
@@ -85,28 +84,27 @@ func TestHostRFCOMMIsPermissionAndDeviceScoped(t *testing.T) {
 	host := &fakeRFCOMMHost{}
 	m.SetRFCOMMHost(host)
 	manifest := protocol.Manifest{ID: "official/sony-headphones", Permissions: []string{"rfcomm"}}
-	allowed := map[string]bool{"sony": true}
-	channels := map[string]string{}
+	session := newHostSession([]protocol.Device{{ID: "sony"}})
 	params, _ := json.Marshal(protocol.RFCOMMOpenParams{DeviceID: "sony", ServiceUUID: "956c"})
-	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, allowed, channels)
+	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.openedDevice != "sony" || host.openedService != "956c" || channels["rfcomm-1"] != "rfcomm" {
-		t.Fatalf("result=%s host=%#v channels=%v", result, host, channels)
+	if host.openedDevice != "sony" || host.openedService != "956c" || !session.channels[channelKey{"rfcomm", "rfcomm-1"}] {
+		t.Fatalf("result=%s host=%#v channels=%v", result, host, session.channels)
 	}
 	write, _ := json.Marshal(protocol.RFCOMMWriteParams{ChannelID: "rfcomm-1", Data: "aabb"})
-	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMWrite, Params: write}, allowed, channels); err != nil {
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMWrite, Params: write}, session); err != nil {
 		t.Fatal(err)
 	}
 	if hex.EncodeToString(host.written) != "aabb" {
 		t.Fatalf("written=%x", host.written)
 	}
 	foreign, _ := json.Marshal(protocol.RFCOMMOpenParams{DeviceID: "other", ServiceUUID: "956c"})
-	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: foreign}, allowed, channels); err == nil {
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: foreign}, session); err == nil {
 		t.Fatal("expected device scope error")
 	}
-	if _, err := m.handleHost(context.Background(), protocol.Manifest{ID: "official/denied"}, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, allowed, channels); err == nil {
+	if _, err := m.handleHost(context.Background(), protocol.Manifest{ID: "official/denied"}, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, session); err == nil {
 		t.Fatal("expected RFCOMM permission error")
 	}
 }
@@ -118,7 +116,7 @@ func TestHostPermissionsAndNamespacedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	params, _ := json.Marshal(protocol.StorageSetParams{Key: "keys/airpods", Value: "secret"})
-	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostStorageSet, Params: params}, nil, nil); err != nil {
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostStorageSet, Params: params}, newHostSession(nil)); err != nil {
 		t.Fatal(err)
 	}
 	value, found, err := m.storageGet(manifest, "keys/airpods")
@@ -126,7 +124,7 @@ func TestHostPermissionsAndNamespacedStorage(t *testing.T) {
 		t.Fatalf("value=%q found=%t err=%v", value, found, err)
 	}
 	denied := protocol.Manifest{ID: "official/denied"}
-	if _, err := m.handleHost(context.Background(), denied, protocol.Message{Method: protocol.HostStorageSet, Params: params}, nil, nil); err == nil {
+	if _, err := m.handleHost(context.Background(), denied, protocol.Message{Method: protocol.HostStorageSet, Params: params}, newHostSession(nil)); err == nil {
 		t.Fatal("expected permission error")
 	}
 }
