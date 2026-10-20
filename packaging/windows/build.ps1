@@ -50,7 +50,14 @@ if (-not $BaseOnly) {
         if ($RequireMicrosoftDriverSignature) {
             throw "A Microsoft Hardware Dev Center-signed driver package is required for the Advanced Support MSI"
         }
-        msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
+        # The WDK's InfVerif task needs a 64-bit MSBuild: the x64 WDK package
+        # has no x86 InfVerif.dll. Prefer the amd64 MSBuild next to an x86 one.
+        $msbuild = (Get-Command msbuild -ErrorAction Stop).Source
+        $msbuild64 = Join-Path (Split-Path $msbuild) "amd64\MSBuild.exe"
+        if ((Split-Path (Split-Path $msbuild) -Leaf) -notin @("amd64", "arm64") -and (Test-Path $msbuild64)) {
+            $msbuild = $msbuild64
+        }
+        & $msbuild $driverProject /restore /m /p:Configuration=$Configuration /p:Platform=x64 /p:DriverVersion=$driverVersion /p:SolutionDir="$PSScriptRoot\"
         if ($LASTEXITCODE -ne 0) { throw "WDK driver build failed" }
     }
 }

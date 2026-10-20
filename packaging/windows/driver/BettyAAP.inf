@@ -28,6 +28,16 @@ CopyFiles=BettyAAP_CopyFiles
 [BettyAAP_CopyFiles]
 BettyAAP.sys
 
+[BettyAAP_Install.NT.HW]
+AddReg=BettyAAP_Security_AddReg
+
+; Only SYSTEM, administrators and interactive users may open the device.
+; Interactive users get read/write, which the IOCTL access bits require.
+; 0x100 is FILE_DEVICE_SECURE_OPEN.
+[BettyAAP_Security_AddReg]
+HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+HKR,,DeviceCharacteristics,0x10001,0x100
+
 [BettyAAP_Install.NT.Services]
 AddService=BettyAAP,0x00000002,BettyAAP_Service
 

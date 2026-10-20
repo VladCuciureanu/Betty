@@ -25,11 +25,14 @@ import (
 // remain entirely in Betty's portable Apple Audio driver.
 var airPodsInterfaceGUID = guid{0xb377a1a0, 0x8cb0, 0x4a5c, [8]byte{0x9b, 0xa2, 0x53, 0xbd, 0xcc, 0x4c, 0x5e, 0x21}}
 
+// IOCTL codes from packaging/windows/driver/BettyAAP.h:
+// CTL_CODE(0x8000, function, METHOD_BUFFERED, access).
 const (
-	ioctlConnect    = uint32(0x80002000)
-	ioctlDisconnect = uint32(0x80002004)
-	ioctlSend       = uint32(0x80002008)
-	ioctlReceive    = uint32(0x8000200c)
+	ioctlConnect    = uint32(0x8000e000) // 0x800, FILE_READ_DATA|FILE_WRITE_DATA
+	ioctlDisconnect = uint32(0x8000e004) // 0x801, FILE_READ_DATA|FILE_WRITE_DATA
+	ioctlSend       = uint32(0x8000a008) // 0x802, FILE_WRITE_DATA
+	ioctlReceive    = uint32(0x8000600c) // 0x803, FILE_READ_DATA
+	ioctlGetAddress = uint32(0x80006010) // 0x804, FILE_READ_DATA
 
 	digcfPresent         = 0x00000002
 	digcfDeviceInterface = 0x00000010
@@ -94,38 +97,86 @@ func (h *windowsHost) OpenL2CAP(ctx context.Context, deviceID string, psm uint16
 		return "", err
 	}
 	if len(paths) == 0 {
-		return "", domain.NewError(domain.CodeUnsupported, "the Windows Apple Audio Bluetooth profile driver is not installed or not bound to this device")
+		return "", domain.NewError(domain.CodeUnsupported, "the Windows Apple Audio Bluetooth profile driver is not installed, or no paired Apple audio device is using it")
 	}
-	var lastErr error
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	handle, err := openBoundInstance(paths, address, probeDriver, closeWindowsHandle)
+	if err != nil {
+		return "", err
+	}
+	input := make([]byte, 10)
+	binary.LittleEndian.PutUint64(input[:8], address)
+	binary.LittleEndian.PutUint16(input[8:], psm)
+	output := make([]byte, 8)
+	_, err = ioctl(handle, ioctlConnect, input, output)
+	if err == nil && binary.LittleEndian.Uint32(output[:4]) != 0 {
+		id := "windows-" + strconv.FormatUint(h.next.Add(1), 10)
+		h.mu.Lock()
+		h.channels[id] = &windowsChannel{handle: handle}
+		h.mu.Unlock()
+		return id, nil
+	}
+	_ = closeWindowsHandle(handle)
+	if err == nil {
+		err = fmt.Errorf("profile driver rejected L2CAP connection (NTSTATUS 0x%08x)", binary.LittleEndian.Uint32(output[4:]))
+	}
+	return "", fmt.Errorf("connect Windows Apple Audio L2CAP PSM 0x%04x: %w", psm, err)
+}
+
+// probeDriver opens one profile driver instance and returns the address of
+// the remote device it is bound to. The caller owns the returned handle.
+func probeDriver(path string) (syscall.Handle, uint64, error) {
+	handle, err := openDriver(path)
+	if err != nil {
+		return syscall.InvalidHandle, 0, err
+	}
+	output := make([]byte, 8)
+	n, err := ioctl(handle, ioctlGetAddress, nil, output)
+	if err == nil && n != len(output) {
+		err = fmt.Errorf("profile driver returned %d address bytes", n)
+	}
+	if err != nil {
+		_ = closeWindowsHandle(handle)
+		return syscall.InvalidHandle, 0, err
+	}
+	return handle, binary.LittleEndian.Uint64(output), nil
+}
+
+// openBoundInstance returns an open handle to the profile driver instance
+// bound to address. Each instance is bound to one remote device, and the
+// driver rejects CONNECT for any other address.
+func openBoundInstance(paths []string, address uint64, probe func(string) (syscall.Handle, uint64, error), closeHandle func(syscall.Handle) error) (syscall.Handle, error) {
+	var probeErrs []error
 	for _, path := range paths {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		handle, err := openDriver(path)
+		handle, bound, err := probe(path)
 		if err != nil {
-			lastErr = err
+			probeErrs = append(probeErrs, err)
 			continue
 		}
-		input := make([]byte, 10)
-		binary.LittleEndian.PutUint64(input[:8], address)
-		binary.LittleEndian.PutUint16(input[8:], psm)
-		output := make([]byte, 8)
-		_, err = ioctl(handle, ioctlConnect, input, output)
-		if err == nil && binary.LittleEndian.Uint32(output[:4]) != 0 {
-			id := "windows-" + strconv.FormatUint(h.next.Add(1), 10)
-			h.mu.Lock()
-			h.channels[id] = &windowsChannel{handle: handle}
-			h.mu.Unlock()
-			return id, nil
+		if bound == address {
+			return handle, nil
 		}
-		if err == nil {
-			lastErr = fmt.Errorf("profile driver rejected L2CAP connection (NTSTATUS 0x%08x)", binary.LittleEndian.Uint32(output[4:]))
-		} else {
-			lastErr = err
-		}
-		_ = closeWindowsHandle(handle)
+		_ = closeHandle(handle)
 	}
-	return "", fmt.Errorf("connect Windows Apple Audio L2CAP PSM 0x%04x: %w", psm, lastErr)
+	if len(probeErrs) > 0 {
+		// The matching instance may be the one that could not be opened,
+		// for example because another process holds its exclusive handle.
+		return syscall.InvalidHandle, fmt.Errorf("open Windows Apple Audio profile driver for %s: %w", formatAddress(address), errors.Join(probeErrs...))
+	}
+	return syscall.InvalidHandle, domain.NewError(domain.CodeUnsupported, "the Windows Apple Audio Bluetooth profile driver is not bound to %s; pair the device with Windows and make sure the driver is installed for it", formatAddress(address))
+}
+
+func formatAddress(address uint64) string {
+	var b strings.Builder
+	for i := 5; i >= 0; i-- {
+		fmt.Fprintf(&b, "%02X", byte(address>>(8*i)))
+		if i > 0 {
+			b.WriteByte(':')
+		}
+	}
+	return b.String()
 }
 
 func (h *windowsHost) ReadL2CAP(ctx context.Context, channelID string, max int) ([]byte, error) {

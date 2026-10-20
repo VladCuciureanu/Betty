@@ -46,7 +46,7 @@
     <ClCompile>
       <WarningLevel>Level4</WarningLevel>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <PreprocessorDefinitions>NDEBUG;_AMD64_;_KERNEL_MODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Inf>
       <SpecifyDriverDirectiveVersion>true</SpecifyDriverDirectiveVersion>
