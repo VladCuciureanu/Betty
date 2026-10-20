@@ -73,10 +73,7 @@ Validate on native macOS, Linux, and Windows:
 - standard Battery Service readings;
 - adapter disabled, permission denied, timeout, reset, and unexpected disconnect behavior.
 
-Document supported public-API limitations instead of working around them with private APIs:
-
-- macOS cannot currently provide supported generic unpairing;
-- Windows cannot reliably initiate every saved-device profile connection or disconnection.
+- [x] Document public-API limitations instead of working around them with private APIs. The README's platform section lists them.
 
 ### 4. Backend contracts and device identity
 
