@@ -92,7 +92,11 @@ provides:
 bt get headphones battery
 bt set headphones noise_control anc
 bt watch headphones battery
+bt get --all battery
 ```
+
+`get --all` reads the property from every device the OS already knows, and
+reports each device's value or the reason it has none.
 
 Without any driver, Betty reads `battery` from the standard GATT Battery Service
 and `manufacturer`, `model`, `serial_number`, `hardware_revision`,

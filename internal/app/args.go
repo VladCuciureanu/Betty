@@ -34,6 +34,7 @@ type options struct {
 	withoutResponse bool
 	interval        time.Duration
 	intervalSet     bool
+	all             bool
 }
 
 func parseArgs(args []string) (options, []string, error) {
@@ -85,6 +86,8 @@ func parseArgs(args []string) (options, []string, error) {
 			o.withResponse = true
 		case "--without-response":
 			o.withoutResponse = true
+		case "--all":
+			o.all = true
 		case "--timeout":
 			o.timeout, o.timeoutSet = parsePositiveDuration(name, takeValue(), fail), true
 		case "--interval":
@@ -141,6 +144,12 @@ func validateFlags(o options, c *command, args []string) error {
 	}
 	if o.intervalSet && c.name != "watch" {
 		return domain.NewError(domain.CodeUsage, "--interval applies only to watch")
+	}
+	if o.all && c.name != "get" {
+		return domain.NewError(domain.CodeUsage, "--all applies only to get")
+	}
+	if c.name == "get" && len(args) != map[bool]int{true: 1, false: 2}[o.all] {
+		return domain.NewError(domain.CodeUsage, "usage: bt %s", c.usage)
 	}
 	return nil
 }
