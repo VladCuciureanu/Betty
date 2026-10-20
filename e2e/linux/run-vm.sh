@@ -30,6 +30,9 @@ fi
 # Inside the VM.
 export HOME=/tmp GOCACHE=/tmp/go-build
 modprobe hci_vhci
+# BlueZ stores adapter settings and pairing keys here; the host's copy is
+# read-only in the VM, and the run must not change it anyway.
+mount -t tmpfs tmpfs /var/lib/bluetooth
 mkdir -p /run/dbus
 dbus-daemon --system --fork
 /usr/libexec/bluetooth/bluetoothd --nodetach >/tmp/bluetoothd.log 2>&1 &
