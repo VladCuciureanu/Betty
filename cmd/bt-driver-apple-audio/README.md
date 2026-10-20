@@ -49,7 +49,9 @@ advertisement is nearby and exactly one Apple audio device is connected, the
 driver also copies the advertisement's battery reading onto the connected
 device. That is usually right, but it is a correlation, not proof: with a
 second set nearby that is not advertising, the reading can belong to the wrong
-device.
+device. The copied reading is marked `correlated`, so clients can show it as
+probable. An exact reading over AAP replaces it, since it comes from the
+connected set itself.
 
 ## Platform behavior
 

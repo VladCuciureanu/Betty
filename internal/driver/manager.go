@@ -198,7 +198,7 @@ func domainProperties(properties map[string]protocol.Property) map[string]domain
 		if name == "battery" {
 			value = batteryObject(value)
 		}
-		out[name] = domain.Property{Value: value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution}
+		out[name] = domain.Property{Value: value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution, Correlated: p.Correlated}
 	}
 	return out
 }

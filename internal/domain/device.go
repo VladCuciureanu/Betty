@@ -57,6 +57,7 @@ type Property struct {
 	Display    string          `json:"display,omitempty"`
 	Estimated  bool            `json:"estimated,omitempty"`
 	Resolution int             `json:"resolution,omitempty"`
+	Correlated bool            `json:"correlated,omitempty"`
 }
 
 // CapabilityStatus says whether a capability can be used now.

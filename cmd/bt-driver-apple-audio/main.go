@@ -144,7 +144,6 @@ func getBattery(host *protocol.Session, request protocol.PropertyRequest) (*prot
 		keyring.Upsert(*keys)
 		save()
 	}
-	// A correlated endpoint shares its properties map with the advertisement.
 	properties := maps.Clone(enrichment.Properties)
 	if properties == nil {
 		properties = map[string]protocol.Property{}
@@ -221,7 +220,14 @@ func enrich(found appleAudioDevices, keyring appleAudioKeyring) map[string]proto
 			e.PossibleMatches = []string{found.connected[0].ID}
 			other := enrichments[found.connected[0].ID]
 			other.PossibleMatches = []string{ad.device.ID}
-			other.Properties = e.Properties
+			// The connected device gets the advertisement's reading, marked
+			// as correlated: one advertisement and one connected set is
+			// likely the same set, but a silent second set could be nearby.
+			other.Properties = map[string]protocol.Property{}
+			for name, property := range e.Properties {
+				property.Correlated = true
+				other.Properties[name] = property
+			}
 			enrichments[found.connected[0].ID] = other
 		}
 		enrichments[ad.device.ID] = e

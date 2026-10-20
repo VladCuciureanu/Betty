@@ -97,6 +97,7 @@ when nothing is found. `inspect` returns one device.
 | `unit` | Present when the value has a unit, such as `%`. |
 | `estimated` | Whether the value is approximate. |
 | `resolution` | For an estimate, its step size in the value's unit. |
+| `correlated` | Present and `true` when the value was read from a nearby endpoint that probably belongs to the device, listed in its `possible_matches`, rather than from the device itself. |
 | `event` | `watch` only: `snapshot` for the first value, `changed` for each later one. |
 
 `set` returns the value read back from the device after writing, not the value

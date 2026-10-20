@@ -136,6 +136,10 @@ type Property struct {
 	Display    string          `json:"display,omitempty"`
 	Estimated  bool            `json:"estimated,omitempty"`
 	Resolution int             `json:"resolution,omitempty"`
+	// Correlated marks a value read from another endpoint in the device's
+	// possible matches, not from the device itself: a likely match, not a
+	// proven one.
+	Correlated bool `json:"correlated,omitempty"`
 }
 
 // BatteryValue is the value of the standard battery property. A device with

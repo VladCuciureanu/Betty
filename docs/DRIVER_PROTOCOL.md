@@ -302,6 +302,7 @@ What a driver tells Betty about a device. Every field is optional.
 | `display` | string | Short human rendering for terminals. Clients must not parse it. |
 | `estimated` | boolean | The value is approximate. |
 | `resolution` | integer | Step size of an estimated value, in the value's unit. |
+| `correlated` | boolean | The value was read from another endpoint in the device's `possible_matches`, not from the device itself: a likely match, not a proven one. |
 
 ### Capability
 
