@@ -28,15 +28,17 @@ func (*darwinHost) OpenRFCOMM(ctx context.Context, deviceID, serviceUUID string)
 	if !ok {
 		return "", domain.NewError(domain.CodeUnsupported, "device %q has no macOS Classic address", deviceID)
 	}
-	cAddress, cUUID := C.CString(address), C.CString(serviceUUID)
-	defer C.free(unsafe.Pointer(cAddress))
-	defer C.free(unsafe.Pointer(cUUID))
 	type result struct {
 		id   int64
 		code int
 	}
 	done := make(chan result, 1)
 	go func() {
+		// The goroutine owns the C strings: on cancel the caller returns while
+		// betty_rfcomm_open may still be reading them.
+		cAddress, cUUID := C.CString(address), C.CString(serviceUUID)
+		defer C.free(unsafe.Pointer(cAddress))
+		defer C.free(unsafe.Pointer(cUUID))
 		var code C.int
 		id := C.betty_rfcomm_open(cAddress, cUUID, &code)
 		done <- result{int64(id), int(code)}
@@ -115,5 +117,24 @@ func parseChannel(value string) (int64, error) {
 }
 
 func nativeError(operation string, code int) error {
-	return fmt.Errorf("macOS RFCOMM %s failed with IOReturn 0x%08x", operation, uint32(code))
+	value := uint32(code)
+	return domain.NewError(ioReturnCode(value), "macOS RFCOMM %s failed with IOReturn 0x%08x", operation, value)
+}
+
+func ioReturnCode(value uint32) domain.ErrorCode {
+	switch value {
+	case 0xe00002c0, 0xe00002f0: // kIOReturnNoDevice, kIOReturnNotFound
+		return domain.CodeNotFound
+	case 0xe00002c1, 0xe00002e2: // kIOReturnNotPrivileged, kIOReturnNotPermitted
+		return domain.CodePermission
+	case 0xe00002c7: // kIOReturnUnsupported
+		return domain.CodeUnsupported
+	case 0xe00002d6: // kIOReturnTimeout
+		return domain.CodeTimeout
+	case 0xe00002cd, 0xe00002d7: // kIOReturnNotOpen, kIOReturnOffline
+		return domain.CodeDisconnected
+	case 0xe00002c2: // kIOReturnBadArgument
+		return domain.CodeUsage
+	}
+	return domain.CodeUnavailable
 }

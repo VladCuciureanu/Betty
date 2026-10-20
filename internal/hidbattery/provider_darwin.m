@@ -1,3 +1,9 @@
+// Manual retain/release: cgo compiles Objective-C without ARC, and every
+// Betty .m file follows the same convention.
+#if __has_feature(objc_arc)
+#error "this file uses manual retain/release"
+#endif
+
 #import <Foundation/Foundation.h>
 #import <IOKit/IOKitLib.h>
 #import <IOKit/hid/IOHIDManager.h>
@@ -80,7 +86,7 @@ static void BettyCollectPublicHID(NSMutableDictionary<NSString *, NSDictionary *
 static NSString *BettyRegistryString(io_service_t service, CFStringRef key) {
     CFTypeRef value = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
     if (!value) return nil;
-    NSString *result = CFGetTypeID(value) == CFStringGetTypeID() ? [(__bridge NSString *)value copy] : nil;
+    NSString *result = CFGetTypeID(value) == CFStringGetTypeID() ? [[(__bridge NSString *)value copy] autorelease] : nil;
     CFRelease(value);
     return result;
 }
@@ -88,7 +94,7 @@ static NSString *BettyRegistryString(io_service_t service, CFStringRef key) {
 static NSNumber *BettyRegistryNumber(io_service_t service, CFStringRef key) {
     CFTypeRef value = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
     if (!value) return nil;
-    NSNumber *result = CFGetTypeID(value) == CFNumberGetTypeID() ? [(__bridge NSNumber *)value copy] : nil;
+    NSNumber *result = CFGetTypeID(value) == CFNumberGetTypeID() ? [[(__bridge NSNumber *)value copy] autorelease] : nil;
     CFRelease(value);
     return result;
 }
@@ -117,7 +123,7 @@ char *betty_copy_hid_batteries_json(void) {
         BettyCollectRegistryFallback(observations);
         NSData *data = [NSJSONSerialization dataWithJSONObject:observations.allValues options:0 error:nil];
         if (!data) return NULL;
-        NSString *json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        NSString *json = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
         return json ? strdup(json.UTF8String) : NULL;
     }
 }

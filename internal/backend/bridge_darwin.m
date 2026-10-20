@@ -1,33 +1,151 @@
+// Manual retain/release: cgo compiles Objective-C without ARC, and every
+// Betty .m file follows the same convention.
+#if __has_feature(objc_arc)
+#error "bridge_darwin.m uses manual retain/release"
+#endif
+
 #import <Foundation/Foundation.h>
 #import <IOBluetooth/IOBluetooth.h>
 #include "bridge_darwin.h"
+#include "_cgo_export.h"
+#include <stdlib.h>
 #include <string.h>
 
-static NSArray<IOBluetoothDevice *> *devices;
-static void refresh(void) { [devices release]; devices = [[IOBluetoothDevice pairedDevices] retain]; }
-void betty_refresh(void) { @autoreleasepool { refresh(); } }
-int betty_paired_count(void) { @autoreleasepool { return (int)devices.count; } }
-char *betty_paired_name(int i) { @autoreleasepool { if (i < 0 || i >= devices.count) return strdup(""); return strdup([[[devices objectAtIndex:i] nameOrAddress] UTF8String]); } }
-char *betty_paired_address(int i) { @autoreleasepool { if (i < 0 || i >= devices.count) return strdup(""); return strdup([[[devices objectAtIndex:i] addressString] UTF8String]); } }
-int betty_paired_connected(int i) { @autoreleasepool { if (i < 0 || i >= devices.count) return 0; return [[devices objectAtIndex:i] isConnected] ? 1 : 0; } }
-int betty_device_paired(int i) { @autoreleasepool { if (i < 0 || i >= devices.count) return 0; return [[devices objectAtIndex:i] isPaired] ? 1 : 0; } }
-static IOBluetoothDevice *device(const char *address) { return [IOBluetoothDevice deviceWithAddressString:[NSString stringWithUTF8String:address]]; }
-int betty_connect(const char *address) { @autoreleasepool { return (int)[device(address) openConnection]; } }
-int betty_disconnect(const char *address) { @autoreleasepool { return (int)[device(address) closeConnection]; } }
-int betty_is_connected(const char *address) { @autoreleasepool { return [device(address) isConnected] ? 1 : 0; } }
-int betty_is_paired(const char *address) { @autoreleasepool { return [device(address) isPaired] ? 1 : 0; } }
+static char *bettyCopyString(NSString *value) {
+	const char *utf8 = value.UTF8String;
+	return strdup(utf8 ? utf8 : "");
+}
+
+static IOBluetoothDevice *bettyDevice(const char *address) {
+	if (!address) return nil;
+	NSString *value = [NSString stringWithUTF8String:address];
+	return value ? [IOBluetoothDevice deviceWithAddressString:value] : nil;
+}
+
+betty_device *betty_copy_paired_devices(int *count) {
+	@autoreleasepool {
+		*count = 0;
+		NSArray<IOBluetoothDevice *> *paired = [IOBluetoothDevice pairedDevices];
+		if (paired.count == 0) return NULL;
+		betty_device *out = calloc(paired.count, sizeof(betty_device));
+		if (!out) return NULL;
+		int n = 0;
+		for (IOBluetoothDevice *device in paired) {
+			out[n].name = bettyCopyString(device.nameOrAddress);
+			out[n].address = bettyCopyString(device.addressString);
+			out[n].connected = device.isConnected ? 1 : 0;
+			out[n].paired = device.isPaired ? 1 : 0;
+			n++;
+		}
+		*count = n;
+		return out;
+	}
+}
+
+void betty_free_devices(betty_device *devices, int count) {
+	if (!devices) return;
+	for (int i = 0; i < count; i++) {
+		free(devices[i].name);
+		free(devices[i].address);
+	}
+	free(devices);
+}
+
+int betty_connect(const char *address) {
+	@autoreleasepool {
+		IOBluetoothDevice *device = bettyDevice(address);
+		return device ? (int)[device openConnection] : kIOReturnNoDevice;
+	}
+}
+
+int betty_disconnect(const char *address) {
+	@autoreleasepool {
+		IOBluetoothDevice *device = bettyDevice(address);
+		return device ? (int)[device closeConnection] : kIOReturnNoDevice;
+	}
+}
+
+int betty_is_connected(const char *address) {
+	@autoreleasepool {
+		return [bettyDevice(address) isConnected] ? 1 : 0;
+	}
+}
+
+int betty_is_paired(const char *address) {
+	@autoreleasepool {
+		return [bettyDevice(address) isPaired] ? 1 : 0;
+	}
+}
 
 @interface BettyPairDelegate : NSObject <IOBluetoothDevicePairDelegate>
-@property BOOL finished;
-@property IOReturn result;
+@property(assign) BOOL finished;
+@property(assign) IOReturn result;
+@property(assign) uintptr_t agent;
 @end
+
 @implementation BettyPairDelegate
-- (void)devicePairingFinished:(id)sender error:(IOReturn)error { self.result = error; self.finished = YES; }
+- (void)devicePairingPINCodeRequest:(id)sender {
+	char pin[17] = {0};
+	int length = bettyPairPIN(self.agent, pin, (int)sizeof(pin) - 1);
+	if (length <= 0) {
+		[sender replyPINCode:0 PINCode:NULL];
+		return;
+	}
+	BluetoothPINCode code;
+	memset(&code, 0, sizeof(code));
+	memcpy(code.data, pin, (size_t)length);
+	[sender replyPINCode:(ByteCount)length PINCode:&code];
+}
+
+- (void)devicePairingUserConfirmationRequest:(id)sender numericValue:(BluetoothNumericValue)numericValue {
+	[sender replyUserConfirmation:bettyPairConfirm(self.agent, (unsigned int)numericValue) ? YES : NO];
+}
+
+- (void)devicePairingUserPasskeyNotification:(id)sender passkey:(BluetoothPasskey)passkey {
+	bettyPairNotify(self.agent, (unsigned int)passkey);
+}
+
+- (void)devicePairingFinished:(id)sender error:(IOReturn)error {
+	self.result = error;
+	self.finished = YES;
+}
 @end
-int betty_pair(const char *address) { @autoreleasepool {
-  IOBluetoothDevicePair *pair = [IOBluetoothDevicePair pairWithDevice:device(address)];
-  BettyPairDelegate *delegate = [BettyPairDelegate new]; pair.delegate = delegate;
-  IOReturn started = [pair start]; if (started != kIOReturnSuccess) { [delegate release]; return (int)started; }
-  while (!delegate.finished) { [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]]; }
-  IOReturn result = delegate.result; [delegate release]; return (int)result;
-} }
+
+int betty_pair(const char *address, int timeout_ms, int *cancel, uintptr_t agent) {
+	@autoreleasepool {
+		IOBluetoothDevice *device = bettyDevice(address);
+		if (!device) return kIOReturnNoDevice;
+		IOBluetoothDevicePair *pair = [IOBluetoothDevicePair pairWithDevice:device];
+		if (!pair) return kIOReturnNoMemory;
+		BettyPairDelegate *delegate = [[BettyPairDelegate new] autorelease];
+		delegate.agent = agent;
+		pair.delegate = delegate;
+		IOReturn started = [pair start];
+		if (started != kIOReturnSuccess) {
+			pair.delegate = nil;
+			return (int)started;
+		}
+		NSDate *deadline = timeout_ms > 0 ? [NSDate dateWithTimeIntervalSinceNow:timeout_ms / 1000.0] : nil;
+		IOReturn result = kIOReturnSuccess;
+		while (!delegate.finished) {
+			if (__atomic_load_n(cancel, __ATOMIC_SEQ_CST)) {
+				result = kIOReturnAborted;
+				break;
+			}
+			if (deadline && [deadline timeIntervalSinceNow] <= 0) {
+				result = kIOReturnTimeout;
+				break;
+			}
+			@autoreleasepool {
+				[[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+			}
+		}
+		if (delegate.finished) {
+			result = delegate.result;
+		} else {
+			[pair stop];
+		}
+		pair.delegate = nil;
+		return (int)result;
+	}
+}
