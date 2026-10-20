@@ -138,7 +138,7 @@ async def main() -> None:
     parser.add_argument("--seed", type=int, default=0, help="varies virtual addresses between runs")
     args = parser.parse_args()
     # BETTY_PEER_LOG=DEBUG traces Bumble's HCI, L2CAP, and RFCOMM handling.
-    logging.basicConfig(level=os.environ.get("BETTY_PEER_LOG", "WARNING").upper(), stream=sys.stderr)
+    logging.basicConfig(level=(os.environ.get("BETTY_PEER_LOG") or "WARNING").upper(), stream=sys.stderr)
 
     if args.transport == "virtual":
         personas, host_address, transport = await create_virtual(args.device, args.seed)
