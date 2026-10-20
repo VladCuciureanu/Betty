@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -55,25 +57,24 @@ func TestHostL2CAPIsScopedToSelectedDevicesAndChannels(t *testing.T) {
 	host := &fakeHost{}
 	m.SetHost(host)
 	manifest := protocol.Manifest{ID: "official/test", Permissions: []string{"l2cap"}}
-	allowed := map[string]bool{"device": true}
-	channels := map[string]string{}
+	session := newHostSession([]protocol.Device{{ID: "device"}})
 	params, _ := json.Marshal(protocol.L2CAPOpenParams{DeviceID: "device", PSM: 25})
-	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: params}, allowed, channels)
+	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: params}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.openedDevice != "device" || channels["channel-1"] != "l2cap" {
-		t.Fatalf("result=%s host=%#v channels=%v", result, host, channels)
+	if host.openedDevice != "device" || !session.channels[channelKey{"l2cap", "channel-1"}] {
+		t.Fatalf("result=%s host=%#v channels=%v", result, host, session.channels)
 	}
 	write, _ := json.Marshal(protocol.L2CAPWriteParams{ChannelID: "channel-1", Data: "aabb"})
-	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPWrite, Params: write}, allowed, channels); err != nil {
+	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPWrite, Params: write}, session); err != nil {
 		t.Fatal(err)
 	}
 	if hex.EncodeToString(host.written) != "aabb" {
 		t.Fatalf("written=%x", host.written)
 	}
 	foreign, _ := json.Marshal(protocol.L2CAPOpenParams{DeviceID: "other", PSM: 25})
-	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: foreign}, allowed, channels); err == nil {
+	if _, err = m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostL2CAPOpen, Params: foreign}, session); err == nil {
 		t.Fatal("expected device scope error")
 	}
 }
@@ -83,28 +84,27 @@ func TestHostRFCOMMIsPermissionAndDeviceScoped(t *testing.T) {
 	host := &fakeRFCOMMHost{}
 	m.SetRFCOMMHost(host)
 	manifest := protocol.Manifest{ID: "official/sony-headphones", Permissions: []string{"rfcomm"}}
-	allowed := map[string]bool{"sony": true}
-	channels := map[string]string{}
+	session := newHostSession([]protocol.Device{{ID: "sony"}})
 	params, _ := json.Marshal(protocol.RFCOMMOpenParams{DeviceID: "sony", ServiceUUID: "956c"})
-	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, allowed, channels)
+	result, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.openedDevice != "sony" || host.openedService != "956c" || channels["rfcomm-1"] != "rfcomm" {
-		t.Fatalf("result=%s host=%#v channels=%v", result, host, channels)
+	if host.openedDevice != "sony" || host.openedService != "956c" || !session.channels[channelKey{"rfcomm", "rfcomm-1"}] {
+		t.Fatalf("result=%s host=%#v channels=%v", result, host, session.channels)
 	}
 	write, _ := json.Marshal(protocol.RFCOMMWriteParams{ChannelID: "rfcomm-1", Data: "aabb"})
-	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMWrite, Params: write}, allowed, channels); err != nil {
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMWrite, Params: write}, session); err != nil {
 		t.Fatal(err)
 	}
 	if hex.EncodeToString(host.written) != "aabb" {
 		t.Fatalf("written=%x", host.written)
 	}
 	foreign, _ := json.Marshal(protocol.RFCOMMOpenParams{DeviceID: "other", ServiceUUID: "956c"})
-	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: foreign}, allowed, channels); err == nil {
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: foreign}, session); err == nil {
 		t.Fatal("expected device scope error")
 	}
-	if _, err := m.handleHost(context.Background(), protocol.Manifest{ID: "official/denied"}, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, allowed, channels); err == nil {
+	if _, err := m.handleHost(context.Background(), protocol.Manifest{ID: "official/denied"}, protocol.Message{Method: protocol.HostRFCOMMOpen, Params: params}, session); err == nil {
 		t.Fatal("expected RFCOMM permission error")
 	}
 }
@@ -116,7 +116,7 @@ func TestHostPermissionsAndNamespacedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	params, _ := json.Marshal(protocol.StorageSetParams{Key: "keys/airpods", Value: "secret"})
-	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostStorageSet, Params: params}, nil, nil); err != nil {
+	if _, err := m.handleHost(context.Background(), manifest, protocol.Message{Method: protocol.HostStorageSet, Params: params}, newHostSession(nil)); err != nil {
 		t.Fatal(err)
 	}
 	value, found, err := m.storageGet(manifest, "keys/airpods")
@@ -124,7 +124,7 @@ func TestHostPermissionsAndNamespacedStorage(t *testing.T) {
 		t.Fatalf("value=%q found=%t err=%v", value, found, err)
 	}
 	denied := protocol.Manifest{ID: "official/denied"}
-	if _, err := m.handleHost(context.Background(), denied, protocol.Message{Method: protocol.HostStorageSet, Params: params}, nil, nil); err == nil {
+	if _, err := m.handleHost(context.Background(), denied, protocol.Message{Method: protocol.HostStorageSet, Params: params}, newHostSession(nil)); err == nil {
 		t.Fatal("expected permission error")
 	}
 }
@@ -240,5 +240,72 @@ func TestPublicErrorCodesMatchDomainCodes(t *testing.T) {
 	}
 	if len(protocol.ErrorCodes) != 12 {
 		t.Fatalf("public error codes changed; update driverErrorCode and docs/DRIVER_PROTOCOL.md")
+	}
+}
+
+func TestConcurrentStorageWritesAreAllKept(t *testing.T) {
+	m := NewAt(t.TempDir())
+	driver := protocol.Manifest{ID: "example/storage"}
+	const writers = 16
+	errs := make(chan error, writers)
+	for i := range writers {
+		go func() { errs <- m.storageSet(driver, fmt.Sprintf("key/%d", i), "value") }()
+	}
+	for range writers {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	values, err := m.readStorage(driver.ID)
+	if err != nil || len(values) != writers {
+		t.Fatalf("kept %d of %d keys, err=%v", len(values), writers, err)
+	}
+}
+
+func TestStorageLimits(t *testing.T) {
+	m := NewAt(t.TempDir())
+	driver := protocol.Manifest{ID: "example/limits"}
+	for i := range maxStorageKeys {
+		if err := m.storageSet(driver, fmt.Sprintf("k%d", i), "v"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := m.storageSet(driver, "one-too-many", "v"); err == nil {
+		t.Fatal("a key beyond the limit was stored")
+	}
+	if err := m.storageSet(driver, "k0", "replaced"); err != nil {
+		t.Fatalf("replacing an existing key must still work: %v", err)
+	}
+	big := strings.Repeat("x", maxStorageValue)
+	m = NewAt(t.TempDir())
+	for i := range maxStorageBytes / maxStorageValue {
+		err := m.storageSet(driver, fmt.Sprintf("big%d", i), big)
+		if err != nil && i < maxStorageBytes/maxStorageValue-1 {
+			t.Fatalf("value %d: %v", i, err)
+		}
+		if err != nil {
+			return
+		}
+	}
+	t.Fatal("storage grew past 1 MiB")
+}
+
+func TestImportStateRejectsOversizedFiles(t *testing.T) {
+	m := NewAt(t.TempDir())
+	id := "official/test"
+	dir := filepath.Join(m.root, safeID(id))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, _ := json.Marshal(protocol.Manifest{Protocol: protocol.Version, ID: id})
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(source, []byte(`{"k":"`+strings.Repeat("x", maxStorageBytes)+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ImportState(id, source); err == nil || !strings.Contains(err.Error(), "exceeds 1 MiB") {
+		t.Fatalf("err=%v", err)
 	}
 }

@@ -86,6 +86,13 @@ const (
 	HostRFCOMMClose = "rfcomm.close"
 	HostStorageGet  = "storage.get"
 	HostStorageSet  = "storage.set"
+
+	HostGATTServices    = "gatt.services"
+	HostGATTRead        = "gatt.read"
+	HostGATTWrite       = "gatt.write"
+	HostGATTSubscribe   = "gatt.subscribe"
+	HostGATTNext        = "gatt.next"
+	HostGATTUnsubscribe = "gatt.unsubscribe"
 )
 
 type Device struct {
@@ -195,6 +202,41 @@ type RFCOMMWriteParams struct {
 	ChannelID string `json:"channel_id"`
 	Data      string `json:"data"`
 }
+
+// GATTServicesParams names the device whose GATT services to list.
+type GATTServicesParams struct {
+	DeviceID string `json:"device_id"`
+}
+
+// GATTService is one service in a gatt.services result.
+type GATTService struct {
+	UUID            string   `json:"uuid"`
+	Characteristics []string `json:"characteristics"`
+}
+
+// GATTCharacteristicParams selects a characteristic. ServiceUUID is needed
+// only when the characteristic UUID appears in more than one service.
+type GATTCharacteristicParams struct {
+	DeviceID           string `json:"device_id"`
+	ServiceUUID        string `json:"service_uuid,omitempty"`
+	CharacteristicUUID string `json:"characteristic_uuid"`
+}
+
+type GATTWriteParams struct {
+	GATTCharacteristicParams
+	Data            string `json:"data"`
+	WithoutResponse bool   `json:"without_response,omitempty"`
+}
+
+type GATTNextParams struct {
+	SubscriptionID string `json:"subscription_id"`
+	TimeoutMS      int    `json:"timeout_ms,omitempty"`
+}
+
+type GATTSubscriptionParams struct {
+	SubscriptionID string `json:"subscription_id"`
+}
+
 type StorageGetParams struct {
 	Key string `json:"key"`
 }

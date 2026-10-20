@@ -95,7 +95,7 @@ bt get "ACME-42" battery
 | `Driver` | Your manifest and the optional `Inspect`, `Get`, and `Set` handlers. |
 | `Serve(d)` | Runs the driver: answers `--manifest`, handles requests until Betty closes stdin, and exits. |
 | `Driver.Run(args, in, out)` | The same over arbitrary streams, for tests. |
-| `*Session` | Host calls for the current request: `OpenL2CAP`, `ReadL2CAP`, `WriteL2CAP`, `CloseL2CAP`, the same four for RFCOMM, `GetState`, and `SetState`. |
+| `*Session` | Host calls for the current request: `OpenL2CAP`, `ReadL2CAP`, `WriteL2CAP`, `CloseL2CAP`, the same four for RFCOMM, `GATTServices`, `ReadGATT`, `WriteGATT`, `SubscribeGATT`, `NextGATT`, `UnsubscribeGATT`, `GetState`, and `SetState`. |
 | `Errorf(code, …)` | Returns a structured error with a stable code. |
 | `Wrap(err, fallback)` | Keeps the code of a failed host call, or applies `fallback`. |
 | `PropertyRequest.DecodeValue` | Decodes a `set` value, reporting `usage` for the wrong JSON type. |

@@ -3,7 +3,6 @@ package driver
 import (
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -31,17 +30,18 @@ type Manager struct {
 	OnInspectError func(driverID string, err error)
 	host           Host
 	rfcomm         RFCOMMHost
+	gattHost       GATTHost
 }
 
 func New() *Manager {
 	if root := os.Getenv("BETTY_DRIVER_DIR"); root != "" {
-		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
 	}
 	root, _ := os.UserConfigDir()
-	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
 }
 func NewAt(root string) *Manager {
-	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}}
+	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
 }
 func (m *Manager) SetHost(host Host) {
 	if host == nil {
@@ -56,6 +56,14 @@ func (m *Manager) SetRFCOMMHost(host RFCOMMHost) {
 		return
 	}
 	m.rfcomm = host
+}
+
+func (m *Manager) SetGATTHost(host GATTHost) {
+	if host == nil {
+		m.gattHost = UnsupportedGATTHost{}
+		return
+	}
+	m.gattHost = host
 }
 
 func (m *Manager) Inspect(ctx context.Context, devices []domain.Device) []domain.Device {
@@ -208,12 +216,15 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 			return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
 		}
 	}
+	unlock, err := m.lock()
+	if err != nil {
+		return manifest, err
+	}
+	defer unlock()
+	// Checked again under the lock: a concurrent install may have finished.
 	dir := filepath.Join(m.root, safeID(manifest.ID))
 	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err == nil {
 		return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
-	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
-		return manifest, err
 	}
 	temp, err := os.MkdirTemp(m.root, ".install-")
 	if err != nil {
@@ -246,6 +257,11 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 func (m *Manager) Remove(id string) error {
 	path := filepath.Join(m.root, safeID(id))
 	if _, err := os.Stat(filepath.Join(path, "manifest.json")); err == nil {
+		unlock, err := m.lock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		return os.RemoveAll(path)
 	}
 	for _, root := range m.bundledRoots() {
@@ -342,25 +358,38 @@ func (m *Manager) ImportState(id, source string) error {
 	if !m.installed(id) {
 		return domain.NewError(domain.CodeNotFound, "driver %q is not installed", id)
 	}
-	bytes, err := os.ReadFile(source)
+	file, err := os.Open(source)
 	if err != nil {
 		return err
 	}
-	if len(bytes) > 1<<20 {
+	defer file.Close()
+	bytes, err := io.ReadAll(io.LimitReader(file, maxStorageBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(bytes) > maxStorageBytes {
 		return domain.NewError(domain.CodeUsage, "driver state exceeds 1 MiB")
 	}
 	values := map[string]string{}
 	if err := json.Unmarshal(bytes, &values); err != nil {
 		return domain.NewError(domain.CodeUsage, "invalid driver state: %v", err)
 	}
+	if len(values) > maxStorageKeys {
+		return domain.NewError(domain.CodeUsage, "driver state has more than %d keys", maxStorageKeys)
+	}
 	for key, value := range values {
 		if err := validateStorageKey(key); err != nil {
 			return err
 		}
-		if len(value) > 65536 {
+		if len(value) > maxStorageValue {
 			return domain.NewError(domain.CodeUsage, "stored value for %q exceeds 64 KiB", key)
 		}
 	}
+	unlock, err := m.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return m.writeStorage(id, values)
 }
 
@@ -386,183 +415,6 @@ func driverErrorCode(value string) domain.ErrorCode {
 	}
 }
 
-func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, message protocol.Message, allowedDevices map[string]bool, channels map[string]string) (json.RawMessage, error) {
-	marshal := func(value any) (json.RawMessage, error) { bytes, err := json.Marshal(value); return bytes, err }
-	required := ""
-	if len(message.Method) >= 6 && message.Method[:6] == "l2cap." {
-		required = protocol.PermissionL2CAP
-	}
-	if len(message.Method) >= 8 && message.Method[:8] == "storage." {
-		required = protocol.PermissionStorage
-	}
-	if len(message.Method) >= 7 && message.Method[:7] == "rfcomm." {
-		required = protocol.PermissionRFCOMM
-	}
-	if required != "" && !hasPermission(driver, required) {
-		return nil, domain.NewError(domain.CodePermission, "driver %s lacks %s permission", driver.ID, required)
-	}
-	switch message.Method {
-	case protocol.HostL2CAPOpen:
-		var p protocol.L2CAPOpenParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if !allowedDevices[p.DeviceID] {
-			return nil, domain.NewError(domain.CodePermission, "driver cannot access device %q", p.DeviceID)
-		}
-		channel, err := m.host.OpenL2CAP(ctx, p.DeviceID, p.PSM)
-		if err != nil {
-			return nil, err
-		}
-		channels[channel] = "l2cap"
-		return marshal(map[string]string{"channel_id": channel})
-	case protocol.HostL2CAPRead:
-		var p protocol.L2CAPReadParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "l2cap" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
-		}
-		if p.MaxBytes < 1 || p.MaxBytes > 65535 {
-			return nil, domain.NewError(domain.CodeUsage, "max_bytes must be between 1 and 65535")
-		}
-		readCtx := ctx
-		cancel := func() {}
-		if p.TimeoutMS > 0 {
-			if p.TimeoutMS > 30000 {
-				return nil, domain.NewError(domain.CodeUsage, "timeout_ms must not exceed 30000")
-			}
-			readCtx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
-		}
-		defer cancel()
-		data, err := m.host.ReadL2CAP(readCtx, p.ChannelID, p.MaxBytes)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]string{"data": hex.EncodeToString(data)})
-	case protocol.HostL2CAPWrite:
-		var p protocol.L2CAPWriteParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "l2cap" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
-		}
-		data, err := hex.DecodeString(p.Data)
-		if err != nil {
-			return nil, domain.NewError(domain.CodeUsage, "invalid hexadecimal L2CAP data")
-		}
-		written, err := m.host.WriteL2CAP(ctx, p.ChannelID, data)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]int{"written": written})
-	case protocol.HostL2CAPClose:
-		var p protocol.L2CAPChannelParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "l2cap" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own L2CAP channel")
-		}
-		if err := m.host.CloseL2CAP(ctx, p.ChannelID); err != nil {
-			return nil, err
-		}
-		delete(channels, p.ChannelID)
-		return marshal(map[string]bool{"closed": true})
-	case protocol.HostRFCOMMOpen:
-		var p protocol.RFCOMMOpenParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if !allowedDevices[p.DeviceID] {
-			return nil, domain.NewError(domain.CodePermission, "driver cannot access device %q", p.DeviceID)
-		}
-		channel, err := m.rfcomm.OpenRFCOMM(ctx, p.DeviceID, p.ServiceUUID)
-		if err != nil {
-			return nil, err
-		}
-		channels[channel] = "rfcomm"
-		return marshal(map[string]string{"channel_id": channel})
-	case protocol.HostRFCOMMRead:
-		var p protocol.RFCOMMReadParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "rfcomm" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
-		}
-		if p.MaxBytes < 1 || p.MaxBytes > 65535 {
-			return nil, domain.NewError(domain.CodeUsage, "max_bytes must be between 1 and 65535")
-		}
-		readCtx := ctx
-		cancel := func() {}
-		if p.TimeoutMS > 0 {
-			if p.TimeoutMS > 30000 {
-				return nil, domain.NewError(domain.CodeUsage, "timeout_ms must not exceed 30000")
-			}
-			readCtx, cancel = context.WithTimeout(ctx, time.Duration(p.TimeoutMS)*time.Millisecond)
-		}
-		defer cancel()
-		data, err := m.rfcomm.ReadRFCOMM(readCtx, p.ChannelID, p.MaxBytes)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]string{"data": hex.EncodeToString(data)})
-	case protocol.HostRFCOMMWrite:
-		var p protocol.RFCOMMWriteParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "rfcomm" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
-		}
-		data, err := hex.DecodeString(p.Data)
-		if err != nil {
-			return nil, domain.NewError(domain.CodeUsage, "invalid hexadecimal RFCOMM data")
-		}
-		written, err := m.rfcomm.WriteRFCOMM(ctx, p.ChannelID, data)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]int{"written": written})
-	case protocol.HostRFCOMMClose:
-		var p protocol.RFCOMMChannelParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if channels[p.ChannelID] != "rfcomm" {
-			return nil, domain.NewError(domain.CodePermission, "driver does not own RFCOMM channel")
-		}
-		if err := m.rfcomm.CloseRFCOMM(ctx, p.ChannelID); err != nil {
-			return nil, err
-		}
-		delete(channels, p.ChannelID)
-		return marshal(map[string]bool{"closed": true})
-	case protocol.HostStorageGet:
-		var p protocol.StorageGetParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		value, found, err := m.storageGet(driver, p.Key)
-		if err != nil {
-			return nil, err
-		}
-		return marshal(map[string]any{"value": value, "found": found})
-	case protocol.HostStorageSet:
-		var p protocol.StorageSetParams
-		if err := json.Unmarshal(message.Params, &p); err != nil {
-			return nil, err
-		}
-		if err := m.storageSet(driver, p.Key, p.Value); err != nil {
-			return nil, err
-		}
-		return marshal(map[string]bool{"stored": true})
-	default:
-		return nil, domain.NewError(domain.CodeUnsupported, "unsupported host method %q", message.Method)
-	}
-}
 func hasPermission(driver protocol.Manifest, want string) bool {
 	for _, permission := range driver.Permissions {
 		if permission == want {
@@ -587,14 +439,29 @@ func (m *Manager) storageSet(driver protocol.Manifest, key, value string) error 
 	if err := validateStorageKey(key); err != nil {
 		return err
 	}
-	if len(value) > 65536 {
+	if len(value) > maxStorageValue {
 		return domain.NewError(domain.CodeUsage, "stored value exceeds 64 KiB")
 	}
+	unlock, err := m.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	values, err := m.readStorage(driver.ID)
 	if err != nil {
 		return err
 	}
+	if _, exists := values[key]; !exists && len(values) >= maxStorageKeys {
+		return domain.NewError(domain.CodeUsage, "driver storage is limited to %d keys", maxStorageKeys)
+	}
 	values[key] = value
+	bytes, err := json.Marshal(values)
+	if err != nil {
+		return err
+	}
+	if len(bytes) > maxStorageBytes {
+		return domain.NewError(domain.CodeUsage, "driver storage is limited to 1 MiB")
+	}
 	return m.writeStorage(driver.ID, values)
 }
 func (m *Manager) writeStorage(driverID string, values map[string]string) error {
@@ -639,8 +506,17 @@ func (m *Manager) readStorage(driverID string) (map[string]string, error) {
 	}
 	return values, nil
 }
+// Driver storage limits, shared by host calls and state import.
+const (
+	maxStorageKeys  = 256
+	maxStorageValue = 64 << 10
+	maxStorageBytes = 1 << 20
+)
+
+var storageKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
+
 func validateStorageKey(key string) error {
-	if len(key) < 1 || len(key) > 128 || !regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`).MatchString(key) {
+	if len(key) < 1 || len(key) > 128 || !storageKeyPattern.MatchString(key) {
 		return domain.NewError(domain.CodeUsage, "invalid storage key")
 	}
 	return nil

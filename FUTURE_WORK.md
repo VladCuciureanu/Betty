@@ -148,7 +148,7 @@ Third-party drivers are a first-class extension point. The protocol in [docs/DRI
 - [x] Provide a Go SDK: `driver.Serve`, typed `Inspect`/`Get`/`Set` handlers, typed host calls, structured errors, and exported constants for every protocol string.
 - [x] Port the Sony driver to the SDK as the reference implementation.
 - [x] Port the Apple Audio driver to the SDK.
-- Add GATT host calls (discover, read, write, subscribe) so BLE-only devices, the most common third-party case, can have drivers. This is an additive protocol 1 change.
+- [x] Add GATT host calls (discover, read, write, subscribe) so BLE-only devices, the most common third-party case, can have drivers. This is an additive protocol 1 change.
 - [x] Add manifest match hints (company IDs, service UUIDs, names) so Betty starts only relevant drivers instead of every driver for every command.
 - Ship a conformance checker that runs a driver against scripted requests and a fake host, for example `bt driver check <executable>`.
 - Surface driver stderr and skipped-inspect failures under `--verbose`.
@@ -164,7 +164,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 
 #### Battery
 
-- Validate exact AAP battery reports on real AirPods and Beats devices on Linux and Windows.
+- Validate exact AAP battery reports on real AirPods and Beats devices on Linux. Windows doesn't support the AAP channel: only a signed kernel-mode driver could open it.
 - Validate authorized System Keychain acquisition and encrypted BLE battery reports on macOS.
 - Compare headset, left, right, case, charging, disconnected, sleeping, and reconnect states against a trustworthy reference.
 - Add fixtures for fragmented packets, unrelated notifications, missing components, malformed lengths, invalid statuses, private-key responses, and timeouts.

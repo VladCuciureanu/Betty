@@ -9,7 +9,7 @@ data is linked into the base `bt` binary.
 | Property | State | Values / shape | Requirements |
 | --- | --- | --- | --- |
 | `battery` | Available | headset or left/right/case percentage, including charging state when reported | A recognized Continuity advertisement for an estimated reading, or keys/AAP transport for an exact reading |
-| `noise_control` | Implemented, validation-gated | `off`, `anc`, `transparency`; `adaptive` only for profiles known to support it | Connected ANC-capable device and AAP transport |
+| `noise_control` | Implemented, validation-gated | `off`, `anc`, `transparency`; `adaptive` only for profiles known to support it | Connected ANC-capable device and AAP transport; Linux only |
 | `heart_rate` | Planned | beats per minute | Powerbeats Pro 2 in its fitness-equipment pairing mode; standard GATT path still needs hardware validation |
 
 Noise-control reads and writes are disabled in normal use until the model and
@@ -57,16 +57,19 @@ device.
 | --- | --- | --- | --- |
 | Linux | Continuity advertisement | Native connection-oriented L2CAP to AAP PSM `0x1001`, or encrypted BLE after key acquisition | AAP implementation available behind validation gate |
 | macOS | Continuity advertisement | Encrypted BLE using explicitly authorized `MobileBluetooth` keys from the System keychain | Unavailable: macOS does not expose the reserved AAP PSM to third-party processes |
-| Windows | Continuity advertisement | Encrypted BLE after key import, or AAP through optional Advanced Support | AAP implementation available behind validation gate; active access needs Advanced Support |
+| Windows | Continuity advertisement | Encrypted BLE after key import | Unsupported: Windows exposes the AAP channel only to kernel-mode drivers |
 
 Linux uses an unprivileged `SOCK_SEQPACKET` L2CAP socket. It does not require
 `CAP_NET_RAW`, `sudo`, or a helper service.
 
-Windows desktop applications cannot open this arbitrary Classic L2CAP profile
-through a general userspace API. The optional Advanced Support MSI therefore
-contains a narrow Betty-owned profile driver and the same userspace Apple Audio
-driver. The base Windows MSI contains neither. Details are in
-[the Windows packaging document](../../packaging/windows/README.md).
+Windows desktop applications cannot open this Classic L2CAP channel through
+any user-mode API; only a kernel-mode profile driver can. Such a driver must be
+Microsoft-signed to load, and none is: Betty's own driver in
+`packaging/windows/driver` is unsigned, and so are the third-party ones
+(MagicAAP, WinPods). On Windows the driver therefore never opens the AAP
+channel. `noise_control` reports `unsupported`, and battery comes from
+advertisements, exactly once keys are imported. The kernel driver's future is
+tracked in [#8](https://github.com/VladCuciureanu/Betty/issues/8).
 
 ## Supported model identification
 

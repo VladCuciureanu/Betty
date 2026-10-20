@@ -131,6 +131,7 @@ Permissions:
 | `device-metadata` | Nothing extra. Every driver receives device metadata; declaring it documents that the driver reads it. |
 | `l2cap` | `l2cap.*` host calls. |
 | `rfcomm` | `rfcomm.*` host calls. |
+| `gatt` | `gatt.*` host calls. |
 | `driver-storage` | `storage.*` host calls. |
 
 Betty accepts other permission names without granting anything for them. The
@@ -354,9 +355,12 @@ Betty enforces these rules, returning `permission_denied` when they are broken:
 - the method's permission must be declared in the manifest;
 - `device_id` must be one of the devices in the current request;
 - `channel_id` must have been opened by this driver in the current request, on
-  the same transport.
+  the same transport;
+- `subscription_id` must have been returned to this driver in the current
+  request.
 
-Betty closes every channel still open when the request ends.
+Betty closes every channel, subscription and GATT connection still open when
+the request ends.
 
 | Method | Permission | `params` | `result` |
 | --- | --- | --- | --- |
@@ -370,6 +374,12 @@ Betty closes every channel still open when the request ends.
 | `rfcomm.close` | `rfcomm` | `channel_id` | `closed` (true) |
 | `storage.get` | `driver-storage` | `key` | `value` (string), `found` (boolean) |
 | `storage.set` | `driver-storage` | `key`, `value` (string, at most 64 KiB) | `stored` (true) |
+| `gatt.services` | `gatt` | `device_id` | `services`: array of `{uuid, characteristics}`, where `characteristics` is an array of UUIDs |
+| `gatt.read` | `gatt` | `device_id`, `characteristic_uuid`, `service_uuid` (optional) | `data` (lowercase hex) |
+| `gatt.write` | `gatt` | `device_id`, `characteristic_uuid`, `service_uuid` (optional), `data` (hex), `without_response` (optional boolean) | `written` (true) |
+| `gatt.subscribe` | `gatt` | `device_id`, `characteristic_uuid`, `service_uuid` (optional) | `subscription_id` |
+| `gatt.next` | `gatt` | `subscription_id`, `timeout_ms` (optional, at most 30000) | `data` (lowercase hex) |
+| `gatt.unsubscribe` | `gatt` | `subscription_id` | `unsubscribed` (true) |
 
 Notes:
 
@@ -378,12 +388,24 @@ Notes:
 - L2CAP channels are Classic, connection-oriented channels. Availability
   depends on the platform; an unavailable transport fails with `unsupported`.
 - Storage is private to the driver ID and written with user-only permissions.
-  Keys are 1–128 characters from `[A-Za-z0-9._/-]`. Users can move a store
-  between machines with `bt driver export-state` and `bt driver import-state`;
-  an import larger than 1 MiB is refused, so keep the whole store below that. Store keys and other
-  secrets only here.
+  Keys are 1–128 characters from `[A-Za-z0-9._/-]`. A store holds at most 256
+  keys and 1 MiB of JSON; a `storage.set` past either limit fails with `usage`.
+  Writes from concurrent `bt` processes are serialized, so none is lost. Users
+  can move a store between machines with `bt driver export-state` and
+  `bt driver import-state`. Store keys and other secrets only here.
 
-BLE GATT is not available through host calls in protocol version 1.
+GATT calls:
+
+- `device_id` must be a device with a BLE endpoint; otherwise the call fails
+  with `unsupported`. Betty connects on the first GATT call for a device and
+  shares that connection across the request's GATT calls, so a read doesn't
+  tear down a subscription.
+- A characteristic UUID that appears in more than one service fails with
+  `device_ambiguous` unless `service_uuid` selects one.
+- A subscription queues at most 64 values and drops the oldest beyond that.
+  `gatt.next` returns the oldest queued value, fails with `timeout` when none
+  arrives in time, and fails with `device_disconnected` once the link drops
+  and the queue is empty.
 
 ## 9. Errors
 
