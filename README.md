@@ -96,7 +96,11 @@ bt watch headphones battery
 
 Without any driver, Betty reads `battery` from the standard GATT Battery Service
 and `manufacturer`, `model`, `serial_number`, `hardware_revision`,
-`software_revision`, and `firmware_version` from the Device Information Service.
+`firmware_version`, `software_revision`, `system_id`, `pnp_id`, and
+`regulatory_certification` from the Device Information Service. All are
+strings: `system_id` and `regulatory_certification` as hex, and `pnp_id` as
+`source:vendor:product:version`, for example `usb:046d:c52b:0100`. `inspect`
+reports the same fields under `information`.
 On macOS it also reads battery levels that the system HID stack publishes for
 connected keyboards, mice, and trackpads, matched by exact address. On Linux it
 reads the levels BlueZ publishes for HID devices, LE devices with the Battery

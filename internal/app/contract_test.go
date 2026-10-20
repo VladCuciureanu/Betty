@@ -260,7 +260,7 @@ func TestEmptyResultsAreEmptyArrays(t *testing.T) {
 func TestStandardDeviceInformationProperty(t *testing.T) {
 	h := newHarness()
 	h.backend.known = []domain.Device{bleDevice("AA:BB:CC:DD:EE:01", "Sensor")}
-	h.ble.info = map[string]string{"firmware_revision": "1.2.3"}
+	h.ble.info = map[string]string{"firmware_version": "1.2.3"}
 	if code := h.run("--json", "get", "Sensor", "firmware_version"); code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, h.stderr.String())
 	}
