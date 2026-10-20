@@ -164,18 +164,119 @@ func TestAAPNoiseControlCodecRejectsMalformedPackets(t *testing.T) {
 	}
 }
 
-func TestEncryptedAdvertisementExactBattery(t *testing.T) {
-	key := mustHex("00112233445566778899aabbccddeeff")
-	plain := make([]byte, 16)
-	copy(plain, []byte{0x04, 0xd9, 0x58, 0xaa}) // 89% charging, 88%, case 42% charging
+// encryptedAdvertisement builds an AirPods Pro Proximity Pairing
+// advertisement whose unencrypted estimates are 90%, 90%, and case 40%, and
+// whose encrypted payload holds plain under key.
+func encryptedAdvertisement(key, plain []byte, address string) protocol.Device {
 	block, _ := aes.NewCipher(key)
 	encrypted := make([]byte, 16)
 	cipher.NewCBCEncrypter(block, make([]byte, aes.BlockSize)).CryptBlocks(encrypted, plain)
-	payload := append(mustHex("0719012420200000000000"), encrypted...)
+	payload := append(mustHex("0719012420209904000000"), encrypted...)
 	device := protocol.Device{ManufacturerData: []protocol.ManufacturerData{{CompanyID: 0x004c, Data: hex.EncodeToString(payload)}}}
+	if address != "" {
+		device.Endpoints = []protocol.Endpoint{{ID: address, Transport: "ble", Address: address}}
+	}
+	return device
+}
+
+// exactPayload is 89% charging, 88%, case 42% charging.
+var exactPayload = append([]byte{0x04, 0xd9, 0x58, 0xaa}, make([]byte, 12)...)
+
+func TestEncryptedAdvertisementExactBattery(t *testing.T) {
+	key := mustHex("00112233445566778899aabbccddeeff")
+	device := encryptedAdvertisement(key, exactPayload, "")
 	battery, ok := decryptAdvertisement(device, 0x2420, appleAudioKeyring{Keys: []appleAudioKeys{{ModelID: 0x2420, ENC: hex.EncodeToString(key)}}})
 	if !ok || battery.Left == nil || battery.Left.Level != 89 || !battery.Left.Charging || battery.Right.Level != 88 || battery.Case.Level != 42 {
 		t.Fatalf("battery=%#v ok=%t", battery, ok)
+	}
+}
+
+func TestWrongKeysAreRejected(t *testing.T) {
+	key := mustHex("00112233445566778899aabbccddeeff")
+	device := encryptedAdvertisement(key, exactPayload, "")
+	data, _ := hex.DecodeString(device.ManufacturerData[0].Data)
+	// Find wrong keys that pass the format check alone, which accepted a
+	// wrong key about 2 times in 256, and require every one to be rejected.
+	formatOnly := 0
+	for i := 0; formatOnly < 25; i++ {
+		wrong := make([]byte, 16)
+		wrong[0], wrong[1], wrong[15] = byte(i), byte(i>>8), 0x5a
+		plain, err := decryptPrivatePayload(data[11:27], hex.EncodeToString(wrong))
+		if err != nil || (plain[0] != 0x04 && plain[0] != 0x14) {
+			continue
+		}
+		formatOnly++
+		keyring := appleAudioKeyring{Keys: []appleAudioKeys{{ENC: hex.EncodeToString(wrong)}}}
+		if battery, ok := decryptAdvertisement(device, 0x2420, keyring); ok {
+			t.Fatalf("wrong key %x was accepted: %#v", wrong, battery)
+		}
+	}
+}
+
+func TestDecryptedLevelsMustAgreeWithTheEstimate(t *testing.T) {
+	key := mustHex("00112233445566778899aabbccddeeff")
+	far := append([]byte{0x04, 0x14, 0x15, 0x2a}, make([]byte, 12)...) // 20%, 21%, case 42%
+	device := encryptedAdvertisement(key, far, "")
+	if _, ok := decryptAdvertisement(device, 0x2420, appleAudioKeyring{Keys: []appleAudioKeys{{ENC: hex.EncodeToString(key)}}}); ok {
+		t.Fatal("levels far from the 90% estimates were accepted")
+	}
+}
+
+// privateAddress returns the resolvable private address that irk generates
+// from prand, most significant byte first.
+func privateAddress(irk []byte, prand [3]byte) string {
+	block, _ := aes.NewCipher(irk)
+	var in, out [16]byte
+	copy(in[13:], prand[:])
+	block.Encrypt(out[:], in[:])
+	return fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X", prand[0], prand[1], prand[2], out[13], out[14], out[15])
+}
+
+func TestKeysMustResolveTheAdvertisersAddress(t *testing.T) {
+	enc := mustHex("00112233445566778899aabbccddeeff")
+	irk := mustHex("0f0e0d0c0b0a09080706050403020100")
+	other := mustHex("a0a1a2a3a4a5a6a7a8a9aaabacadaeaf")
+	address := privateAddress(irk, [3]byte{0x5a, 0x12, 0x34}) // top bits 01: resolvable
+	device := encryptedAdvertisement(enc, exactPayload, address)
+	for name, test := range map[string]struct {
+		irk  []byte
+		want bool
+	}{"its own IRK": {irk, true}, "its IRK, reversed": {reversed(irk), true}, "another device's IRK": {other, false}} {
+		keyring := appleAudioKeyring{Keys: []appleAudioKeys{{IRK: hex.EncodeToString(test.irk), ENC: hex.EncodeToString(enc)}}}
+		if _, ok := decryptAdvertisement(device, 0x2420, keyring); ok != test.want {
+			t.Fatalf("%s: accepted=%t, want %t", name, ok, test.want)
+		}
+	}
+}
+
+func TestAnUnreadableKeyringIsNotOverwritten(t *testing.T) {
+	host, child := net.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		defer child.Close()
+		done <- protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set}.Run(nil, child, child)
+	}()
+	betty := &fakeBetty{
+		t:       t,
+		encoder: json.NewEncoder(host),
+		decoder: json.NewDecoder(host),
+		storage: map[string]string{keyringStorageKey: `{"version":2,"keys":[{"irk":"keep","enc":"keep"}]}`},
+		packets: []string{
+			"040004000400030401590201020158020108012a0101",
+			"04000400310002" + "01001000" + "00112233445566778899aabbccddeeff" + "04001000" + "ffeeddccbbaa99887766554433221100",
+		},
+	}
+	devices := []protocol.Device{{ID: "classic", Name: "AirPods Pro", Connected: true}}
+	got := betty.request(protocol.Request{ID: "1", Method: protocol.MethodGet, DeviceID: "classic", Property: "battery", Devices: devices})
+	if _, ok := got.Enrichments["classic"].Properties["battery"]; got.Error != "" || !ok {
+		t.Fatalf("the battery read must still work: %+v", got)
+	}
+	if stored := betty.storage[keyringStorageKey]; stored != `{"version":2,"keys":[{"irk":"keep","enc":"keep"}]}` {
+		t.Fatalf("the unreadable keyring was overwritten with %s", stored)
+	}
+	host.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -338,6 +439,33 @@ func TestAppleAudioDriverServesOverProtocol(t *testing.T) {
 		}
 	}
 
+	host.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNoiseControlWriteWaitsForTheRequestedMode(t *testing.T) {
+	t.Setenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS", "1")
+	host, child := net.Pipe()
+	done := make(chan error, 1)
+	go func() {
+		defer child.Close()
+		done <- protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set}.Run(nil, child, child)
+	}()
+	betty := &fakeBetty{
+		t:       t,
+		encoder: json.NewEncoder(host),
+		decoder: json.NewDecoder(host),
+		storage: map[string]string{},
+		// The device reports its old mode, off, before the requested one.
+		packets: []string{"0400040009000d01000000", "0400040009000d02000000"},
+	}
+	devices := []protocol.Device{{ID: "classic", Name: "AirPods Pro", Connected: true}}
+	got := betty.request(protocol.Request{ID: "1", Method: protocol.MethodSet, DeviceID: "classic", Property: "noise_control", Value: json.RawMessage(`"anc"`), Devices: devices})
+	if property := got.Enrichments["classic"].Properties["noise_control"]; got.Error != "" || string(property.Value) != `"anc"` {
+		t.Fatalf("set=%+v", got)
+	}
 	host.Close()
 	if err := <-done; err != nil {
 		t.Fatal(err)

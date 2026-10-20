@@ -93,11 +93,21 @@ func controlProperty(host *protocol.Session, request protocol.PropertyRequest, w
 // correlated advertisement is returned instead of the error.
 func getBattery(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
 	found := classifyDevices(request.Devices)
-	keyring, _ := loadKeyring(host)
+	keyring, loadErr := loadKeyring(host)
+	// A keyring that fails to load is never saved over: the save would erase
+	// every key in it. It is still used for this request, and stays empty.
+	save := func() {
+		if loadErr == nil {
+			_ = saveKeyring(host, keyring)
+		}
+	}
+	if loadErr != nil {
+		fmt.Fprintf(os.Stderr, "bt-driver-apple-audio: not updating the unreadable keyring: %v\n", loadErr)
+	}
 	for _, device := range found.connected {
 		if keys, err := systemAppleAudioKeys(device); err == nil {
 			keyring.Upsert(keys)
-			_ = saveKeyring(host, keyring)
+			save()
 		}
 	}
 	device := request.Device
@@ -121,7 +131,7 @@ func getBattery(host *protocol.Session, request protocol.PropertyRequest) (*prot
 			keys.ModelID = found.ads[0].modelID
 		}
 		keyring.Upsert(*keys)
-		_ = saveKeyring(host, keyring)
+		save()
 	}
 	// A correlated endpoint shares its properties map with the advertisement.
 	properties := maps.Clone(enrichment.Properties)

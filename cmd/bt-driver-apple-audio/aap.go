@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -36,147 +37,174 @@ var aapNoiseControlValues = map[string]byte{
 type exactBattery = protocol.BatteryValue
 type batteryComponent = protocol.BatteryComponent
 
-func readAAP(host *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *appleAudioKeys, error) {
+// aapSession is one conversation with an Apple audio device over its AAP
+// L2CAP channel. It performs the exchange every request starts with: the
+// handshake, feature negotiation, and the request for notifications.
+type aapSession struct {
+	host      *protocol.Session
+	channelID string
+	ready     bool
+}
+
+func openAAP(host *protocol.Session, deviceID string) (*aapSession, error) {
 	channelID, err := host.OpenL2CAP(deviceID, airPodsPSM)
 	if err != nil {
-		return exactBattery{}, nil, err
+		return nil, err
 	}
-	defer host.CloseL2CAP(channelID)
-	if err := writeAAP(host, channelID, aapHandshake); err != nil {
-		return exactBattery{}, nil, err
+	session := &aapSession{host: host, channelID: channelID}
+	if err := session.write(aapHandshake); err != nil {
+		session.close()
+		return nil, err
 	}
-	notificationsRequested := false
-	keysRequested := false
-	var battery *exactBattery
-	var acquiredKeys *appleAudioKeys
-	for attempts := 0; attempts < 12; attempts++ {
-		packet, err := host.ReadL2CAP(channelID, 4096, aapReadTimeout)
+	return session, nil
+}
+
+func (s *aapSession) close() { _ = s.host.CloseL2CAP(s.channelID) }
+
+func (s *aapSession) write(packet []byte) error { return writeAAP(s.host, s.channelID, packet) }
+
+// run reads at most attempts packets. It answers the handshake itself and
+// calls onReady once, when the device accepts requests. Every other packet
+// goes to onPacket, which returns true to end the session.
+func (s *aapSession) run(attempts int, onReady func() error, onPacket func(packet []byte) (bool, error)) error {
+	becomeReady := func() error {
+		if s.ready {
+			return nil
+		}
+		s.ready = true
+		if err := s.write(aapRequestNotifications); err != nil {
+			return err
+		}
+		return onReady()
+	}
+	for range attempts {
+		packet, err := s.host.ReadL2CAP(s.channelID, 4096, aapReadTimeout)
 		if err != nil {
-			if battery != nil {
-				return *battery, nil, nil
-			}
-			return exactBattery{}, nil, err
+			return err
 		}
 		switch {
 		case startsWith(packet, aapHandshakeACK):
-			if err := writeAAP(host, channelID, aapSetSpecificFeatures); err != nil {
-				return exactBattery{}, nil, err
+			if err := s.write(aapSetSpecificFeatures); err != nil {
+				return err
 			}
 		case startsWith(packet, aapFeaturesACK):
-			if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
-				return exactBattery{}, nil, err
+			if err := becomeReady(); err != nil {
+				return err
 			}
-			notificationsRequested = true
-			if requestKeys {
-				if err := writeAAP(host, channelID, aapRequestPrivateKeys); err != nil {
-					return exactBattery{}, nil, err
-				}
-				keysRequested = true
+		default:
+			done, err := onPacket(packet)
+			if done || err != nil {
+				return err
 			}
+			// Some devices skip feature negotiation; ask anyway.
+			if err := becomeReady(); err != nil {
+				return err
+			}
+		}
+	}
+	return errAAPExhausted
+}
+
+// errAAPExhausted reports that the device sent the allowed number of packets
+// without the one a request was waiting for.
+var errAAPExhausted = errors.New("Apple audio device did not answer")
+
+// readAAP reads exact battery state and, when requestKeys is set, the
+// device's private keys. A battery reading already received is returned even
+// if the session then fails.
+func readAAP(host *protocol.Session, deviceID string, requestKeys bool) (exactBattery, *appleAudioKeys, error) {
+	session, err := openAAP(host, deviceID)
+	if err != nil {
+		return exactBattery{}, nil, err
+	}
+	defer session.close()
+	var battery *exactBattery
+	var keys *appleAudioKeys
+	keysRequested := false
+	requestKeysOnce := func() error {
+		if !requestKeys || keysRequested {
+			return nil
+		}
+		keysRequested = true
+		return session.write(aapRequestPrivateKeys)
+	}
+	err = session.run(12, requestKeysOnce, func(packet []byte) (bool, error) {
+		switch {
 		case startsWith(packet, aapBatteryHeader):
 			parsed, err := parseExactBattery(packet)
 			if err != nil {
-				return exactBattery{}, nil, err
+				return false, err
 			}
 			battery = &parsed
-			if !requestKeys {
-				return parsed, nil, nil
+			if !requestKeys || keys != nil {
+				return true, nil
 			}
-			if acquiredKeys != nil {
-				return parsed, acquiredKeys, nil
-			}
-			if !keysRequested {
-				if err := writeAAP(host, channelID, aapRequestPrivateKeys); err != nil {
-					return exactBattery{}, nil, err
-				}
-				keysRequested = true
-			}
+			return false, requestKeysOnce()
 		case startsWith(packet, aapPrivateKeysHeader):
-			keys, err := parsePrivateKeys(packet)
-			if err == nil {
-				acquiredKeys = &keys
-				if battery != nil {
-					return *battery, acquiredKeys, nil
-				}
+			if parsed, err := parsePrivateKeys(packet); err == nil {
+				keys = &parsed
 			}
-		default:
-			if !notificationsRequested {
-				if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
-					return exactBattery{}, nil, err
-				}
-				notificationsRequested = true
-			}
-			if requestKeys && !keysRequested {
-				if err := writeAAP(host, channelID, aapRequestPrivateKeys); err != nil {
-					return exactBattery{}, nil, err
-				}
-				keysRequested = true
-			}
+			return battery != nil && keys != nil, nil
 		}
-	}
+		return false, nil
+	})
 	if battery != nil {
-		return *battery, acquiredKeys, nil
+		return *battery, keys, nil
 	}
-	return exactBattery{}, nil, fmt.Errorf("Apple audio device did not report battery state")
+	if errors.Is(err, errAAPExhausted) {
+		return exactBattery{}, nil, fmt.Errorf("Apple audio device did not report battery state")
+	}
+	return exactBattery{}, nil, err
 }
 
-// readAAPNoiseControl obtains the current state from the device notification
-// stream. A write is successful only after the device reports the requested
-// state back; completion of the L2CAP write itself is not treated as success.
+// readAAPNoiseControl reads the current noise-control mode or, when
+// requested is set, writes it. A write succeeds only once the device reports
+// the requested mode back; completing the L2CAP write is not success. Reports
+// of another mode after the write are skipped, because the device may report
+// its old state before it applies the new one.
 func readAAPNoiseControl(host *protocol.Session, deviceID string, requested *string) (string, error) {
-	channelID, err := host.OpenL2CAP(deviceID, airPodsPSM)
+	session, err := openAAP(host, deviceID)
 	if err != nil {
 		return "", err
 	}
-	defer host.CloseL2CAP(channelID)
-	if err := writeAAP(host, channelID, aapHandshake); err != nil {
-		return "", err
-	}
-	notificationsRequested := false
-	controlWritten := false
-	for attempts := 0; attempts < 16; attempts++ {
-		packet, err := host.ReadL2CAP(channelID, 4096, aapReadTimeout)
-		if err != nil {
+	defer session.close()
+	var command []byte
+	if requested != nil {
+		if command, err = encodeAAPNoiseControl(*requested); err != nil {
 			return "", err
 		}
-		switch {
-		case startsWith(packet, aapHandshakeACK):
-			if err := writeAAP(host, channelID, aapSetSpecificFeatures); err != nil {
-				return "", err
-			}
-		case startsWith(packet, aapFeaturesACK):
-			if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
-				return "", err
-			}
-			notificationsRequested = true
-			if requested != nil {
-				packet, err := encodeAAPNoiseControl(*requested)
-				if err != nil {
-					return "", err
-				}
-				if err := writeAAP(host, channelID, packet); err != nil {
-					return "", err
-				}
-				controlWritten = true
-			}
-		default:
-			if mode, ok := parseAAPNoiseControl(packet); ok {
-				if requested == nil || mode == *requested {
-					return mode, nil
-				}
-				if controlWritten {
-					return "", fmt.Errorf("Apple audio device reported noise_control %q after requesting %q", mode, *requested)
-				}
-			}
-			if !notificationsRequested {
-				if err := writeAAP(host, channelID, aapRequestNotifications); err != nil {
-					return "", err
-				}
-				notificationsRequested = true
-			}
-		}
 	}
-	return "", fmt.Errorf("Apple audio device did not report noise-control state")
+	var result, lastReported string
+	writeOnce := func() error {
+		if command == nil {
+			return nil
+		}
+		packet := command
+		command = nil
+		return session.write(packet)
+	}
+	err = session.run(16, writeOnce, func(packet []byte) (bool, error) {
+		mode, ok := parseAAPNoiseControl(packet)
+		if !ok {
+			return false, nil
+		}
+		lastReported = mode
+		if requested == nil || mode == *requested {
+			result = mode
+			return true, nil
+		}
+		return false, nil
+	})
+	switch {
+	case result != "":
+		return result, nil
+	case errors.Is(err, errAAPExhausted) && requested != nil && lastReported != "":
+		return "", fmt.Errorf("Apple audio device kept reporting noise_control %q after %q was requested", lastReported, *requested)
+	case errors.Is(err, errAAPExhausted):
+		return "", fmt.Errorf("Apple audio device did not report noise-control state")
+	default:
+		return "", err
+	}
 }
 
 func encodeAAPNoiseControl(mode string) ([]byte, error) {
