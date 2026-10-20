@@ -10,10 +10,7 @@ import (
 	protocol "github.com/vladcuciureanu/betty/driver"
 )
 
-const (
-	keyringStorageKey       = "apple-audio/keyring-v1"
-	legacyKeyringStorageKey = "airpods/keyring-v1"
-)
+const keyringStorageKey = "apple-audio/keyring-v1"
 
 type appleAudioKeys struct {
 	DeviceID string `json:"device_id,omitempty"`
@@ -38,16 +35,8 @@ func (k *appleAudioKeyring) Upsert(value appleAudioKeys) {
 }
 
 func loadKeyring(session *protocol.Session) (appleAudioKeyring, error) {
-	keyring, found, err := loadStoredKeyring(session, keyringStorageKey)
-	if err != nil || found {
-		return keyring, err
-	}
-	keyring, found, err = loadStoredKeyring(session, legacyKeyringStorageKey)
-	if err != nil || !found {
-		return keyring, err
-	}
-	_ = saveKeyring(session, keyring)
-	return keyring, nil
+	keyring, _, err := loadStoredKeyring(session, keyringStorageKey)
+	return keyring, err
 }
 
 func loadStoredKeyring(session *protocol.Session, key string) (appleAudioKeyring, bool, error) {

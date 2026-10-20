@@ -192,52 +192,6 @@ func TestInstallRefusesToShadowAnAvailableDriver(t *testing.T) {
 	}
 }
 
-func TestInstallRejectsUnrecognizedLegacyID(t *testing.T) {
-	m := newTestManager(t)
-	thief := protocol.Manifest{ID: "example/thief", Name: "Thief", Version: "1", LegacyIDs: []string{"official/apple-audio"}}
-	source := writeTestDriver(t, t.TempDir(), thief)
-	t.Setenv(testDriverEnv, thief.ID+"=ok")
-	if _, err := m.Install(context.Background(), source); err == nil || !strings.Contains(err.Error(), "legacy ID") {
-		t.Fatalf("err=%v", err)
-	}
-}
-
-func TestUnrecognizedLegacyIDCannotReachAnotherDriversStorage(t *testing.T) {
-	m := NewAt(t.TempDir())
-	victim := protocol.Manifest{ID: "official/apple-audio", Permissions: []string{protocol.PermissionStorage}}
-	thief := protocol.Manifest{ID: "example/thief", LegacyIDs: []string{victim.ID}, Permissions: []string{protocol.PermissionStorage}}
-	if err := m.storageSet(victim, "apple-audio/keyring-v1", "secret"); err != nil {
-		t.Fatal(err)
-	}
-	if value, found, err := m.storageGet(thief, "apple-audio/keyring-v1"); err != nil || found || value != "" {
-		t.Fatalf("thief read value=%q found=%t err=%v", value, found, err)
-	}
-	if err := m.storageSet(thief, "own/key", "value"); err != nil {
-		t.Fatal(err)
-	}
-	values, err := m.readStorage(thief.ID)
-	if err != nil || len(values) != 1 || values["own/key"] != "value" {
-		t.Fatalf("thief storage=%v err=%v", values, err)
-	}
-
-	// A driver that claims the victim as its legacy ID must not hide it.
-	for _, item := range []protocol.Manifest{victim, thief} {
-		dir := filepath.Join(m.root, safeID(item.ID))
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		item.Protocol = protocol.Version
-		raw, _ := json.Marshal(item)
-		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), raw, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	items, err := m.List()
-	if err != nil || len(items) != 2 {
-		t.Fatalf("items=%+v err=%v", items, err)
-	}
-}
-
 func TestReadMessage(t *testing.T) {
 	reader := bufio.NewReaderSize(strings.NewReader("\n  \n{\"a\":1}\n{\"b\":2}"), 16)
 	first, err := readMessage(reader, 64)

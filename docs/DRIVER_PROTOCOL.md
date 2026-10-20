@@ -6,6 +6,11 @@ and writes their properties. Betty starts it as a child process and talks to it
 over standard input and output, so you can write a driver in any language that
 can read and write JSON.
 
+> [!WARNING]
+> Betty is pre-1.0. This protocol may change incompatibly in any release before
+> 1.0, without a version bump or a migration path. Expect to rebuild drivers
+> against each release until then.
+
 This document is the normative specification. The key words MUST, MUST NOT,
 SHOULD, and MAY are used as in RFC 2119. Go drivers can use the SDK in
 [`driver`](../driver) (`driver.Serve`), which implements everything below.
@@ -24,7 +29,7 @@ SHOULD, and MAY are used as in RFC 2119. Go drivers can use the SDK in
 10. [How Betty uses driver results](#10-how-betty-uses-driver-results)
 11. [Installation and discovery](#11-installation-and-discovery)
 12. [Security model](#12-security-model)
-13. [Compatibility rules](#13-compatibility-rules)
+13. [Stability](#13-stability)
 14. [Example transcript](#14-example-transcript)
 15. [Minimal driver in Python](#15-minimal-driver-in-python)
 
@@ -91,17 +96,12 @@ drivers can use any file name; Betty identifies them by manifest ID.
 | `name` | string | yes | Human-readable name. |
 | `version` | string | yes | Driver version. Semantic versioning is RECOMMENDED. |
 | `permissions` | array of strings | no | Host capabilities the driver may use ([section 8](#8-host-calls)). |
-| `legacy_ids` | array of strings | no | Earlier IDs of this driver. See below. |
 
 The output of `--manifest` MUST NOT exceed 64 KiB.
 
-`legacy_ids` is honored only for renames that Betty itself recognizes, such as
-`official/airpods` becoming `official/apple-audio`. For those, the earlier
-driver is hidden while this one is installed, and the earlier driver's stored
-state is read as a fallback. Because a manifest is self-declared, Betty rejects
-an install that lists any other legacy ID: otherwise any driver could claim
-another driver's private storage. To rename a third-party driver, users move
-its state with `bt driver export-state` and `bt driver import-state`.
+A driver's stored state belongs to its ID. Renaming a driver starts it with
+empty state; users can carry state over with `bt driver export-state` and
+`bt driver import-state`.
 
 The `official/` publisher is used by drivers shipped by the Betty project. Betty
 does not verify publishers, but it refuses to install a driver whose ID is
@@ -445,8 +445,7 @@ operating system directly. Install only drivers you trust.
 Within those limits, Betty keeps one driver from interfering with another or
 with Betty:
 
-- each driver's stored state is private to its ID, and only legacy IDs Betty
-  recognizes can read an earlier driver's state;
+- each driver's stored state is private to its ID;
 - an install cannot shadow a driver that is already provided;
 - deadlines, message-size limits, and a kill on every exit path stop a broken
   driver from hanging Betty, exhausting its memory, or outliving the command.
@@ -454,22 +453,22 @@ with Betty:
 Drivers SHOULD treat device data as untrusted input, bound every buffer and
 loop, and never log keys, PINs, or exported state.
 
-## 13. Compatibility rules
+## 13. Stability
 
-Within protocol version 1:
+Until Betty 1.0, any part of this protocol may change in an incompatible way:
+fields, methods, host calls, error codes, and limits. The `protocol` number may
+stay at `1` across such changes. Betty does not keep migration paths for
+earlier driver IDs or stored state before 1.0.
 
-- new optional fields, methods, purposes, host calls, permissions, error codes,
-  capability types, and property names may be added;
-- existing fields keep their meaning and type;
-- both sides MUST ignore unknown fields;
-- a driver that receives an unknown `method` MUST respond with an
-  `unsupported` error and keep running;
-- a driver that receives a request whose `protocol` is not `1` MUST respond
-  with an `unsupported` error.
+Drivers SHOULD still be written defensively, because these rules will become
+guarantees at 1.0:
 
-A change that breaks any of these rules requires protocol version 2. Betty will
-then refuse to install drivers whose manifest declares a version it does not
-speak.
+- ignore unknown fields;
+- answer an unknown `method` with an `unsupported` error and keep running;
+- answer a request whose `protocol` is not `1` with an `unsupported` error.
+
+At 1.0, protocol version 1 freezes. After that, only additive changes are made
+within a version, and anything else requires protocol version 2.
 
 ## 14. Example transcript
 

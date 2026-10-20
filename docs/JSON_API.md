@@ -1,5 +1,10 @@
 # Betty JSON API
 
+> [!WARNING]
+> Betty is pre-1.0. The JSON API may change incompatibly in any release before
+> 1.0, and `schema_version` may stay at `1` across those changes. Schema version
+> 1 freezes at 1.0.
+
 Betty's JSON output is a process API for any local client. It is not tailored
 to a particular UI. Every response uses a versioned envelope:
 

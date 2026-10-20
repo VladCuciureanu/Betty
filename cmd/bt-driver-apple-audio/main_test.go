@@ -94,12 +94,6 @@ func TestInspectIdentifiesSavedAppleAudioWithoutConnecting(t *testing.T) {
 	}
 }
 
-func TestAppleAudioManifestMigratesAirPodsDriver(t *testing.T) {
-	if manifest.ID != "official/apple-audio" || len(manifest.LegacyIDs) != 1 || manifest.LegacyIDs[0] != "official/airpods" {
-		t.Fatalf("manifest=%#v", manifest)
-	}
-}
-
 func TestAppleAudioCapabilitiesUseGenericPropertyTypes(t *testing.T) {
 	capabilities := appleAudioCapabilities(appleAudioModels[0x1420])
 	if capabilities["battery"].Kind != "battery" || capabilities["noise_control"].Kind != "enum" {

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"slices"
 	"sort"
 	"time"
 
@@ -273,11 +272,6 @@ func (m *Manager) List() ([]protocol.Manifest, error) {
 		}
 	}
 	out := make([]protocol.Manifest, 0, len(byID))
-	for _, item := range byID {
-		for _, legacyID := range honoredLegacyIDs(item) {
-			delete(byID, legacyID)
-		}
-	}
 	for _, item := range byID {
 		out = append(out, item)
 	}
@@ -560,17 +554,6 @@ func (m *Manager) storageGet(driver protocol.Manifest, key string) (string, bool
 		return "", false, err
 	}
 	value, ok := values[key]
-	if !ok {
-		for _, legacyID := range honoredLegacyIDs(driver) {
-			legacyValues, legacyErr := m.readStorage(legacyID)
-			if legacyErr != nil {
-				return "", false, legacyErr
-			}
-			if value, ok = legacyValues[key]; ok {
-				break
-			}
-		}
-	}
 	return value, ok, nil
 }
 func (m *Manager) storageSet(driver protocol.Manifest, key, value string) error {
@@ -583,18 +566,6 @@ func (m *Manager) storageSet(driver protocol.Manifest, key, value string) error 
 	values, err := m.readStorage(driver.ID)
 	if err != nil {
 		return err
-	}
-	if len(values) == 0 {
-		for _, legacyID := range honoredLegacyIDs(driver) {
-			legacyValues, legacyErr := m.readStorage(legacyID)
-			if legacyErr != nil {
-				return legacyErr
-			}
-			if len(legacyValues) > 0 {
-				values = legacyValues
-				break
-			}
-		}
 	}
 	values[key] = value
 	return m.writeStorage(driver.ID, values)
@@ -654,34 +625,9 @@ func validateManifest(m protocol.Manifest) error {
 	if !protocol.ValidID(m.ID) {
 		return domain.NewError(domain.CodeUsage, "invalid driver ID")
 	}
-	for _, legacyID := range m.LegacyIDs {
-		if !protocol.ValidID(legacyID) || legacyID == m.ID {
-			return domain.NewError(domain.CodeUsage, "invalid legacy driver ID")
-		}
-		if !slices.Contains(knownRenames[m.ID], legacyID) {
-			return domain.NewError(domain.CodeUsage, "driver %s declares legacy ID %s, which Betty does not recognize as an earlier name of this driver", m.ID, legacyID)
-		}
-	}
 	return nil
 }
 
-// knownRenames lists the earlier IDs Betty accepts for each driver. A
-// manifest's legacy_ids is self-declared, so honoring arbitrary entries would
-// let any driver read another driver's private storage and hide that driver.
-var knownRenames = map[string][]string{
-	"official/apple-audio": {"official/airpods"},
-}
-
-// honoredLegacyIDs returns the legacy IDs of item that Betty recognizes.
-func honoredLegacyIDs(item protocol.Manifest) []string {
-	var honored []string
-	for _, legacyID := range item.LegacyIDs {
-		if legacyID != item.ID && slices.Contains(knownRenames[item.ID], legacyID) {
-			honored = append(honored, legacyID)
-		}
-	}
-	return honored
-}
 func safeID(id string) string { return base64.RawURLEncoding.EncodeToString([]byte(id)) }
 func executableName() string {
 	if runtime.GOOS == "windows" {

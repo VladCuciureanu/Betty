@@ -129,26 +129,6 @@ func TestHostPermissionsAndNamespacedStorage(t *testing.T) {
 	}
 }
 
-func TestDriverStorageMigratesFromLegacyID(t *testing.T) {
-	m := NewAt(t.TempDir())
-	legacy := protocol.Manifest{ID: "official/airpods"}
-	current := protocol.Manifest{ID: "official/apple-audio", LegacyIDs: []string{legacy.ID}}
-	if err := m.storageSet(legacy, "airpods/keyring-v1", "secret"); err != nil {
-		t.Fatal(err)
-	}
-	value, found, err := m.storageGet(current, "airpods/keyring-v1")
-	if err != nil || !found || value != "secret" {
-		t.Fatalf("value=%q found=%t err=%v", value, found, err)
-	}
-	if err := m.storageSet(current, "apple-audio/keyring-v1", "new"); err != nil {
-		t.Fatal(err)
-	}
-	values, err := m.readStorage(current.ID)
-	if err != nil || values["airpods/keyring-v1"] != "secret" || values["apple-audio/keyring-v1"] != "new" {
-		t.Fatalf("values=%#v err=%v", values, err)
-	}
-}
-
 func TestExportImportDriverState(t *testing.T) {
 	root := t.TempDir()
 	m := NewAt(root)
@@ -161,7 +141,7 @@ func TestExportImportDriverState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.storageSet(protocol.Manifest{ID: id}, "airpods/keyring-v1", "secret"); err != nil {
+	if err := m.storageSet(protocol.Manifest{ID: id}, "keys/example", "secret"); err != nil {
 		t.Fatal(err)
 	}
 	export := filepath.Join(t.TempDir(), "state.json")
@@ -172,13 +152,13 @@ func TestExportImportDriverState(t *testing.T) {
 	if info, _ := os.Stat(export); runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode=%o", info.Mode().Perm())
 	}
-	if err := m.storageSet(protocol.Manifest{ID: id}, "airpods/keyring-v1", "changed"); err != nil {
+	if err := m.storageSet(protocol.Manifest{ID: id}, "keys/example", "changed"); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.ImportState(id, export); err != nil {
 		t.Fatal(err)
 	}
-	value, found, err := m.storageGet(protocol.Manifest{ID: id}, "airpods/keyring-v1")
+	value, found, err := m.storageGet(protocol.Manifest{ID: id}, "keys/example")
 	if err != nil || !found || value != "secret" {
 		t.Fatalf("value=%q found=%t err=%v", value, found, err)
 	}
@@ -187,7 +167,7 @@ func TestExportImportDriverState(t *testing.T) {
 func TestBundledDriversAreDiscoveredButNotRemoved(t *testing.T) {
 	m := NewAt(t.TempDir())
 	m.bundled = t.TempDir()
-	id := "official/airpods"
+	id := "official/bundled-test"
 	dir := filepath.Join(m.bundled, safeID(id))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -211,7 +191,7 @@ func TestBundledDriversAreDiscoveredButNotRemoved(t *testing.T) {
 func TestSystemBundledDriverIsDiscoveredAndExecutable(t *testing.T) {
 	m := NewAt(t.TempDir())
 	m.systemBundled = t.TempDir()
-	id := "official/airpods"
+	id := "official/bundled-test"
 	dir := filepath.Join(m.systemBundled, safeID(id))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

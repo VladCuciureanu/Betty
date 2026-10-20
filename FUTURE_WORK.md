@@ -55,7 +55,7 @@ The existing `bt <device>` and `bt <device> battery` forms may remain as human-f
 - [x] Guarantee that `--json` success output is JSON-only on stdout; prompts, diagnostics, and JSON failures use stderr.
 - [x] Define schema-version-1 envelopes for inspect, get, set, watch events, and errors.
 - [x] Add structured errors for interaction required, disconnected devices, missing drivers, unsupported features, permissions, unavailable adapters, authentication, and timeout.
-- Ensure unknown JSON fields are safe for clients to ignore and existing fields do not change meaning within a schema version.
+- At 1.0, freeze schema version 1: from then on, unknown JSON fields are safe for clients to ignore and existing fields do not change meaning within a schema version. Until then the JSON API and driver protocol may change incompatibly.
 - Test cancellation and timeout behavior at every process and Bluetooth resource boundary.
 
 ### 3. Cross-platform generic hardware behavior
@@ -116,7 +116,7 @@ Document supported public-API limitations instead of working around them with pr
 
 - Build and install Debian packages on native Ubuntu and Debian runners.
 - Verify that `betty` contains no vendor protocol implementation.
-- Test `betty-apple-audio` replacement of the earlier `betty-airpods` package, version matching, upgrades, and clean uninstall.
+- Test `betty-apple-audio` version matching, upgrades, and clean uninstall.
 - Test `betty-sony` installation and clean uninstall.
 - Preserve per-user driver state during package removal and document explicit state deletion.
 

@@ -13,7 +13,7 @@ import (
 
 var version = "dev"
 
-var manifest = protocol.Manifest{Protocol: protocol.Version, ID: "official/apple-audio", LegacyIDs: []string{"official/airpods"}, Name: "Apple Audio", Version: version, Permissions: []string{"device-metadata", "advertisements", "l2cap", "driver-storage"}}
+var manifest = protocol.Manifest{Protocol: protocol.Version, ID: "official/apple-audio", Name: "Apple Audio", Version: version, Permissions: []string{"device-metadata", "advertisements", "l2cap", "driver-storage"}}
 
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--manifest" {
