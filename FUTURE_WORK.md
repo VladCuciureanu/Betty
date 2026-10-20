@@ -150,7 +150,7 @@ Third-party drivers are a first-class extension point. The protocol in [docs/DRI
 - [x] Port the Apple Audio driver to the SDK.
 - [x] Add GATT host calls (discover, read, write, subscribe) so BLE-only devices, the most common third-party case, can have drivers. This is an additive protocol 1 change.
 - Add manifest match hints (company IDs, service UUIDs, name prefixes) so Betty starts only relevant drivers instead of every driver for every command.
-- Ship a conformance checker that runs a driver against scripted requests and a fake host, for example `bt driver check <executable>`.
+- [x] Ship a conformance checker that runs a driver against scripted requests and a fake host: `bt driver check <executable>`.
 - Surface driver stderr and skipped-inspect failures under `--verbose`.
 - Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
 - Bound message sizes and test malformed, oversized, crashing, and hanging drivers.

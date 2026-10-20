@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vladcuciureanu/betty/internal/domain"
+	"github.com/vladcuciureanu/betty/internal/driver"
 )
 
 type versionResult struct {
@@ -242,6 +243,25 @@ func (r driverResult) WriteHuman(w io.Writer) error {
 	return err
 }
 
+type checkResults []driver.CheckResult
+
+func (r checkResults) WriteHuman(w io.Writer) error {
+	for _, result := range r {
+		mark := "ok  "
+		if !result.Passed {
+			mark = "FAIL"
+		}
+		line := mark + " " + result.Name
+		if result.Detail != "" {
+			line += ": " + result.Detail
+		}
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *application) driverCommand(ctx context.Context, args []string) error {
 	if a.drivers == nil {
 		return domain.NewError(domain.CodeUnsupported, "optional drivers are unavailable")
@@ -255,11 +275,12 @@ func (a *application) driverCommand(ctx context.Context, args []string) error {
 		"remove":       "driver remove <id>",
 		"export-state": "driver export-state <id> <file>",
 		"import-state": "driver import-state <id> <file>",
+		"check":        "driver check <executable>",
 	}
-	wantArgs := map[string]int{"list": 0, "install": 1, "remove": 1, "export-state": 2, "import-state": 2}
+	wantArgs := map[string]int{"list": 0, "install": 1, "remove": 1, "export-state": 2, "import-state": 2, "check": 1}
 	want, ok := wantArgs[args[0]]
 	if !ok {
-		return domain.NewError(domain.CodeUsage, "unknown driver operation %q; use list, install, remove, export-state, or import-state", args[0])
+		return domain.NewError(domain.CodeUsage, "unknown driver operation %q; use list, install, remove, export-state, import-state, or check", args[0])
 	}
 	if len(args)-1 != want {
 		return domain.NewError(domain.CodeUsage, "usage: bt %s", usage[args[0]])
@@ -277,6 +298,24 @@ func (a *application) driverCommand(ctx context.Context, args []string) error {
 			return err
 		}
 		return a.render.Data(manifest)
+	case "check":
+		results, err := driver.Check(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		if err := a.render.Data(checkResults(results)); err != nil {
+			return err
+		}
+		failed := 0
+		for _, result := range results {
+			if !result.Passed {
+				failed++
+			}
+		}
+		if failed > 0 {
+			return domain.NewError(domain.CodeUnsupported, "the driver failed %d of %d conformance checks", failed, len(results))
+		}
+		return nil
 	case "remove":
 		if err := a.drivers.Remove(args[1]); err != nil {
 			return err
