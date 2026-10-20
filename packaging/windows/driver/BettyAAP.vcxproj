@@ -7,9 +7,23 @@
     <ProjectGuid>{56C9CA1F-E592-42E4-87D1-507AB7449A91}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>BettyAAP</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <!-- Must match the platform version of the SDK and WDK packages below. -->
+    <WindowsTargetPlatformVersion>10.0.28000.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <!--
+    The WDK comes from NuGet, but the build agent's installed driver toolset
+    can supply older WDK targets that look for tools in the wrong folders of
+    the NuGet package, so stampinf.exe is not found. Point each WDK tool at
+    its folder in the package. WDKContentRoot has no trailing separator in
+    NuGet builds.
+  -->
+  <PropertyGroup Condition="'$(WDK_NuGet)' == 'true'">
+    <WDKBinRoot>$(WDKContentRoot)\bin\$(WindowsTargetPlatformVersion)</WDKBinRoot>
+    <InfToolPath>$(WDKBinRoot)\x64\</InfToolPath>
+    <DrvCatToolPath>$(WDKBinRoot)\x64\</DrvCatToolPath>
+    <Inf2CatToolPath>$(WDKBinRoot)\x86\</Inf2CatToolPath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Driver</ConfigurationType>
     <DriverType>KMDF</DriverType>
@@ -18,6 +32,10 @@
     <TargetVersion>Windows10</TargetVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup Condition="'$(WDK_NuGet)' == 'true'">
+    <!-- infverif.exe lives in the package's tools folder. -->
+    <ExecutablePath>$(WDKContentRoot)\tools\$(WindowsTargetPlatformVersion)\x64;$(ExecutablePath)</ExecutablePath>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetName>BettyAAP</TargetName>
     <OutDir>$(SolutionDir)artifacts\driver\</OutDir>
@@ -43,6 +61,9 @@
     <Inf Include="BettyAAP.inf" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The SDK and WDK packages must share one version. -->
+    <PackageReference Include="Microsoft.Windows.SDK.CPP" Version="10.0.28000.2526" />
+    <PackageReference Include="Microsoft.Windows.SDK.CPP.x64" Version="10.0.28000.2526" />
     <PackageReference Include="Microsoft.Windows.WDK.x64" Version="10.0.28000.2526" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

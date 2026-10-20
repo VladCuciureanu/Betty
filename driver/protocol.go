@@ -8,7 +8,6 @@ const Version = 1
 type Manifest struct {
 	Protocol    int      `json:"protocol"`
 	ID          string   `json:"id"`
-	LegacyIDs   []string `json:"legacy_ids,omitempty"`
 	Name        string   `json:"name"`
 	Version     string   `json:"version"`
 	Permissions []string `json:"permissions,omitempty"`

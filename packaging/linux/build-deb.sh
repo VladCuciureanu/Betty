@@ -65,9 +65,6 @@ Priority: optional
 Architecture: $architecture
 Depends: betty (= $version)
 Maintainer: Betty contributors
-Replaces: betty-airpods
-Conflicts: betty-airpods
-Provides: betty-airpods
 Description: Optional Apple and Beats audio support for Betty
  Adds passive battery decoding and Classic L2CAP transport for exact
  component battery readings. The base Betty package contains no Apple audio code.

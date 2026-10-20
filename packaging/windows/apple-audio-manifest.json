@@ -1,7 +1,6 @@
 {
   "protocol": 1,
   "id": "official/apple-audio",
-  "legacy_ids": ["official/airpods"],
   "name": "Apple Audio",
   "version": "bundled",
   "permissions": [

@@ -18,115 +18,77 @@ var manifest = protocol.Manifest{
 	Name:     "Sony Headphones",
 	Version:  version,
 	Permissions: []string{
-		"device-metadata",
-		"rfcomm",
+		protocol.PermissionDeviceMetadata,
+		protocol.PermissionRFCOMM,
 	},
 }
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--manifest" {
-		_ = json.NewEncoder(os.Stdout).Encode(manifest)
-		return
-	}
-	session := protocol.NewSession(os.Stdin, os.Stdout)
-	request, err := session.Receive()
-	if err != nil {
-		_ = session.Respond(protocol.Response{Error: err.Error()})
-		return
-	}
-	if request.Protocol != protocol.Version {
-		_ = session.Respond(protocol.Response{ID: request.ID, Error: "unsupported driver protocol"})
-		return
-	}
-	if request.Method != "inspect" && request.Method != "get" && request.Method != "set" {
-		_ = session.Respond(protocol.Response{ID: request.ID, Error: "unsupported method"})
-		return
-	}
-	purpose := request.Purpose
-	if request.Method == "get" || request.Method == "set" {
-		if request.Property == "battery" && request.Method == "get" {
-			response := getBattery(session, request.Devices, request.DeviceID)
-			response.ID = request.ID
-			_ = session.Respond(response)
-			return
+	protocol.Serve(protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set})
+}
+
+func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
+	switch request.Property {
+	case "battery":
+		return getBattery(host, request.Device)
+	case "noise_control", "ambient_level":
+		if sonyControlValidationEnabled() {
+			return controlProperty(host, request, false)
 		}
-		if !sonyControlValidationEnabled() || (request.Property != "noise_control" && request.Property != "ambient_level") {
-			_ = session.Respond(protocol.Response{ID: request.ID, Enrichments: map[string]protocol.Enrichment{}})
-			return
-		}
-		response := controlProperty(session, request)
-		response.ID = request.ID
-		_ = session.Respond(response)
-		return
 	}
-	response := inspect(session, request.Devices, purpose)
-	response.ID = request.ID
-	_ = session.Respond(response)
+	return nil, nil
+}
+
+func set(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
+	switch request.Property {
+	case "noise_control", "ambient_level":
+		if sonyControlValidationEnabled() {
+			return controlProperty(host, request, true)
+		}
+	}
+	return nil, nil
 }
 
 func sonyControlValidationEnabled() bool {
 	return os.Getenv("BETTY_VALIDATE_SONY_CONTROLS") == "1"
 }
 
-func controlProperty(host *protocol.Session, request protocol.Request) protocol.Response {
-	response := protocol.Response{Protocol: protocol.Version, Enrichments: map[string]protocol.Enrichment{}}
-	for _, device := range request.Devices {
-		if device.ID != request.DeviceID {
-			continue
-		}
-		model, protocolVersion, ok := identify(device)
-		if !ok {
-			return response
-		}
-		layout, supported := sonyNoiseLayoutForModel(model)
-		if protocolVersion != protocolV2 || !supported {
-			response.Error = "Sony noise control is not validated for this model and protocol"
-			response.ErrorCode = "unsupported"
-			return response
-		}
-		if !device.Connected {
-			response.Error = "Sony noise control requires a connected device"
-			response.ErrorCode = "device_disconnected"
-			return response
-		}
-		session, err := openSonySession(host, device.ID, protocolVersion)
-		if err != nil {
-			return sonyControlError(response, err)
-		}
-		defer session.close()
-		if err := initializeSonySession(session); err != nil {
-			return sonyControlError(response, err)
-		}
-		state, err := readSonyNoiseStateV2(session, layout)
-		if err != nil {
-			return sonyControlError(response, err)
-		}
-		if request.Method == "set" {
-			if err := applySonyControlInput(&state, request.Property, request.Value, layout); err != nil {
-				response.Error = err.Error()
-				response.ErrorCode = "usage"
-				return response
-			}
-			state, err = writeAndVerifySonyNoiseStateV2(session, state, layout)
-			if err != nil {
-				return sonyControlError(response, err)
-			}
-		}
-		response.Enrichments[device.ID] = sonyControlEnrichment(device, model, protocolVersion, state)
-		return response
+func controlProperty(host *protocol.Session, request protocol.PropertyRequest, write bool) (*protocol.Enrichment, error) {
+	device := request.Device
+	model, protocolVersion, ok := identify(device)
+	if !ok {
+		return nil, nil
 	}
-	return response
-}
-
-func sonyControlError(response protocol.Response, err error) protocol.Response {
-	response.Error = err.Error()
-	response.ErrorCode = "bluetooth_unavailable"
-	var remote *protocol.RemoteError
-	if errors.As(err, &remote) && remote.Code != "" {
-		response.ErrorCode = remote.Code
-		response.Details = remote.Details
+	layout, supported := sonyNoiseLayoutForModel(model)
+	if protocolVersion != protocolV2 || !supported {
+		return nil, protocol.Errorf(protocol.CodeUnsupported, "Sony noise control is not validated for this model and protocol")
 	}
-	return response
+	if !device.Connected {
+		return nil, protocol.Errorf(protocol.CodeDeviceDisconnected, "Sony noise control requires a connected device")
+	}
+	session, err := openSonySession(host, device.ID, protocolVersion)
+	if err != nil {
+		return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+	}
+	defer session.close()
+	if err := initializeSonySession(session); err != nil {
+		return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+	}
+	state, err := readSonyNoiseStateV2(session, layout)
+	if err != nil {
+		return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+	}
+	if write {
+		if err := applySonyControlInput(&state, request.Property, request.Value, layout); err != nil {
+			return nil, protocol.Errorf(protocol.CodeUsage, "%v", err)
+		}
+		state, err = writeAndVerifySonyNoiseStateV2(session, state, layout)
+		if err != nil {
+			return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+		}
+	}
+	enrichment := sonyControlEnrichment(device, model, protocolVersion, state)
+	return &enrichment, nil
 }
 
 func applySonyControlInput(state *sonyNoiseState, property string, raw json.RawMessage, layout sonyNoiseLayout) error {
@@ -171,71 +133,51 @@ func sonyControlEnrichment(device protocol.Device, model string, version sonyPro
 	}
 	capabilities := sonyCapabilitiesFor(model, version)
 	return protocol.Enrichment{
-		Identification: &protocol.Identification{Vendor: "Sony", Family: "Headphones", Model: model, Confidence: identificationConfidence(device)},
+		Identification: sonyIdentification(device, model),
 		Properties:     properties,
 		Capabilities:   capabilities,
 	}
 }
 
-func getBattery(session *protocol.Session, devices []protocol.Device, deviceID string) protocol.Response {
-	response := protocol.Response{Protocol: protocol.Version, Enrichments: map[string]protocol.Enrichment{}}
-	for _, device := range devices {
-		if device.ID != deviceID {
-			continue
-		}
-		model, protocolVersion, ok := identify(device)
-		if !ok {
-			return response
-		}
-		if !device.Connected {
-			response.Error = "Sony battery requires a connected device"
-			response.ErrorCode = "device_disconnected"
-			return response
-		}
-		battery, err := readSonyBattery(session, device.ID, protocolVersion)
-		if err != nil {
-			response.Error = err.Error()
-			response.ErrorCode = "bluetooth_unavailable"
-			var remote *protocol.RemoteError
-			if errors.As(err, &remote) && remote.Code != "" {
-				response.ErrorCode = remote.Code
-				response.Details = remote.Details
-			}
-			return response
-		}
-		raw, _ := json.Marshal(battery)
-		response.Enrichments[device.ID] = protocol.Enrichment{
-			Identification: &protocol.Identification{Vendor: "Sony", Family: "Headphones", Model: model, Confidence: identificationConfidence(device)},
-			Capabilities:   sonyCapabilities(protocolVersion),
-			Properties:     map[string]protocol.Property{"battery": {Value: raw, Unit: "%", Display: battery.display()}},
-		}
-		return response
+func getBattery(host *protocol.Session, device protocol.Device) (*protocol.Enrichment, error) {
+	model, protocolVersion, ok := identify(device)
+	if !ok {
+		return nil, nil
 	}
-	return response
+	if !device.Connected {
+		return nil, protocol.Errorf(protocol.CodeDeviceDisconnected, "Sony battery requires a connected device")
+	}
+	battery, err := readSonyBattery(host, device.ID, protocolVersion)
+	if err != nil {
+		return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+	}
+	raw, _ := json.Marshal(battery)
+	return &protocol.Enrichment{
+		Identification: sonyIdentification(device, model),
+		Capabilities:   sonyCapabilities(protocolVersion),
+		Properties:     map[string]protocol.Property{"battery": {Value: raw, Unit: "%", Display: battery.display()}},
+	}, nil
 }
 
-func inspect(session *protocol.Session, devices []protocol.Device, purpose string) protocol.Response {
-	response := protocol.Response{Protocol: protocol.Version, Enrichments: map[string]protocol.Enrichment{}}
-	for _, device := range devices {
+// inspect identifies Sony devices without opening a connection; battery and
+// controls are read on demand through get.
+func inspect(_ *protocol.Session, request protocol.InspectRequest) (map[string]protocol.Enrichment, error) {
+	enrichments := map[string]protocol.Enrichment{}
+	for _, device := range request.Devices {
 		model, protocolVersion, ok := identify(device)
 		if !ok {
 			continue
 		}
-		enrichment := protocol.Enrichment{
-			Identification: &protocol.Identification{Vendor: "Sony", Family: "Headphones", Model: model, Confidence: identificationConfidence(device)},
+		enrichments[device.ID] = protocol.Enrichment{
+			Identification: sonyIdentification(device, model),
 			Capabilities:   sonyCapabilitiesFor(model, protocolVersion),
 		}
-		if purpose == "battery" && device.Connected {
-			if battery, err := readSonyBattery(session, device.ID, protocolVersion); err == nil {
-				raw, _ := json.Marshal(battery)
-				enrichment.Properties = map[string]protocol.Property{
-					"battery": {Value: raw, Unit: "%", Display: battery.display()},
-				}
-			}
-		}
-		response.Enrichments[device.ID] = enrichment
 	}
-	return response
+	return enrichments, nil
+}
+
+func sonyIdentification(device protocol.Device, model string) *protocol.Identification {
+	return &protocol.Identification{Vendor: "Sony", Family: "Headphones", Model: model, Confidence: identificationConfidence(device)}
 }
 
 func identify(device protocol.Device) (string, sonyProtocol, bool) {
@@ -269,10 +211,10 @@ func identificationConfidence(device protocol.Device) string {
 	for _, service := range device.Services {
 		normalized := normalizeUUID(service)
 		if normalized == sonyServiceV1 || normalized == sonyServiceV2 {
-			return "protocol"
+			return protocol.ConfidenceProtocol
 		}
 	}
-	return "name"
+	return protocol.ConfidenceName
 }
 
 func normalizeUUID(value string) string {
@@ -294,14 +236,14 @@ func sonyCapabilities(protocolVersion sonyProtocol) map[string]protocol.Capabili
 	reason := "Sony control messages are not enabled until current-state reads and hardware-verified writes are implemented"
 	minimum, maximum, step := 1.0, 20.0, 1.0
 	capabilities := map[string]protocol.Capability{
-		"battery":       {Status: "available", Kind: "battery", Readable: true},
-		"noise_control": {Status: "planned", Kind: "enum", Readable: true, Writable: true, Values: []string{"off", "anc", "ambient"}, Reason: reason},
-		"ambient_level": {Status: "planned", Kind: "integer", Readable: true, Writable: true, Minimum: &minimum, Maximum: &maximum, Step: &step, Reason: reason},
-		"equalizer":     {Status: "planned", Kind: "enum", Readable: true, Writable: true, Reason: reason},
+		"battery":       {Status: protocol.StatusAvailable, Kind: protocol.KindBattery, Readable: true},
+		"noise_control": {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: []string{"off", "anc", "ambient"}, Reason: reason},
+		"ambient_level": {Status: protocol.StatusPlanned, Kind: protocol.KindInteger, Readable: true, Writable: true, Minimum: &minimum, Maximum: &maximum, Step: &step, Reason: reason},
+		"equalizer":     {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Reason: reason},
 	}
 	if protocolVersion == protocolV2 || protocolVersion == protocolUnknown {
-		capabilities["dsee"] = protocol.Capability{Status: "planned", Kind: "boolean", Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
-		capabilities["sony.speak_to_chat"] = protocol.Capability{Status: "planned", Kind: "boolean", Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
+		capabilities["dsee"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindBoolean, Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
+		capabilities["sony.speak_to_chat"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindBoolean, Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
 	}
 	return capabilities
 }
@@ -313,11 +255,11 @@ func sonyCapabilitiesFor(model string, protocolVersion sonyProtocol) map[string]
 		return capabilities
 	}
 	noise := capabilities["noise_control"]
-	noise.Status, noise.Reason = "available", ""
+	noise.Status, noise.Reason = protocol.StatusAvailable, ""
 	capabilities["noise_control"] = noise
 	if layout == sonyNoiseStandard {
 		ambient := capabilities["ambient_level"]
-		ambient.Status, ambient.Reason = "available", ""
+		ambient.Status, ambient.Reason = protocol.StatusAvailable, ""
 		capabilities["ambient_level"] = ambient
 	}
 	return capabilities

@@ -74,8 +74,7 @@ validated. Release evidence is recorded separately in
 
 ## Driver permissions and state
 
-Manifest ID: `official/apple-audio`  
-Legacy ID: `official/airpods`
+Manifest ID: `official/apple-audio`
 
 Declared host permissions:
 

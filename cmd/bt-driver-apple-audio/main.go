@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -13,113 +14,124 @@ import (
 
 var version = "dev"
 
-var manifest = protocol.Manifest{Protocol: protocol.Version, ID: "official/apple-audio", LegacyIDs: []string{"official/airpods"}, Name: "Apple Audio", Version: version, Permissions: []string{"device-metadata", "advertisements", "l2cap", "driver-storage"}}
+var manifest = protocol.Manifest{
+	Protocol: protocol.Version,
+	ID:       "official/apple-audio",
+	Name:     "Apple Audio",
+	Version:  version,
+	Permissions: []string{
+		protocol.PermissionDeviceMetadata,
+		"advertisements",
+		protocol.PermissionL2CAP,
+		protocol.PermissionStorage,
+	},
+}
 
 func main() {
-	if len(os.Args) == 2 && os.Args[1] == "--manifest" {
-		_ = json.NewEncoder(os.Stdout).Encode(manifest)
-		return
-	}
-	session := protocol.NewSession(os.Stdin, os.Stdout)
-	request, err := session.Receive()
-	if err != nil {
-		_ = session.Respond(protocol.Response{Error: err.Error()})
-		return
-	}
-	if request.Protocol != protocol.Version {
-		_ = session.Respond(protocol.Response{ID: request.ID, Error: "unsupported driver protocol"})
-		return
-	}
-	if request.Method != "inspect" && request.Method != "get" && request.Method != "set" {
-		_ = session.Respond(protocol.Response{ID: request.ID, Error: "unsupported method"})
-		return
-	}
-	purpose := request.Purpose
-	if request.Method == "get" || request.Method == "set" {
-		if request.Property == "noise_control" && appleAudioControlValidationEnabled() {
-			response := controlProperty(session, request)
-			response.ID = request.ID
-			_ = session.Respond(response)
-			return
-		}
-		if request.Property != "battery" || request.Method == "set" {
-			_ = session.Respond(protocol.Response{ID: request.ID, Enrichments: map[string]protocol.Enrichment{}})
-			return
-		}
-		purpose = "battery"
-	}
-	response, readErrors := inspectWithErrors(session, request.Devices, purpose)
-	if request.Method == "get" {
-		response.Enrichments = targetEnrichment(response.Enrichments, request.DeviceID)
-		if enrichment, ok := response.Enrichments[request.DeviceID]; ok {
-			if _, hasBattery := enrichment.Properties["battery"]; !hasBattery && readErrors[request.DeviceID] != nil {
-				response.Error = readErrors[request.DeviceID].Error()
-				response.ErrorCode = "bluetooth_unavailable"
-				var remote *protocol.RemoteError
-				if errors.As(readErrors[request.DeviceID], &remote) && remote.Code != "" {
-					response.ErrorCode = remote.Code
-					response.Details = remote.Details
-				}
-			}
+	protocol.Serve(protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set})
+}
+
+func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
+	switch request.Property {
+	case "battery":
+		return getBattery(host, request)
+	case "noise_control":
+		if appleAudioControlValidationEnabled() {
+			return controlProperty(host, request, false)
 		}
 	}
-	response.ID = request.ID
-	_ = session.Respond(response)
+	return nil, nil
+}
+
+func set(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
+	if request.Property == "noise_control" && appleAudioControlValidationEnabled() {
+		return controlProperty(host, request, true)
+	}
+	return nil, nil
 }
 
 func appleAudioControlValidationEnabled() bool {
 	return os.Getenv("BETTY_VALIDATE_APPLE_AUDIO_CONTROLS") == "1"
 }
 
-func controlProperty(session *protocol.Session, request protocol.Request) protocol.Response {
-	response := protocol.Response{Protocol: protocol.Version, Enrichments: map[string]protocol.Enrichment{}}
-	for _, device := range request.Devices {
-		if device.ID != request.DeviceID {
-			continue
-		}
-		// A nearby Continuity advertisement is not proof that it belongs to this
-		// Classic endpoint. Control the explicitly selected L2CAP device and use
-		// only its own name to choose the conservative set of accepted modes.
-		profile, ok := connectedAppleAudioProfile(device, nil)
-		if !ok || !profile.ANC {
-			return response
-		}
-		if !device.Connected {
-			response.Error, response.ErrorCode = "Apple audio noise control requires a connected device", "device_disconnected"
-			return response
-		}
-		var requested *string
-		if request.Method == "set" {
-			var mode string
-			if err := json.Unmarshal(request.Value, &mode); err != nil || !containsString(appleAudioCapabilities(profile)["noise_control"].Values, mode) {
-				response.Error, response.ErrorCode = "noise_control value is unsupported by this Apple audio model", "usage"
-				return response
-			}
-			requested = &mode
-		}
-		mode, err := readAAPNoiseControl(session, device.ID, requested)
-		if err != nil {
-			response.Error, response.ErrorCode = err.Error(), "bluetooth_unavailable"
-			var remote *protocol.RemoteError
-			if errors.As(err, &remote) && remote.Code != "" {
-				response.ErrorCode, response.Details = remote.Code, remote.Details
-			}
-			return response
-		}
-		raw, _ := json.Marshal(mode)
-		response.Enrichments[device.ID] = protocol.Enrichment{Identification: &protocol.Identification{Vendor: profile.Vendor, Family: profile.Family, Model: profile.Name, Confidence: "name"}, Capabilities: connectedAppleAudioCapabilities(device, nil), Properties: map[string]protocol.Property{"noise_control": {Value: raw, Display: mode}}}
-		return response
+func controlProperty(host *protocol.Session, request protocol.PropertyRequest, write bool) (*protocol.Enrichment, error) {
+	device := request.Device
+	// A nearby Continuity advertisement is not proof that it belongs to this
+	// Classic endpoint. Control the explicitly selected L2CAP device and use
+	// only its own name to choose the conservative set of accepted modes.
+	profile, ok := connectedAppleAudioProfile(device, nil)
+	if !ok || !profile.ANC {
+		return nil, nil
 	}
-	return response
+	if !device.Connected {
+		return nil, protocol.Errorf(protocol.CodeDeviceDisconnected, "Apple audio noise control requires a connected device")
+	}
+	var requested *string
+	if write {
+		var mode string
+		if err := json.Unmarshal(request.Value, &mode); err != nil || !slices.Contains(appleAudioCapabilities(profile)["noise_control"].Values, mode) {
+			return nil, protocol.Errorf(protocol.CodeUsage, "noise_control value is unsupported by this Apple audio model")
+		}
+		requested = &mode
+	}
+	mode, err := readAAPNoiseControl(host, device.ID, requested)
+	if err != nil {
+		return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+	}
+	raw, _ := json.Marshal(mode)
+	return &protocol.Enrichment{
+		Identification: nameIdentification(profile),
+		Capabilities:   connectedAppleAudioCapabilities(device, nil),
+		Properties:     map[string]protocol.Property{"noise_control": {Value: raw, Display: mode}},
+	}, nil
 }
 
-func containsString(values []string, value string) bool {
-	for _, candidate := range values {
-		if candidate == value {
-			return true
+// getBattery reads exact battery state from the requested device over AAP. It
+// first refreshes the keyring from the system's pairing records so that
+// encrypted advertisements decrypt to exact levels, and it stores the keys the
+// device reports. When the AAP read fails, a battery level taken from a
+// correlated advertisement is returned instead of the error.
+func getBattery(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
+	found := classifyDevices(request.Devices)
+	keyring, _ := loadKeyring(host)
+	for _, device := range found.connected {
+		if keys, err := systemAppleAudioKeys(device); err == nil {
+			keyring.Upsert(keys)
+			_ = saveKeyring(host, keyring)
 		}
 	}
-	return false
+	device := request.Device
+	enrichment, ok := enrich(found, keyring)[device.ID]
+	if !ok {
+		return nil, nil
+	}
+	if !device.Connected || !isAppleAudioName(device.Name) {
+		return &enrichment, nil
+	}
+	battery, keys, err := readAAP(host, device.ID, true)
+	if err != nil {
+		if _, hasBattery := enrichment.Properties["battery"]; hasBattery {
+			return &enrichment, nil
+		}
+		return nil, protocol.Wrap(err, protocol.CodeBluetoothUnavailable)
+	}
+	if keys != nil {
+		keys.DeviceID = device.ID
+		if found.correlated() {
+			keys.ModelID = found.ads[0].modelID
+		}
+		keyring.Upsert(*keys)
+		_ = saveKeyring(host, keyring)
+	}
+	// A correlated endpoint shares its properties map with the advertisement.
+	properties := maps.Clone(enrichment.Properties)
+	if properties == nil {
+		properties = map[string]protocol.Property{}
+	}
+	raw, _ := json.Marshal(battery)
+	properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: exactBatteryDisplay(battery)}
+	enrichment.Properties = properties
+	return &enrichment, nil
 }
 
 type appleAudioAdvertisement struct {
@@ -131,38 +143,47 @@ type appleAudioAdvertisement struct {
 	exact                    *exactBattery
 }
 
-func inspect(session *protocol.Session, devices []protocol.Device, purpose string) protocol.Response {
-	response, _ := inspectWithErrors(session, devices, purpose)
-	return response
+// appleAudioDevices holds the devices in one request that this driver may
+// recognize: Classic endpoints by name and BLE advertisements by model ID.
+type appleAudioDevices struct {
+	named     []protocol.Device
+	connected []protocol.Device
+	ads       []appleAudioAdvertisement
 }
 
-func inspectWithErrors(session *protocol.Session, devices []protocol.Device, purpose string) (protocol.Response, map[string]error) {
-	response := protocol.Response{Protocol: protocol.Version, Enrichments: map[string]protocol.Enrichment{}}
-	readErrors := map[string]error{}
-	keyring, _ := loadKeyring(session)
-	var ads []appleAudioAdvertisement
-	var appleAudioDevices []protocol.Device
-	var connected []protocol.Device
+// correlated reports whether exactly one advertisement and one connected
+// endpoint are present, so that each can be offered as the other's possible
+// match.
+func (d appleAudioDevices) correlated() bool {
+	return len(d.ads) == 1 && len(d.connected) == 1
+}
+
+func classifyDevices(devices []protocol.Device) appleAudioDevices {
+	var found appleAudioDevices
 	for _, device := range devices {
 		if isAppleAudioName(device.Name) {
-			appleAudioDevices = append(appleAudioDevices, device)
+			found.named = append(found.named, device)
 			if device.Connected {
-				connected = append(connected, device)
+				found.connected = append(found.connected, device)
 			}
 		}
 		if ad, ok := parseDevice(device); ok {
-			ads = append(ads, ad)
+			found.ads = append(found.ads, ad)
 		}
 	}
-	if purpose == "battery" {
-		for _, device := range connected {
-			if keys, err := systemAppleAudioKeys(device); err == nil {
-				keyring.Upsert(keys)
-				_ = saveKeyring(session, keyring)
-			}
-		}
-	}
-	for _, ad := range ads {
+	return found
+}
+
+// inspect identifies Apple audio devices and reports advertised battery levels
+// without opening a connection; exact battery is read on demand through get.
+func inspect(host *protocol.Session, request protocol.InspectRequest) (map[string]protocol.Enrichment, error) {
+	keyring, _ := loadKeyring(host)
+	return enrich(classifyDevices(request.Devices), keyring), nil
+}
+
+func enrich(found appleAudioDevices, keyring appleAudioKeyring) map[string]protocol.Enrichment {
+	enrichments := map[string]protocol.Enrichment{}
+	for _, ad := range found.ads {
 		if exact, ok := decryptAdvertisement(ad.device, ad.modelID, keyring); ok {
 			ad.exact = &exact
 		}
@@ -175,73 +196,47 @@ func inspectWithErrors(session *protocol.Session, devices []protocol.Device, pur
 			raw, _ := json.Marshal(battery)
 			e.Properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: batteryDisplay(ad), Estimated: true, Resolution: 10}
 		}
-		if len(ads) == 1 && len(connected) == 1 {
-			e.PossibleMatches = []string{connected[0].ID}
-			other := response.Enrichments[connected[0].ID]
+		if found.correlated() {
+			e.PossibleMatches = []string{found.connected[0].ID}
+			other := enrichments[found.connected[0].ID]
 			other.PossibleMatches = []string{ad.device.ID}
 			other.Properties = e.Properties
-			response.Enrichments[connected[0].ID] = other
+			enrichments[found.connected[0].ID] = other
 		}
-		response.Enrichments[ad.device.ID] = e
+		enrichments[ad.device.ID] = e
 	}
-	for _, device := range appleAudioDevices {
-		enrichment := response.Enrichments[device.ID]
+	for _, device := range found.named {
+		enrichment := enrichments[device.ID]
 		// A saved endpoint name can provide a conservative semantic identity.
 		// Nearby advertisements remain possible matches, not identity proof.
 		if profile, ok := connectedAppleAudioProfile(device, nil); ok {
-			enrichment.Identification = &protocol.Identification{Vendor: profile.Vendor, Family: profile.Family, Model: profile.Name, Confidence: "name"}
+			enrichment.Identification = nameIdentification(profile)
 		}
-		enrichment.Capabilities = connectedAppleAudioCapabilities(device, ads)
-		response.Enrichments[device.ID] = enrichment
-		if purpose != "battery" || !device.Connected {
-			continue
-		}
-		if battery, keys, err := readAAP(session, device.ID, true); err == nil {
-			if keys != nil {
-				keys.DeviceID = device.ID
-				if len(ads) == 1 && len(connected) == 1 {
-					keys.ModelID = ads[0].modelID
-				}
-				keyring.Upsert(*keys)
-				_ = saveKeyring(session, keyring)
-			}
-			enrichment := response.Enrichments[device.ID]
-			if enrichment.Properties == nil {
-				enrichment.Properties = map[string]protocol.Property{}
-			}
-			raw, _ := json.Marshal(battery)
-			enrichment.Properties["battery"] = protocol.Property{Value: raw, Unit: "%", Display: exactBatteryDisplay(battery)}
-			response.Enrichments[device.ID] = enrichment
-		} else {
-			readErrors[device.ID] = err
-		}
+		enrichment.Capabilities = connectedAppleAudioCapabilities(device, found.ads)
+		enrichments[device.ID] = enrichment
 	}
-	return response, readErrors
+	return enrichments
+}
+
+func nameIdentification(profile appleAudioProfile) *protocol.Identification {
+	return &protocol.Identification{Vendor: profile.Vendor, Family: profile.Family, Model: profile.Name, Confidence: protocol.ConfidenceName}
 }
 
 func appleAudioCapabilities(profile appleAudioProfile) map[string]protocol.Capability {
 	capabilities := map[string]protocol.Capability{
-		"battery": {Status: "available", Kind: "battery", Readable: true},
+		"battery": {Status: protocol.StatusAvailable, Kind: protocol.KindBattery, Readable: true},
 	}
 	if profile.ANC {
 		values := []string{"off", "anc", "transparency"}
 		if profile.Adaptive {
 			values = append(values, "adaptive")
 		}
-		capabilities["noise_control"] = protocol.Capability{Status: "planned", Kind: "enum", Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation"}
+		capabilities["noise_control"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation"}
 	}
 	if profile.HeartRate {
-		capabilities["heart_rate"] = protocol.Capability{Status: "planned", Kind: "number", Readable: true, Reason: "Powerbeats Pro 2 exposes the standard BLE Heart Rate Service only while fitness-equipment pairing mode is active"}
+		capabilities["heart_rate"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindNumber, Readable: true, Reason: "Powerbeats Pro 2 exposes the standard BLE Heart Rate Service only while fitness-equipment pairing mode is active"}
 	}
 	return capabilities
-}
-
-func targetEnrichment(enrichments map[string]protocol.Enrichment, deviceID string) map[string]protocol.Enrichment {
-	target := map[string]protocol.Enrichment{}
-	if enrichment, ok := enrichments[deviceID]; ok {
-		target[deviceID] = enrichment
-	}
-	return target
 }
 
 func parseDevice(device protocol.Device) (appleAudioAdvertisement, bool) {
@@ -263,7 +258,7 @@ func parseDevice(device protocol.Device) (appleAudioAdvertisement, bool) {
 			left, right = right, left
 		}
 		caseBattery := batteryNibble(data[7] & 0x0f)
-		return appleAudioAdvertisement{device: device, identification: protocol.Identification{Vendor: profile.Vendor, Family: profile.Family, Model: profile.Name, Confidence: "model"}, left: left, right: right, caseBattery: caseBattery, modelID: model, profile: profile}, true
+		return appleAudioAdvertisement{device: device, identification: protocol.Identification{Vendor: profile.Vendor, Family: profile.Family, Model: profile.Name, Confidence: protocol.ConfidenceModel}, left: left, right: right, caseBattery: caseBattery, modelID: model, profile: profile}, true
 	}
 	return appleAudioAdvertisement{}, false
 }
@@ -384,7 +379,7 @@ func connectedAppleAudioCapabilities(device protocol.Device, ads []appleAudioAdv
 	profile, _ := connectedAppleAudioProfile(device, ads)
 	capabilities := appleAudioCapabilities(profile)
 	if capability, ok := capabilities["noise_control"]; ok && appleAudioControlValidationEnabled() && device.Connected {
-		capability.Status = "available"
+		capability.Status = protocol.StatusAvailable
 		capability.Reason = ""
 		capabilities["noise_control"] = capability
 	}

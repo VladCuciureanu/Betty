@@ -153,15 +153,45 @@ func TestIdentifySonyByProtocolAndName(t *testing.T) {
 }
 
 func TestUnknownDeviceIsIgnored(t *testing.T) {
-	response := inspect(nil, []protocol.Device{{ID: "other", Name: "Keyboard"}}, "scan")
-	if len(response.Enrichments) != 0 {
-		t.Fatalf("enrichments=%#v", response.Enrichments)
+	enrichments, err := inspect(nil, protocol.InspectRequest{Purpose: protocol.PurposeScan, Devices: []protocol.Device{{ID: "other", Name: "Keyboard"}}})
+	if err != nil || len(enrichments) != 0 {
+		t.Fatalf("enrichments=%#v err=%v", enrichments, err)
 	}
 }
 
 func TestSonyBatteryGetReportsDisconnectedDevice(t *testing.T) {
-	response := getBattery(nil, []protocol.Device{{ID: "sony", Name: "WH-1000XM5"}}, "sony")
-	if response.ErrorCode != "device_disconnected" {
-		t.Fatalf("response=%+v", response)
+	enrichment, err := getBattery(nil, protocol.Device{ID: "sony", Name: "WH-1000XM5"})
+	if code, _ := protocol.CodeOf(err, protocol.CodeInternal); enrichment != nil || code != protocol.CodeDeviceDisconnected {
+		t.Fatalf("enrichment=%+v err=%v", enrichment, err)
+	}
+}
+
+func TestSonyDriverServesOverProtocol(t *testing.T) {
+	driver := protocol.Driver{Manifest: manifest, Inspect: inspect, Get: get, Set: set}
+	var in, out bytes.Buffer
+	devices := []protocol.Device{{ID: "sony", Name: "WH-1000XM5", Services: []string{sonyServiceV2}}, {ID: "other", Name: "Keyboard"}}
+	encoder := json.NewEncoder(&in)
+	_ = encoder.Encode(protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: protocol.PurposeList, Devices: devices})
+	_ = encoder.Encode(protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "2", Method: protocol.MethodGet, DeviceID: "sony", Property: "battery", Devices: devices})
+	_ = encoder.Encode(protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "3", Method: protocol.MethodSet, DeviceID: "sony", Property: "equalizer", Value: json.RawMessage(`"bass"`), Devices: devices})
+	if err := driver.Run(nil, &in, &out); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&out)
+	var responses [3]protocol.Response
+	for i := range responses {
+		if err := decoder.Decode(&responses[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inspected, ok := responses[0].Enrichments["sony"]
+	if !ok || len(responses[0].Enrichments) != 1 || inspected.Identification.Confidence != protocol.ConfidenceProtocol {
+		t.Fatalf("inspect=%+v", responses[0])
+	}
+	if responses[1].ErrorCode != string(protocol.CodeDeviceDisconnected) {
+		t.Fatalf("get=%+v", responses[1])
+	}
+	if responses[2].Error != "" || len(responses[2].Enrichments) != 0 {
+		t.Fatalf("set of an unhandled property must be left to other drivers: %+v", responses[2])
 	}
 }
