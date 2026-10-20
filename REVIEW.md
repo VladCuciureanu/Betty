@@ -175,8 +175,9 @@ found four bugs that unit tests could not, all fixed with the suite:
 The suite also confirms on Linux, through BlueZ: GATT reads, writes in both
 modes, and notifications; property `watch`; a dropped link ending a GATT watch
 with `device_disconnected`; duplicate names being ambiguous; and a refused
-pairing reporting `authentication_failed`. Classic `connect` and the Sony
-driver still need an over-the-air run (Windows, macOS) or real hardware.
+pairing reporting `authentication_failed`. Classic `connect` now runs too, since the patched
+controller re-authenticates paired devices; the Sony driver still needs an
+over-the-air run (Windows, macOS) or real hardware.
 
 ## Documentation claims
 

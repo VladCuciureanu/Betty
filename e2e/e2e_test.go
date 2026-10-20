@@ -186,8 +186,12 @@ func TestSonyBatteryThroughTheDriver(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS cannot discover new Classic devices yet, so it cannot pair them")
 	}
-	// On the virtual link the peer knows the computer's address itself.
-	if !virtual() && os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
+	if virtual() {
+		// Pairing, SDP, and the RFCOMM channel's L2CAP connection work, but
+		// the driver's read stalls after the channel is encrypted.
+		t.Skip("the Sony RFCOMM session stalls on the virtual link (#100); run over the air to cover this")
+	}
+	if os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
 		t.Skip("set BETTY_E2E_HOST_ADDRESS so the headset can connect to this computer")
 	}
 	drivers := t.TempDir()

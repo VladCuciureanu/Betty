@@ -146,6 +146,19 @@ class InquiryController(Controller):
         self.send_hci_packet(hci.HCI_Link_Key_Request_Event(bd_addr=connection.peer_address))
         return None
 
+    def on_hci_read_clock_offset_command(self, command):
+        # Linux reads it after every Classic connection; on a virtual link
+        # there is no clock to be offset from.
+        self._send_hci_command_status(hci.HCI_COMMAND_STATUS_PENDING, command.op_code)
+        self.send_hci_packet(
+            hci.HCI_Read_Clock_Offset_Complete_Event(
+                status=hci.HCI_ErrorCode.SUCCESS,
+                connection_handle=command.connection_handle,
+                clock_offset=0,
+            )
+        )
+        return None
+
     def on_hci_set_connection_encryption_command(self, command):
         # Bumble implements only LE encryption. Report Classic encryption as
         # on, which is all the host checks; the link itself is virtual.
