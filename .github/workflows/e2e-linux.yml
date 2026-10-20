@@ -1,0 +1,43 @@
+name: End-to-end (Linux, virtual)
+
+# Runs bt and the drivers against scripted Bluetooth devices on a virtual
+# link, inside a VM, because GitHub's runner kernels have no Bluetooth
+# support. Windows and macOS end-to-end runs need a radio and are manual;
+# see e2e/README.md.
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.x'
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install a generic kernel, virtme-ng, and BlueZ
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq linux-image-generic virtme-ng qemu-system-x86 bluez dbus
+          release="$(ls /lib/modules | grep -- -generic | sort -V | tail -n 1)"
+          sudo apt-get install -y -qq "linux-modules-extra-$release"
+          # virtme-ng runs as this user: let it use KVM and read the kernel.
+          sudo chmod 666 /dev/kvm
+          sudo chmod a+r /boot/vmlinuz-*
+      - name: Install the scripted devices
+        run: |
+          python -m venv e2e/peer/.venv
+          e2e/peer/.venv/bin/pip install --quiet ./e2e/peer
+      - name: Run the end-to-end suite
+        run: e2e/linux/run-vm.sh -v

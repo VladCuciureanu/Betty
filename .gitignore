@@ -5,3 +5,7 @@
 *.exe
 *.test
 .DS_Store
+# End-to-end peer environment
+/e2e/peer/.venv/
+__pycache__/
+*.egg-info/

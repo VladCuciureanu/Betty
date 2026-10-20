@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -187,15 +188,16 @@ func openSonySession(host *protocol.Session, deviceID string, version sonyProtoc
 	} else if version == protocolV2 {
 		services = []string{sonyServiceV2}
 	}
-	var lastErr error
+	// Report every failed attempt: the first is usually the informative one.
+	var failures []error
 	for _, service := range services {
 		channelID, err := host.OpenRFCOMM(deviceID, service)
 		if err == nil {
 			return &sonySession{host: host, channelID: channelID}, nil
 		}
-		lastErr = err
+		failures = append(failures, err)
 	}
-	return nil, lastErr
+	return nil, errors.Join(failures...)
 }
 
 func (s *sonySession) close() {

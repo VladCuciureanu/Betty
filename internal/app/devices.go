@@ -13,8 +13,10 @@ import (
 
 const (
 	// lookupScanLimit bounds the scan a command runs when the device it
-	// needs is not among the devices the OS already knows.
-	lookupScanLimit = 4 * time.Second
+	// needs is not among the devices the OS already knows. BlueZ alternates
+	// about 5s of LE scanning with Classic inquiry, so a shorter scan never
+	// finds a new Classic device on Linux.
+	lookupScanLimit = 8 * time.Second
 	// scanReserve is left of the deadline after a scan, for the work that
 	// follows it.
 	scanReserve = time.Second

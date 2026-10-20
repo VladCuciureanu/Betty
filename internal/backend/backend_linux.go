@@ -25,7 +25,11 @@ type linuxBackend struct {
 }
 
 func newPlatformBackend(pairing PairingIO) Backend {
-	conn, err := dbus.SystemBus()
+	// A private connection, not the shared dbus.SystemBus(): BlueZ tracks
+	// discovery per D-Bus client, and the BLE library scans on the shared
+	// connection at the same time. On one connection the second
+	// StartDiscovery fails with "Operation already in progress".
+	conn, err := dbus.ConnectSystemBus()
 	return &linuxBackend{conn: conn, initErr: err, pairing: pairing}
 }
 func (b *linuxBackend) Capabilities() domain.Capabilities {

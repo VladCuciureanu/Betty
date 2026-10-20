@@ -211,6 +211,14 @@ go test ./...
 go vet ./...
 ```
 
+There are three test levels:
+
+| Level | Runs against | Where |
+| --- | --- | --- |
+| Unit (`go test ./...`) | Fakes | Everywhere, in CI |
+| [End-to-end](e2e/README.md) (`-tags=e2e`) | Scripted Bluetooth devices | Linux in CI, fully virtual; Windows and macOS by hand, with a USB dongle |
+| Hardware (`-tags=hardware`) | Your own real devices | By hand |
+
 Hardware tests are opt-in because some of them pair, connect, disconnect, and
 unpair a disposable device:
 
