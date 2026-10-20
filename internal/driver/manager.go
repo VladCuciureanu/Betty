@@ -195,12 +195,15 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 			return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
 		}
 	}
+	unlock, err := m.lock()
+	if err != nil {
+		return manifest, err
+	}
+	defer unlock()
+	// Checked again under the lock: a concurrent install may have finished.
 	dir := filepath.Join(m.root, safeID(manifest.ID))
 	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err == nil {
 		return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
-	}
-	if err := os.MkdirAll(m.root, 0o755); err != nil {
-		return manifest, err
 	}
 	temp, err := os.MkdirTemp(m.root, ".install-")
 	if err != nil {
@@ -233,6 +236,11 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 func (m *Manager) Remove(id string) error {
 	path := filepath.Join(m.root, safeID(id))
 	if _, err := os.Stat(filepath.Join(path, "manifest.json")); err == nil {
+		unlock, err := m.lock()
+		if err != nil {
+			return err
+		}
+		defer unlock()
 		return os.RemoveAll(path)
 	}
 	for _, root := range m.bundledRoots() {
@@ -329,25 +337,38 @@ func (m *Manager) ImportState(id, source string) error {
 	if !m.installed(id) {
 		return domain.NewError(domain.CodeNotFound, "driver %q is not installed", id)
 	}
-	bytes, err := os.ReadFile(source)
+	file, err := os.Open(source)
 	if err != nil {
 		return err
 	}
-	if len(bytes) > 1<<20 {
+	defer file.Close()
+	bytes, err := io.ReadAll(io.LimitReader(file, maxStorageBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(bytes) > maxStorageBytes {
 		return domain.NewError(domain.CodeUsage, "driver state exceeds 1 MiB")
 	}
 	values := map[string]string{}
 	if err := json.Unmarshal(bytes, &values); err != nil {
 		return domain.NewError(domain.CodeUsage, "invalid driver state: %v", err)
 	}
+	if len(values) > maxStorageKeys {
+		return domain.NewError(domain.CodeUsage, "driver state has more than %d keys", maxStorageKeys)
+	}
 	for key, value := range values {
 		if err := validateStorageKey(key); err != nil {
 			return err
 		}
-		if len(value) > 65536 {
+		if len(value) > maxStorageValue {
 			return domain.NewError(domain.CodeUsage, "stored value for %q exceeds 64 KiB", key)
 		}
 	}
+	unlock, err := m.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	return m.writeStorage(id, values)
 }
 
@@ -397,14 +418,29 @@ func (m *Manager) storageSet(driver protocol.Manifest, key, value string) error 
 	if err := validateStorageKey(key); err != nil {
 		return err
 	}
-	if len(value) > 65536 {
+	if len(value) > maxStorageValue {
 		return domain.NewError(domain.CodeUsage, "stored value exceeds 64 KiB")
 	}
+	unlock, err := m.lock()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	values, err := m.readStorage(driver.ID)
 	if err != nil {
 		return err
 	}
+	if _, exists := values[key]; !exists && len(values) >= maxStorageKeys {
+		return domain.NewError(domain.CodeUsage, "driver storage is limited to %d keys", maxStorageKeys)
+	}
 	values[key] = value
+	bytes, err := json.Marshal(values)
+	if err != nil {
+		return err
+	}
+	if len(bytes) > maxStorageBytes {
+		return domain.NewError(domain.CodeUsage, "driver storage is limited to 1 MiB")
+	}
 	return m.writeStorage(driver.ID, values)
 }
 func (m *Manager) writeStorage(driverID string, values map[string]string) error {
@@ -449,8 +485,17 @@ func (m *Manager) readStorage(driverID string) (map[string]string, error) {
 	}
 	return values, nil
 }
+// Driver storage limits, shared by host calls and state import.
+const (
+	maxStorageKeys  = 256
+	maxStorageValue = 64 << 10
+	maxStorageBytes = 1 << 20
+)
+
+var storageKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
+
 func validateStorageKey(key string) error {
-	if len(key) < 1 || len(key) > 128 || !regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`).MatchString(key) {
+	if len(key) < 1 || len(key) > 128 || !storageKeyPattern.MatchString(key) {
 		return domain.NewError(domain.CodeUsage, "invalid storage key")
 	}
 	return nil
