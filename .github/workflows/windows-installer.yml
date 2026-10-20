@@ -26,14 +26,14 @@ jobs:
   build-msi:
     runs-on: windows-2025-vs2026
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.24.x'
       # The WDK's InfVerif task loads InfVerif.dll for the MSBuild process's
       # architecture, and the x64 WDK package ships no x86 build of it, so
       # the default x86 MSBuild cannot verify the driver INF.
-      - uses: microsoft/setup-msbuild@v2
+      - uses: microsoft/setup-msbuild@v3
         with:
           msbuild-architecture: x64
       - name: Build unsigned validation MSI
@@ -45,7 +45,7 @@ jobs:
           $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
           $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-apple-audio-advanced-windows-x64.msi -Recurse).FullName
           ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced -SkipDriver
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: betty-windows-unsigned-validation
           path: packaging/windows/artifacts/msi/**/*.msi
