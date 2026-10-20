@@ -1,0 +1,63 @@
+"""A Bumble virtual controller that also answers Classic inquiry.
+
+Bumble's software controller implements Classic connections and pairing but
+not the Inquiry command, which BlueZ uses to discover Classic devices. This
+subclass answers inquiry with every other Classic controller on the same
+virtual link that has inquiry scan enabled.
+"""
+
+import asyncio
+
+from bumble import hci
+from bumble.controller import Controller
+
+# Write Scan Enable values that include inquiry scan.
+_INQUIRY_SCAN = 0x01
+# How long a virtual inquiry takes; real inquiries take seconds, but nothing
+# here needs that.
+_INQUIRY_DELAY = 0.2
+
+
+class InquiryController(Controller):
+    class_of_device: int = 0
+    extended_inquiry_response: bytes = b""
+
+    def on_hci_write_class_of_device_command(self, command):
+        self.class_of_device = command.class_of_device
+        return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+
+    def on_hci_write_extended_inquiry_response_command(self, command):
+        self.extended_inquiry_response = bytes(command.extended_inquiry_response)
+        return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+
+    def on_hci_inquiry_command(self, command):
+        self._send_hci_command_status(hci.HCI_ErrorCode.SUCCESS, command.op_code)
+        asyncio.get_running_loop().call_later(_INQUIRY_DELAY, self._report_inquiry)
+
+    def on_hci_inquiry_cancel_command(self, _command):
+        return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+
+    def _report_inquiry(self):
+        for other in list(self.link.controllers):
+            if other is self or not (other.classic_scan_enable & _INQUIRY_SCAN):
+                continue
+            response = getattr(other, "extended_inquiry_response", b"") or _name_eir(other.local_name)
+            self.send_hci_packet(
+                hci.HCI_Extended_Inquiry_Result_Event(
+                    num_responses=1,
+                    bd_addr=other.public_address,
+                    page_scan_repetition_mode=1,
+                    reserved=0,
+                    class_of_device=getattr(other, "class_of_device", 0),
+                    clock_offset=0,
+                    rssi=-40,
+                    extended_inquiry_response=response.ljust(240, b"\x00")[:240],
+                )
+            )
+        self.send_hci_packet(hci.HCI_Inquiry_Complete_Event(status=hci.HCI_ErrorCode.SUCCESS))
+
+
+def _name_eir(name: str) -> bytes:
+    encoded = name.encode("utf-8")[:238]
+    # EIR structure: length, type 0x09 (Complete Local Name), data.
+    return bytes([len(encoded) + 1, 0x09]) + encoded

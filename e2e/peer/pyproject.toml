@@ -1,0 +1,14 @@
+[project]
+name = "betty-peer"
+version = "0.1.0"
+description = "Scripted Bluetooth devices for Betty's end-to-end tests"
+requires-python = ">=3.10"
+# Pinned: the peer patches Bumble's virtual controller (betty_peer/controller.py).
+dependencies = ["bumble==0.0.236"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["betty_peer"]
