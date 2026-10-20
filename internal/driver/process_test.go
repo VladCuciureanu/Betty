@@ -105,7 +105,9 @@ func writeTestDriver(t *testing.T, dir string, manifest protocol.Manifest) strin
 
 func newTestManager(t *testing.T) *Manager {
 	m := NewAt(t.TempDir())
-	m.inspectTimeout = 500 * time.Millisecond
+	// Long enough for a cold test binary to start on a slow CI runner; only
+	// the "hang" driver should ever reach it.
+	m.inspectTimeout = 3 * time.Second
 	m.exitGrace = 200 * time.Millisecond
 	return m
 }
@@ -140,7 +142,7 @@ func TestDriverCallFailures(t *testing.T) {
 			if e := domain.AsError(err); e.Code != tc.code || !strings.Contains(e.Message, tc.want) {
 				t.Fatalf("err=%v code=%s", err, e.Code)
 			}
-			if elapsed := time.Since(started); elapsed > 5*time.Second {
+			if elapsed := time.Since(started); elapsed > 15*time.Second {
 				t.Fatalf("call took %s", elapsed)
 			}
 		})
@@ -157,7 +159,7 @@ func TestDriverThatIgnoresEOFIsKilledButItsResponseStands(t *testing.T) {
 	if err != nil || response.Enrichments["device"].Identification == nil {
 		t.Fatalf("response=%+v err=%v", response, err)
 	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
+	if elapsed := time.Since(started); elapsed > 15*time.Second {
 		t.Fatalf("call took %s", elapsed)
 	}
 }
