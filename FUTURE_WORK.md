@@ -152,7 +152,7 @@ Third-party drivers are a first-class extension point. The protocol in [docs/DRI
 - Add manifest match hints (company IDs, service UUIDs, name prefixes) so Betty starts only relevant drivers instead of every driver for every command.
 - Ship a conformance checker that runs a driver against scripted requests and a fake host, for example `bt driver check <executable>`.
 - Surface driver stderr and skipped-inspect failures under `--verbose`.
-- Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
+- [x] Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
 - Bound message sizes and test malformed, oversized, crashing, and hanging drivers.
 - Reuse one driver process across requests within a command once the per-request loop is proven by every official driver.
 
