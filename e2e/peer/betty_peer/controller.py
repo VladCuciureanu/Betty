@@ -34,6 +34,7 @@ _DUAL_MODE_FEATURES = (
 _CLASSIC_COMMANDS = [
     "INQUIRY",
     "INQUIRY_CANCEL",
+    "WRITE_INQUIRY_MODE",
     "CREATE_CONNECTION",
     "ACCEPT_CONNECTION_REQUEST",
     "REMOTE_NAME_REQUEST",
@@ -77,6 +78,11 @@ class InquiryController(Controller):
 
     def on_hci_write_class_of_device_command(self, command):
         self.class_of_device = command.class_of_device
+        return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+
+    def on_hci_write_inquiry_mode_command(self, command):
+        # Results always use the extended format, which every mode accepts.
+        self.inquiry_mode = command.inquiry_mode
         return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
 
     def on_hci_write_extended_inquiry_response_command(self, command):
