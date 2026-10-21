@@ -201,7 +201,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 - Preserve namespaced, user-private driver state and migration behavior.
 - Add cryptographic endpoint verification where supported by a protocol.
 - Review the pinned `tinygo.org/x/bluetooth` version before upgrades.
-- Test characteristics with duplicate UUIDs under different services and define deterministic selection.
+- [x] Test characteristics with duplicate UUIDs under different services and define deterministic selection: such a UUID is ambiguous unless the service is named.
 - [x] Complete Device Information Service coverage and consistent field naming.
 - Expand native event consumption where it materially improves cancellation or state accuracy.
 

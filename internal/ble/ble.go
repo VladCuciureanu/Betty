@@ -29,6 +29,7 @@ type Client interface {
 	Read(context.Context, string, string) ([]byte, error)
 	Write(context.Context, string, string, []byte, bool) error
 	Watch(context.Context, string, string, func([]byte) error) error
+	MTU(context.Context, string) (int, error)
 	DeviceInformation(context.Context, string) (map[string]string, error)
 }
 
@@ -238,95 +239,79 @@ func (b *TinyGo) Characteristics(ctx context.Context, address, serviceUUID strin
 	return out, nil
 }
 
-func (b *TinyGo) find(ctx context.Context, address, characteristicUUID string) (bluetooth.Device, bluetooth.DeviceCharacteristic, error) {
-	uuid, err := bluetooth.ParseUUID(characteristicUUID)
-	if err != nil {
-		return bluetooth.Device{}, bluetooth.DeviceCharacteristic{}, domain.NewError(domain.CodeUsage, "invalid characteristic UUID %q", characteristicUUID)
+// splitCharacteristic splits "service/characteristic" into its UUIDs. A bare
+// characteristic UUID names no service.
+func splitCharacteristic(spec string) (service, characteristic string) {
+	if service, characteristic, ok := strings.Cut(spec, "/"); ok {
+		return service, characteristic
 	}
-	d, err := b.connect(ctx, address)
-	if err != nil {
-		return d, bluetooth.DeviceCharacteristic{}, err
-	}
-	services, err := d.DiscoverServices(nil)
-	if err != nil {
-		d.Disconnect()
-		return d, bluetooth.DeviceCharacteristic{}, translate("service discovery", err, domain.CodeInternal)
-	}
-	// Discover every characteristic and match locally: with a UUID filter,
-	// tinygo reports "not found" as an error, which would hide real failures.
-	for _, s := range services {
-		chars, e := s.DiscoverCharacteristics(nil)
-		if e != nil {
-			d.Disconnect()
-			return d, bluetooth.DeviceCharacteristic{}, translate("characteristic discovery", e, domain.CodeInternal)
-		}
-		for _, c := range chars {
-			if c.UUID() == uuid {
-				return d, c, nil
-			}
-		}
-	}
-	d.Disconnect()
-	return d, bluetooth.DeviceCharacteristic{}, domain.NewError(domain.CodeNotFound, "characteristic %s not found", characteristicUUID)
+	return "", spec
 }
 
-func (b *TinyGo) Read(ctx context.Context, address, uuid string) ([]byte, error) {
-	d, c, err := b.find(ctx, address, uuid)
+// Read reads a characteristic, given as a UUID or "service/characteristic".
+// A UUID found in several services is ambiguous unless the service is given.
+func (b *TinyGo) Read(ctx context.Context, address, spec string) ([]byte, error) {
+	conn, err := b.Open(ctx, address)
 	if err != nil {
 		return nil, err
 	}
-	defer d.Disconnect()
-	buf := make([]byte, 512)
-	n, err := c.Read(buf)
-	if err != nil {
-		return nil, translate("read", err, domain.CodeInternal)
-	}
-	return buf[:n], nil
+	defer conn.Close()
+	service, characteristic := splitCharacteristic(spec)
+	return conn.Read(ctx, service, characteristic)
 }
 
-func (b *TinyGo) Write(ctx context.Context, address, uuid string, value []byte, withoutResponse bool) error {
-	d, c, err := b.find(ctx, address, uuid)
+// Write writes a characteristic, given as in Read.
+func (b *TinyGo) Write(ctx context.Context, address, spec string, value []byte, withoutResponse bool) error {
+	conn, err := b.Open(ctx, address)
 	if err != nil {
 		return err
 	}
-	defer d.Disconnect()
-	if withoutResponse {
-		_, err = c.WriteWithoutResponse(value)
-	} else {
-		_, err = c.Write(value)
-	}
-	return translate("write", err, domain.CodeInternal)
+	defer conn.Close()
+	service, characteristic := splitCharacteristic(spec)
+	return conn.Write(ctx, service, characteristic, value, withoutResponse)
 }
 
-func (b *TinyGo) Watch(ctx context.Context, address, uuid string, emit func([]byte) error) error {
-	d, c, err := b.find(ctx, address, uuid)
+// Watch calls emit with each notification of a characteristic, given as in
+// Read, until ctx ends, emit fails, or the link drops.
+func (b *TinyGo) Watch(ctx context.Context, address, spec string, emit func([]byte) error) error {
+	conn, err := b.Open(ctx, address)
 	if err != nil {
 		return err
 	}
-	defer d.Disconnect()
-	lost, stopWatching := b.watchDisconnect(d.Address.String())
-	defer stopWatching()
+	defer conn.Close()
 	errCh := make(chan error, 1)
-	if err := c.EnableNotifications(func(value []byte) {
-		copied := append([]byte(nil), value...)
-		if e := emit(copied); e != nil {
+	service, characteristic := splitCharacteristic(spec)
+	stop, err := conn.Subscribe(ctx, service, characteristic, func(value []byte) {
+		if e := emit(value); e != nil {
 			select {
 			case errCh <- e:
 			default:
 			}
 		}
-	}); err != nil {
-		return translate("enable notifications", err, domain.CodeInternal)
+	})
+	if err != nil {
+		return err
 	}
-	defer stopNotifications(c)
+	defer stop()
 	select {
 	case <-ctx.Done():
 		return nil
 	case err := <-errCh:
 		return err
-	case <-lost:
+	case <-conn.Lost():
 		return domain.NewError(domain.CodeDisconnected, "BLE device %s disconnected", address)
 	}
+}
+
+// MTU reports the ATT MTU the operating system negotiated for a connection
+// to the device. No platform lets an app choose it.
+func (b *TinyGo) MTU(ctx context.Context, address string) (int, error) {
+	conn, err := b.Open(ctx, address)
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+	return conn.MTU(ctx)
 }
 
 // watchDisconnect returns a channel that is closed when the device at address

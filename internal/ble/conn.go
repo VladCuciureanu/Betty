@@ -160,7 +160,11 @@ func (c *Conn) Read(ctx context.Context, serviceUUID, characteristicUUID string)
 		value = buf[:n]
 		return nil
 	})
-	return value, err
+	if err != nil {
+		// value may still be written by a read that outlived ctx.
+		return nil, err
+	}
+	return value, nil
 }
 
 // Write writes a characteristic's value, with or without a response.
@@ -207,6 +211,31 @@ func (c *Conn) Subscribe(ctx context.Context, serviceUUID, characteristicUUID st
 		mu.Unlock()
 		stopNotifications(characteristic)
 	}, nil
+}
+
+// MTU reports the negotiated ATT MTU. tinygo reads it through a
+// characteristic, so the device must have one.
+func (c *Conn) MTU(ctx context.Context) (int, error) {
+	c.mu.Lock()
+	if err := c.discover(ctx); err != nil {
+		c.mu.Unlock()
+		return 0, err
+	}
+	chars := c.chars
+	c.mu.Unlock()
+	if len(chars) == 0 {
+		return 0, domain.NewError(domain.CodeUnsupported, "the device has no characteristic to read the MTU through")
+	}
+	var mtu uint16
+	err := run(ctx, func() error {
+		var err error
+		mtu, err = chars[0].characteristic.GetMTU()
+		return translate("read MTU", err, domain.CodeUnsupported)
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(mtu), nil
 }
 
 // run calls f and returns its error, or the context's error if the context

@@ -70,6 +70,7 @@ func (b *fakeBLE) Read(context.Context, string, string) ([]byte, error) {
 }
 func (*fakeBLE) Write(context.Context, string, string, []byte, bool) error       { return nil }
 func (*fakeBLE) Watch(context.Context, string, string, func([]byte) error) error { return nil }
+func (*fakeBLE) MTU(context.Context, string) (int, error)                        { return 247, nil }
 func (b *fakeBLE) DeviceInformation(context.Context, string) (map[string]string, error) {
 	return b.info, b.err
 }
