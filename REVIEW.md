@@ -147,10 +147,11 @@ Beyond the "Fix first" items:
   `Disconnect`, which releases the device's COM objects, when the link
   drops. A GATT `watch` that ends that way then calls `Disconnect` again.
   (hw)
-- On Linux, tinygo's `Connect` waits for the `Connected` property with no
-  timeout, so the goroutine of a cancelled BLE connect can stay blocked.
-  Betty now disconnects the result if it ever arrives, but can't abort the
-  attempt itself.
+- **Fixed** (Betty makes BlueZ's `Device1.Connect` call itself, under the
+  command's context, and disconnects if it is cancelled; tinygo then finds the
+  device connected). On Linux, tinygo's `Connect` waited for the `Connected`
+  property with no timeout, so the goroutine of a cancelled BLE connect could
+  stay blocked.
 - This pass didn't touch the `IOHIDManager` Input Monitoring prompt, the
   Windows `SO_RCVTIMEO` retries, macOS RFCOMM's asynchronous SDP query or
   the duplicated `waitFD` helpers. They remain as listed above.

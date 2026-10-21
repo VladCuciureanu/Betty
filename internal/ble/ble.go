@@ -171,6 +171,9 @@ func (b *TinyGo) connect(ctx context.Context, address string) (bluetooth.Device,
 	if err := b.enableContext(ctx); err != nil {
 		return bluetooth.Device{}, err
 	}
+	if err := preconnect(ctx, address); err != nil {
+		return bluetooth.Device{}, err
+	}
 	type result struct {
 		device bluetooth.Device
 		err    error
