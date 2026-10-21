@@ -26,6 +26,9 @@ type application struct {
 	hid     hidbattery.Provider // nil disables HID battery readings
 	render  output.Renderer
 	opts    options
+	// setupErr is a failure while connecting the platform, such as an
+	// --adapter the platform can't select.
+	setupErr error
 }
 
 // Main runs bt with args and returns the process exit status.
@@ -38,6 +41,9 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		a.backend = backend.New(backend.PairingIO{In: pairingInput, Out: stderr})
 		client := ble.New()
 		a.ble = client
+		if a.opts.adapter != "" {
+			a.setupErr = selectAdapter(a.backend, client, a.opts.adapter)
+		}
 		a.hid = hidbattery.New()
 		a.drivers = driver.New()
 		a.drivers.SetHost(l2cap.New())
@@ -91,6 +97,9 @@ func run(args []string, stdout, stderr io.Writer, version string, connect func(*
 		return a.fail(err)
 	}
 	connect(a)
+	if a.setupErr != nil {
+		return a.fail(a.setupErr)
+	}
 
 	interrupted, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

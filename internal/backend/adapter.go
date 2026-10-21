@@ -6,6 +6,14 @@ import (
 	"github.com/vladcuciureanu/betty/internal/domain"
 )
 
+// AdapterSelector is implemented by backends on platforms with several
+// adapters to choose from.
+type AdapterSelector interface {
+	// SelectAdapter makes every later operation use the adapter id, such as
+	// "hci1". An adapter that doesn't exist fails when it is first used.
+	SelectAdapter(id string) error
+}
+
 // AdapterBackend is implemented by backends that can report, and possibly
 // change, the local Bluetooth adapter.
 type AdapterBackend interface {
