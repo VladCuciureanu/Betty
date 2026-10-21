@@ -32,13 +32,13 @@ type Manager struct {
 	// OnDriverLog, when set, receives each line a driver writes to stderr,
 	// up to 64 KiB per driver process. Otherwise stderr is discarded.
 	OnDriverLog func(driverID, line string)
-	host           Host
+	host        Host
 	// reuse keeps driver processes in procs until Close; see SetReuse.
-	reuse   bool
-	procsMu sync.Mutex
-	procs   map[string]*driverProcess
-	rfcomm         RFCOMMHost
-	gattHost       GATTHost
+	reuse    bool
+	procsMu  sync.Mutex
+	procs    map[string]*driverProcess
+	rfcomm   RFCOMMHost
+	gattHost GATTHost
 }
 
 func New() *Manager {
@@ -203,7 +203,7 @@ func domainProperties(properties map[string]protocol.Property) map[string]domain
 		if name == "battery" {
 			value = batteryObject(value)
 		}
-		out[name] = domain.Property{Value: value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution, Verified: p.Verified}
+		out[name] = domain.Property{Value: value, Unit: p.Unit, Display: p.Display, Estimated: p.Estimated, Resolution: p.Resolution, Verified: p.Verified, Correlated: p.Correlated}
 	}
 	return out
 }
@@ -562,6 +562,7 @@ func (m *Manager) readStorage(driverID string) (map[string]string, error) {
 	}
 	return values, nil
 }
+
 // Driver storage limits, shared by host calls and state import.
 const (
 	maxStorageKeys  = 256

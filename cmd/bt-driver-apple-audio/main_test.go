@@ -40,6 +40,14 @@ func TestInspectRecognizesAndCorrelatesUniqueAirPods(t *testing.T) {
 	if advertisement.Properties["battery"].Display != "left ~90% · right ~90% · case —" || !advertisement.Properties["battery"].Estimated {
 		t.Fatalf("battery=%q", advertisement.Properties["battery"].Display)
 	}
+	// The connected set gets the reading too, marked as a likely match; the
+	// advertisement's own reading is not.
+	if battery := classic.Properties["battery"]; !battery.Correlated || battery.Display != advertisement.Properties["battery"].Display {
+		t.Fatalf("classic battery=%+v", battery)
+	}
+	if advertisement.Properties["battery"].Correlated {
+		t.Fatal("the advertisement's own battery was marked correlated")
+	}
 	noiseControl := classic.Capabilities["noise_control"]
 	if noiseControl.Status != "planned" || !noiseControl.Readable || !noiseControl.Writable || len(noiseControl.Values) != 4 {
 		t.Fatalf("noise_control=%#v", noiseControl)

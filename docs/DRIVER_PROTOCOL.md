@@ -313,6 +313,7 @@ What a driver tells Betty about a device. Every field is optional.
 | `estimated` | boolean | The value is approximate. |
 | `resolution` | integer | Step size of an estimated value, in the value's unit. |
 | `verified` | boolean | In a `set` response: the value was read back from the device after the write. Omit it when the value is only the one requested. |
+| `correlated` | boolean | The value was read from another endpoint in the device's `possible_matches`, not from the device itself: a likely match, not a proven one. |
 
 ### Capability
 

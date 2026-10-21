@@ -26,8 +26,9 @@ type propertyResult struct {
 	Resolution int             `json:"resolution,omitempty"`
 	// Verified is set only by set: whether the driver read the value back
 	// from the device after writing it.
-	Verified *bool `json:"verified,omitempty"`
-	display  string
+	Verified   *bool `json:"verified,omitempty"`
+	Correlated bool  `json:"correlated,omitempty"`
+	display    string
 }
 
 func (r propertyResult) WriteHuman(w io.Writer) error {
@@ -38,6 +39,9 @@ func (r propertyResult) WriteHuman(w io.Writer) error {
 	if r.Estimated && r.Resolution > 0 {
 		text += fmt.Sprintf(" (estimated, ±%d)", r.Resolution)
 	}
+	if r.Correlated {
+		text += " (from a nearby advertisement that probably belongs to this device)"
+	}
 	_, err := fmt.Fprintln(w, text)
 	return err
 }
@@ -46,7 +50,7 @@ func newPropertyResult(d domain.Device, name string, p domain.Property) (propert
 	if len(p.Value) == 0 || !json.Valid(p.Value) {
 		return propertyResult{}, domain.NewError(domain.CodeInternal, "%s returned no valid value for %s", d.Name, name)
 	}
-	return propertyResult{DeviceID: d.ID, Property: name, Value: p.Value, Unit: p.Unit, Estimated: p.Estimated, Resolution: p.Resolution, display: p.Display}, nil
+	return propertyResult{DeviceID: d.ID, Property: name, Value: p.Value, Unit: p.Unit, Estimated: p.Estimated, Resolution: p.Resolution, Correlated: p.Correlated, display: p.Display}, nil
 }
 
 func (a *application) get(ctx context.Context, args []string) error {
