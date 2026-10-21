@@ -244,33 +244,66 @@ func (m *Manager) Install(ctx context.Context, source string) (protocol.Manifest
 	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err == nil {
 		return manifest, domain.NewError(domain.CodeUsage, "driver %s is already installed", manifest.ID)
 	}
-	temp, err := os.MkdirTemp(m.root, ".install-")
+	return manifest, m.place(manifest, source, dir)
+}
+
+// Upgrade replaces a user-installed driver with the executable at source,
+// which must report the same ID. The driver's private storage is kept.
+// Bundled and package-managed drivers are upgraded by their installer.
+func (m *Manager) Upgrade(ctx context.Context, source string) (protocol.Manifest, error) {
+	manifest, err := readManifest(ctx, source)
 	if err != nil {
 		return manifest, err
+	}
+	if err := validateManifest(manifest); err != nil {
+		return manifest, err
+	}
+	unlock, err := m.lock()
+	if err != nil {
+		return manifest, err
+	}
+	defer unlock()
+	dir := filepath.Join(m.root, safeID(manifest.ID))
+	if _, err := os.Stat(filepath.Join(dir, "manifest.json")); err != nil {
+		for _, item := range mustList(m) {
+			if item.ID == manifest.ID {
+				return manifest, domain.NewError(domain.CodeUnsupported, "driver %s is bundled with Betty or managed by a package manager; upgrade it with that installer", manifest.ID)
+			}
+		}
+		return manifest, domain.NewError(domain.CodeNotFound, "driver %s is not installed; use bt driver install", manifest.ID)
+	}
+	return manifest, m.place(manifest, source, dir)
+}
+
+// place copies the executable at source and its manifest into dir, replacing
+// what is there but leaving the driver's storage alone. The caller holds the
+// lock.
+func (m *Manager) place(manifest protocol.Manifest, source, dir string) error {
+	temp, err := os.MkdirTemp(m.root, ".install-")
+	if err != nil {
+		return err
 	}
 	defer os.RemoveAll(temp)
 	target := filepath.Join(temp, executableName())
 	if err := copyExecutable(source, target); err != nil {
-		return manifest, err
+		return err
 	}
 	bytes, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := os.WriteFile(filepath.Join(temp, "manifest.json"), append(bytes, '\n'), 0o644); err != nil {
-		return manifest, err
+		return err
 	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		if err := os.Rename(temp, dir); err != nil {
-			return manifest, err
-		}
-	} else {
-		if err := os.Rename(target, filepath.Join(dir, executableName())); err != nil {
-			return manifest, err
-		}
-		if err := os.Rename(filepath.Join(temp, "manifest.json"), filepath.Join(dir, "manifest.json")); err != nil {
-			_ = os.Remove(filepath.Join(dir, executableName()))
-			return manifest, err
-		}
+		return os.Rename(temp, dir)
 	}
-	return manifest, nil
+	// The directory exists: it holds storage, and for an upgrade the old
+	// driver. Replace the executable, then the manifest that names it.
+	if err := os.Rename(target, filepath.Join(dir, executableName())); err != nil {
+		return err
+	}
+	if err := os.Rename(filepath.Join(temp, "manifest.json"), filepath.Join(dir, "manifest.json")); err != nil {
+		return err
+	}
+	return nil
 }
 func (m *Manager) Remove(id string) error {
 	path := filepath.Join(m.root, safeID(id))
