@@ -93,7 +93,8 @@ func controlProperty(host *protocol.Session, request protocol.PropertyRequest, w
 	return &protocol.Enrichment{
 		Identification: nameIdentification(profile),
 		Capabilities:   connectedAppleAudioCapabilities(device, nil),
-		Properties:     map[string]protocol.Property{"noise_control": {Value: raw, Display: mode}},
+		// A write returns only once the device reports the requested mode.
+		Properties: map[string]protocol.Property{"noise_control": {Value: raw, Display: mode, Verified: write}},
 	}, nil
 }
 

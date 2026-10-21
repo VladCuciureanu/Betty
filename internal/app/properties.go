@@ -24,7 +24,10 @@ type propertyResult struct {
 	Unit       string          `json:"unit,omitempty"`
 	Estimated  bool            `json:"estimated"`
 	Resolution int             `json:"resolution,omitempty"`
-	display    string
+	// Verified is set only by set: whether the driver read the value back
+	// from the device after writing it.
+	Verified *bool `json:"verified,omitempty"`
+	display  string
 }
 
 func (r propertyResult) WriteHuman(w io.Writer) error {
@@ -245,6 +248,10 @@ func (a *application) set(ctx context.Context, args []string) error {
 		result, err := newPropertyResult(d, name, property)
 		if err != nil {
 			return err
+		}
+		result.Verified = &property.Verified
+		if !property.Verified {
+			a.render.Warn("the driver reports %s as requested, not as read back from %s", name, d.Name)
 		}
 		return a.render.Data(result)
 	})

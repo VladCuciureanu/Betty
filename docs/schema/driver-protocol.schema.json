@@ -507,7 +507,10 @@
         "unit": {
           "type": "string"
         },
-        "value": {}
+        "value": {},
+        "verified": {
+          "type": "boolean"
+        }
       },
       "required": [
         "value"

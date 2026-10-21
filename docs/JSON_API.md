@@ -100,7 +100,9 @@ when nothing is found. `inspect` returns one device.
 | `event` | `watch` only: `snapshot` for the first value, `changed` for each later one. |
 
 `set` returns the value read back from the device after writing, not the value
-requested.
+requested, and adds `"verified": true`. A driver that cannot read the value
+back reports `"verified": false`, and Betty also warns that the value is only
+the one requested.
 
 `get --all <property>` returns an array with one entry per known device: the
 fields above plus `name`, or, for a device whose property couldn't be read,

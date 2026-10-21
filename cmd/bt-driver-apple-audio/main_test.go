@@ -469,7 +469,7 @@ func TestNoiseControlWriteWaitsForTheRequestedMode(t *testing.T) {
 	}
 	devices := []protocol.Device{{ID: "classic", Name: "AirPods Pro", Connected: true}}
 	got := betty.request(protocol.Request{ID: "1", Method: protocol.MethodSet, DeviceID: "classic", Property: "noise_control", Value: json.RawMessage(`"anc"`), Devices: devices})
-	if property := got.Enrichments["classic"].Properties["noise_control"]; got.Error != "" || string(property.Value) != `"anc"` {
+	if property := got.Enrichments["classic"].Properties["noise_control"]; got.Error != "" || string(property.Value) != `"anc"` || !property.Verified {
 		t.Fatalf("set=%+v", got)
 	}
 	host.Close()
