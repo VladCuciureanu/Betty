@@ -35,7 +35,7 @@ func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.En
 	switch request.Property {
 	case "battery":
 		return getBattery(host, request.Device)
-	case "noise_control", "ambient_level":
+	case "noise_control", "transparency_level":
 		if sonyControlValidationEnabled() {
 			return controlProperty(host, request, false)
 		}
@@ -45,7 +45,7 @@ func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.En
 
 func set(host *protocol.Session, request protocol.PropertyRequest) (*protocol.Enrichment, error) {
 	switch request.Property {
-	case "noise_control", "ambient_level":
+	case "noise_control", "transparency_level":
 		if sonyControlValidationEnabled() {
 			return controlProperty(host, request, true)
 		}
@@ -107,25 +107,25 @@ func applySonyControlInput(state *sonyNoiseState, property string, raw json.RawM
 	case "noise_control":
 		var mode string
 		if err := json.Unmarshal(raw, &mode); err != nil {
-			return errors.New("noise_control requires off, anc, or ambient")
+			return errors.New("noise_control requires off, anc, or transparency")
 		}
-		if mode != "off" && mode != "anc" && mode != "ambient" {
-			return errors.New("noise_control requires off, anc, or ambient")
+		if mode != "off" && mode != "anc" && mode != "transparency" {
+			return errors.New("noise_control requires off, anc, or transparency")
 		}
 		state.Mode = mode
-		if mode == "ambient" && layout == sonyNoiseStandard && state.AmbientLevel == nil {
+		if mode == "transparency" && layout == sonyNoiseStandard && state.AmbientLevel == nil {
 			level := 1
 			state.AmbientLevel = &level
 		}
-	case "ambient_level":
+	case "transparency_level":
 		if layout != sonyNoiseStandard {
-			return errors.New("ambient_level is unsupported for this model")
+			return errors.New("transparency_level is unsupported for this model")
 		}
 		var level int
 		if err := json.Unmarshal(raw, &level); err != nil || level < 1 || level > 20 {
-			return errors.New("ambient_level requires an integer from 1 through 20")
+			return errors.New("transparency_level requires an integer from 1 through 20")
 		}
-		state.Mode = "ambient"
+		state.Mode = "transparency"
 		state.AmbientLevel = &level
 	default:
 		return fmt.Errorf("unsupported Sony property %q", property)
@@ -140,7 +140,7 @@ func sonyControlEnrichment(device protocol.Device, model string, version sonyPro
 	}
 	if state.AmbientLevel != nil {
 		level, _ := json.Marshal(*state.AmbientLevel)
-		properties["ambient_level"] = protocol.Property{Value: level, Display: fmt.Sprintf("%d", *state.AmbientLevel)}
+		properties["transparency_level"] = protocol.Property{Value: level, Display: fmt.Sprintf("%d", *state.AmbientLevel)}
 	}
 	capabilities := sonyCapabilitiesFor(model, version)
 	return protocol.Enrichment{
@@ -248,8 +248,8 @@ func sonyCapabilities(protocolVersion sonyProtocol) map[string]protocol.Capabili
 	minimum, maximum, step := 1.0, 20.0, 1.0
 	capabilities := map[string]protocol.Capability{
 		"battery":       batteryCapability(protocolVersion),
-		"noise_control": {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: []string{"off", "anc", "ambient"}, Reason: reason},
-		"ambient_level": {Status: protocol.StatusPlanned, Kind: protocol.KindInteger, Readable: true, Writable: true, Minimum: &minimum, Maximum: &maximum, Step: &step, Reason: reason},
+		"noise_control": {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: []string{"off", "anc", "transparency"}, Reason: reason},
+		"transparency_level": {Status: protocol.StatusPlanned, Kind: protocol.KindInteger, Readable: true, Writable: true, Minimum: &minimum, Maximum: &maximum, Step: &step, Reason: reason},
 		"equalizer":     {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Reason: reason},
 	}
 	if protocolVersion == protocolV2 || protocolVersion == protocolUnknown {
@@ -282,9 +282,9 @@ func sonyCapabilitiesFor(model string, protocolVersion sonyProtocol) map[string]
 	noise.Status, noise.Reason = protocol.StatusAvailable, ""
 	capabilities["noise_control"] = noise
 	if layout == sonyNoiseStandard {
-		ambient := capabilities["ambient_level"]
+		ambient := capabilities["transparency_level"]
 		ambient.Status, ambient.Reason = protocol.StatusAvailable, ""
-		capabilities["ambient_level"] = ambient
+		capabilities["transparency_level"] = ambient
 	}
 	return capabilities
 }

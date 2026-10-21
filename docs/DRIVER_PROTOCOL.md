@@ -355,12 +355,14 @@ vendors:
 | Name | Type | Value |
 | --- | --- | --- |
 | `battery` | `battery` | An object. A device with one battery sets `level` (0–100), with optional `charging` (boolean) and `status` (string). A device with independently reported parts sets `left`, `right`, and `case` components instead, each `{"level": 0-100, "charging": bool, "status": string}`. Omit unavailable parts; never report them as 0. Betty turns a bare integer percentage into `{"level": n}`. |
-| `noise_control` | `enum` | `off`, `anc`, `ambient`, `transparency`, `adaptive`, as supported by the model. |
-| `ambient_level` | `integer` | Model-specific range. |
-| `wear_detection` | `boolean` | `off`, `on`. |
-| `microphone_mute` | `boolean` | `off`, `on`. |
-| `codec` | `string` | Active audio codec. |
-| `firmware_version` | `string` | Firmware version. |
+| `noise_control` | `enum` | `off`, `anc` (active noise cancellation), `transparency` (outside sound passes through, whatever the vendor calls it, such as ambient sound or hear-through), and `adaptive`, as supported by the model. |
+| `transparency_level` | `integer` | How much outside sound passes through in `transparency` mode, in a model-specific range. |
+| `firmware_version` | `string` | Firmware version. Betty reads it from the Device Information Service when no driver reports it. |
+
+These names are reserved for future definition, so don't use them for
+something else: `wear_detection`, `microphone_mute`, and `codec`.
+
+The Go SDK has constants for every name and `noise_control` value above.
 
 Name genuinely vendor-specific properties `<vendor>.<name>`, for example
 `sony.speak_to_chat`. New shared names are added to this table through the

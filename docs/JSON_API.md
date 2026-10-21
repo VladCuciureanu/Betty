@@ -70,7 +70,7 @@ when nothing is found. `inspect` returns one device.
   ],
   "identification": {"vendor": "Sony", "family": "Headphones", "model": "WH-1000XM5", "confidence": "protocol"},
   "properties": {"battery": {"value": {"level": 80}, "unit": "%", "display": "80%"}},
-  "capabilities": {"noise_control": {"status": "planned", "type": "enum", "readable": true, "writable": true, "values": ["off", "anc", "ambient"], "reason": "..."}}
+  "capabilities": {"noise_control": {"status": "planned", "type": "enum", "readable": true, "writable": true, "values": ["off", "anc", "transparency"], "reason": "..."}}
 }
 ```
 

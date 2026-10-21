@@ -44,7 +44,7 @@ The earlier `bt <device>` and `bt <device> battery` aliases were removed: they t
 - [x] Implement `inspect`, `get`, `set`, and property-level `watch` without adding vendor-specific CLI commands.
 - [x] Extend the external-driver protocol beyond `inspect` with generic get and set operations. Property watch initially polls generic get, leaving native driver subscriptions optional.
 - [x] Keep capability descriptions small: type, readable, writable, accepted values or numeric range, and availability.
-- Normalize shared properties such as `battery`, `noise_control`, `ambient_level`, `wear_detection`, `microphone_mute`, `codec`, and `firmware_version`.
+- [x] Normalize shared properties: `battery`, `noise_control`, `transparency_level`, and `firmware_version` are defined in the protocol and the SDK; `wear_detection`, `microphone_mute`, and `codec` are reserved.
 - Namespace only genuinely vendor-specific properties, for example `sony.speak_to_chat`.
 - [x] Verify writes by reading state back when the protocol supports it; distinguish requested from verified state.
 - [x] Initially support one property per watch process. Multi-property subscriptions can wait for a demonstrated need.
@@ -190,7 +190,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 - Validate v2 initialization, single and component battery values, charging state, fragmentation, and acknowledgements.
 - Determine whether supported v1 models expose battery through the control protocol.
 - [x] Implement model-scoped v2 current-state reads and write/read-back verification for WH-CH720N and ULT Wear packet layouts, gated behind `BETTY_VALIDATE_SONY_CONTROLS=1` until Betty-native hardware evidence exists.
-- Hardware-validate noise control and ambient level on each claimed model before removing the validation gate.
+- Hardware-validate noise control and transparency level on each claimed model before removing the validation gate.
 - Keep EQ, DSEE, voice focus, and speak-to-chat planned until model-specific hardware tests pass.
 - Maintain a tested-model table rather than treating a shared service UUID as proof of feature support.
 

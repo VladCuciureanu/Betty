@@ -94,11 +94,11 @@ func TestParseSonyBattery(t *testing.T) {
 
 func TestSonyV2NoiseControlFixtures(t *testing.T) {
 	standard, err := parseSonyNoiseStateV2([]byte{0x67, 0x17, 0x01, 0x01, 0x01, 0x00, 0x0c}, sonyNoiseStandard)
-	if err != nil || standard.Mode != "ambient" || standard.AmbientLevel == nil || *standard.AmbientLevel != 12 || standard.VoiceFocus {
+	if err != nil || standard.Mode != "transparency" || standard.AmbientLevel == nil || *standard.AmbientLevel != 12 || standard.VoiceFocus {
 		t.Fatalf("standard=%+v err=%v", standard, err)
 	}
 	reserved, err := parseSonyNoiseStateV2([]byte{0x67, 0x17, 0x01, 0x01, 0x01, 0x01, 0x01}, sonyNoiseReservedByte)
-	if err != nil || reserved.Mode != "ambient" || reserved.AmbientLevel != nil || !reserved.VoiceFocus {
+	if err != nil || reserved.Mode != "transparency" || reserved.AmbientLevel != nil || !reserved.VoiceFocus {
 		t.Fatalf("reserved=%+v err=%v", reserved, err)
 	}
 	off, err := parseSonyNoiseStateV2([]byte{0x67, 0x17, 0x01, 0x00, 0x00, 0x00, 0x01}, sonyNoiseStandard)
@@ -109,7 +109,7 @@ func TestSonyV2NoiseControlFixtures(t *testing.T) {
 
 func TestSonyV2NoiseControlWriteFixtures(t *testing.T) {
 	level := 12
-	standard, err := encodeSonyNoiseStateV2(sonyNoiseState{Mode: "ambient", AmbientLevel: &level, VoiceFocus: true}, sonyNoiseStandard)
+	standard, err := encodeSonyNoiseStateV2(sonyNoiseState{Mode: "transparency", AmbientLevel: &level, VoiceFocus: true}, sonyNoiseStandard)
 	if err != nil || !bytes.Equal(standard, []byte{0x68, 0x17, 0x01, 0x01, 0x01, 0x01, 0x0c}) {
 		t.Fatalf("standard=%x err=%v", standard, err)
 	}
@@ -155,11 +155,11 @@ func TestSonyControlValidationGate(t *testing.T) {
 	}
 	t.Setenv("BETTY_VALIDATE_SONY_CONTROLS", "1")
 	capabilities := sonyCapabilitiesFor("WH-CH720N", protocolV2)
-	if capabilities["noise_control"].Status != "available" || capabilities["ambient_level"].Status != "available" {
+	if capabilities["noise_control"].Status != "available" || capabilities["transparency_level"].Status != "available" {
 		t.Fatalf("capabilities=%#v", capabilities)
 	}
 	ult := sonyCapabilitiesFor("ULT WEAR", protocolV2)
-	if ult["noise_control"].Status != "available" || ult["ambient_level"].Status != "planned" {
+	if ult["noise_control"].Status != "available" || ult["transparency_level"].Status != "planned" {
 		t.Fatalf("ULT capabilities=%#v", ult)
 	}
 }
@@ -167,13 +167,13 @@ func TestSonyControlValidationGate(t *testing.T) {
 func TestApplySonyControlInput(t *testing.T) {
 	level := 4
 	state := sonyNoiseState{Mode: "anc", AmbientLevel: &level}
-	if err := applySonyControlInput(&state, "noise_control", json.RawMessage(`"ambient"`), sonyNoiseStandard); err != nil || state.Mode != "ambient" {
+	if err := applySonyControlInput(&state, "noise_control", json.RawMessage(`"transparency"`), sonyNoiseStandard); err != nil || state.Mode != "transparency" {
 		t.Fatalf("state=%+v err=%v", state, err)
 	}
-	if err := applySonyControlInput(&state, "ambient_level", json.RawMessage(`12`), sonyNoiseStandard); err != nil || state.AmbientLevel == nil || *state.AmbientLevel != 12 {
+	if err := applySonyControlInput(&state, "transparency_level", json.RawMessage(`12`), sonyNoiseStandard); err != nil || state.AmbientLevel == nil || *state.AmbientLevel != 12 {
 		t.Fatalf("state=%+v err=%v", state, err)
 	}
-	if err := applySonyControlInput(&state, "ambient_level", json.RawMessage(`12`), sonyNoiseReservedByte); err == nil {
+	if err := applySonyControlInput(&state, "transparency_level", json.RawMessage(`12`), sonyNoiseReservedByte); err == nil {
 		t.Fatal("ULT layout accepted unsupported ambient level")
 	}
 }

@@ -160,7 +160,7 @@ func TestWrapPreservesHostErrorCode(t *testing.T) {
 
 func TestDecodeValueReportsUsage(t *testing.T) {
 	var level int
-	err := PropertyRequest{Property: "ambient_level", Value: json.RawMessage(`"loud"`)}.DecodeValue(&level)
+	err := PropertyRequest{Property: "transparency_level", Value: json.RawMessage(`"loud"`)}.DecodeValue(&level)
 	if code, _ := CodeOf(err, CodeInternal); code != CodeUsage {
 		t.Fatalf("err=%v", err)
 	}
