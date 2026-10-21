@@ -93,6 +93,8 @@ _DEFAULT_REPLIES = {
     "HCI_READ_NUMBER_OF_SUPPORTED_IAC_COMMAND": {"num_support_iac": 1},
     # The General Inquiry Access Code, little-endian.
     "HCI_READ_CURRENT_IAC_LAP_COMMAND": {"num_support_iac": 1, "iac_lap": bytes([0x33, 0x8B, 0x9E])},
+    # Linux writes it when the adapter becomes discoverable.
+    "HCI_WRITE_CURRENT_IAC_LAP_COMMAND": None,
     "HCI_READ_PAGE_SCAN_ACTIVITY_COMMAND": {"page_scan_interval": 0x0800, "page_scan_window": 0x0012},
     "HCI_READ_PAGE_SCAN_TYPE_COMMAND": {"page_scan_type": 0},
     "HCI_READ_STORED_LINK_KEY_COMMAND": {"max_num_keys": 0, "num_keys_read": 0},

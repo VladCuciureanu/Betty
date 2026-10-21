@@ -116,6 +116,19 @@ devices isn't read yet ([#24](https://github.com/VladCuciureanu/Betty/issues/24)
 seconds by default (`--interval`). It reports retryable errors as warnings and
 keeps going, and it ends when interrupted.
 
+### Adapter
+
+```console
+bt adapter
+bt adapter power off
+bt adapter discoverable on
+bt adapter name "Desk PC"
+```
+
+`bt adapter` lists the computer's Bluetooth adapters and marks the one Betty
+uses. A change prints the adapter's state read back afterwards, and fails if
+the adapter didn't take it.
+
 ### GATT
 
 ```console
@@ -213,6 +226,7 @@ driver.
 | Pair | Implemented | Paired-list devices only, so new Classic devices cannot be paired yet | Implemented; Windows may show its own dialog |
 | Unpair | Implemented | Unsupported: no public API | Implemented |
 | Connect and disconnect | Implemented | Opens or closes the baseband link, not individual profiles | Unsupported: no public API for every profile |
+| Adapter | Show, power, discoverable, name | Show only | Show and discoverable; the name is the computer's, and power isn't implemented yet |
 
 An operation a platform cannot perform returns `unsupported`. Device IDs are
 opaque and platform-local; don't parse them.

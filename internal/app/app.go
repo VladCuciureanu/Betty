@@ -161,6 +161,7 @@ var commands = []command{
 	{name: "connect", usage: "connect <device>", summary: "connect a paired device", minArgs: 1, maxArgs: 1, run: mutation("connect")},
 	{name: "disconnect", usage: "disconnect <device>", summary: "disconnect a device", minArgs: 1, maxArgs: 1, run: mutation("disconnect")},
 	{name: "gatt", usage: "gatt <device> services|characteristics|read|write|watch ...", summary: "use BLE GATT directly; see bt help gatt", details: gattHelp, minArgs: 2, maxArgs: 4, run: (*application).gatt, streams: func(args []string) bool { return len(args) > 1 && args[1] == "watch" }},
+	{name: "adapter", usage: "adapter [power on|off | discoverable on|off | name <name>]", summary: "show or change the local Bluetooth adapter; see bt help adapter", details: adapterHelp, maxArgs: 2, run: (*application).adapter},
 	{name: "capabilities", usage: "capabilities", summary: "show which operations this platform supports", maxArgs: 0, run: (*application).capabilities},
 	{name: "driver", usage: "driver list|install|upgrade|remove|export-state|import-state|check ...", summary: "manage optional device drivers; see bt help driver", details: driverHelp, minArgs: 0, maxArgs: 3, run: (*application).driverCommand},
 }

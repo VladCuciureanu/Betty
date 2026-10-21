@@ -389,3 +389,62 @@ func TestGetAllTakesOnePropertyAndNoDevice(t *testing.T) {
 		}
 	}
 }
+
+// adapterBackend adds adapter control to fakeBackend.
+type adapterBackend struct {
+	fakeBackend
+	adapter domain.Adapter
+	ignore  bool // pretend to apply changes without applying them
+}
+
+func (b *adapterBackend) Adapters(context.Context) ([]domain.Adapter, error) {
+	return []domain.Adapter{b.adapter}, nil
+}
+
+func (b *adapterBackend) SetAdapter(_ context.Context, change domain.AdapterChange) (domain.Adapter, error) {
+	if !b.ignore {
+		if change.Powered != nil {
+			b.adapter.Powered = change.Powered
+		}
+		if change.Name != nil {
+			b.adapter.Name = *change.Name
+		}
+	}
+	return b.adapter, nil
+}
+
+func TestAdapterReportsAndChangesTheAdapter(t *testing.T) {
+	off := false
+	backend := &adapterBackend{adapter: domain.Adapter{ID: "hci0", Name: "laptop", Powered: &off, Default: true}}
+	h := newHarness()
+	run := func(args ...string) int {
+		h.stdout.Reset()
+		h.stderr.Reset()
+		return run(args, &h.stdout, &h.stderr, "test", func(a *application) { a.backend, a.ble = backend, h.ble })
+	}
+	if code := run("--json", "adapter"); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, h.stderr.String())
+	}
+	var adapters []domain.Adapter
+	h.data(t, &adapters)
+	if len(adapters) != 1 || adapters[0].ID != "hci0" || *adapters[0].Powered {
+		t.Fatalf("adapters=%+v", adapters)
+	}
+	if code := run("--json", "adapter", "power", "on"); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, h.stderr.String())
+	}
+	var state domain.Adapter
+	h.data(t, &state)
+	if state.Powered == nil || !*state.Powered {
+		t.Fatalf("state=%+v", state)
+	}
+	backend.ignore = true
+	if code := run("adapter", "power", "off"); code == 0 {
+		t.Fatal("a change the adapter didn't make was reported as done")
+	}
+	for _, args := range [][]string{{"adapter", "power", "maybe"}, {"adapter", "volume", "up"}, {"adapter", "name", " "}, {"adapter", "power"}} {
+		if code := run(args...); code != 2 {
+			t.Errorf("bt %v: code=%d, want a usage error", args, code)
+		}
+	}
+}
