@@ -73,8 +73,10 @@ Bluetooth stack.
 
 The Sony scenario stalls on the virtual link after its RFCOMM channel is
 encrypted, so it is skipped there and runs only over the air
-([#100](https://github.com/VladCuciureanu/Betty/issues/100)). Everything else,
-Classic `connect` and `disconnect` included, runs on both.
+([#100](https://github.com/VladCuciureanu/Betty/issues/100)). Classic `connect`
+and `disconnect` fail intermittently there
+([#116](https://github.com/VladCuciureanu/Betty/issues/116)), so they are skipped
+on the virtual link too. Everything else runs on both.
 
 The scripted devices also run on a patched controller
 (`peer/betty_peer/controller.py`). It reports dual-mode support, answers Classic

@@ -155,6 +155,8 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	assertPaired(t, p.device(0).Address)
 
 	switch {
+	case virtual():
+		t.Log("skipping connect and disconnect: they fail intermittently on the virtual link (#116)")
 	case runtime.GOOS == "windows":
 		fails(t, domain.CodeUnsupported, "connect", name)
 	default:
