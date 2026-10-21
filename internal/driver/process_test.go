@@ -47,6 +47,18 @@ func runTestDriver(modes string) {
 			mode = value
 		}
 	}
+	if mode == "pusher" {
+		// Pushes two changes of "level", then ends the watch.
+		_ = protocol.Driver{Manifest: manifest, Watch: func(_ *protocol.Session, request protocol.PropertyRequest, emit func(protocol.Enrichment) error) error {
+			for _, level := range []string{"1", "2"} {
+				if err := emit(protocol.Enrichment{Properties: map[string]protocol.Property{request.Property: {Value: json.RawMessage(level)}}}); err != nil {
+					return err
+				}
+			}
+			return nil
+		}}.Run(nil, os.Stdin, os.Stdout)
+		return
+	}
 	if mode == "sdk" {
 		// A conforming driver: the SDK serves every request until EOF.
 		_ = protocol.Driver{Manifest: manifest, Inspect: func(*protocol.Session, protocol.InspectRequest) (map[string]protocol.Enrichment, error) {
@@ -369,5 +381,34 @@ func TestATimedOutReusedDriverIsDiscarded(t *testing.T) {
 	}
 	if _, kept := m.procs[manifest.ID]; kept {
 		t.Fatal("a driver that timed out was kept for reuse")
+	}
+}
+
+func TestADriverCanPushChanges(t *testing.T) {
+	m := newTestManager(t)
+	manifest := protocol.Manifest{ID: "example/pusher", Name: "Pusher", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=pusher")
+	var levels []string
+	handled, err := m.Watch(context.Background(), []domain.Device{{ID: "device"}}, "device", "level", func(devices []domain.Device) error {
+		levels = append(levels, string(devices[0].Properties["level"].Value))
+		return nil
+	})
+	if err != nil || !handled || strings.Join(levels, ",") != "1,2" {
+		t.Fatalf("handled=%t levels=%v err=%v", handled, levels, err)
+	}
+}
+
+func TestDriversWithoutWatchLeaveItToPolling(t *testing.T) {
+	m := newTestManager(t)
+	manifest := protocol.Manifest{ID: "example/plain", Name: "Plain", Version: "1"}
+	installTestDriver(t, m.root, manifest)
+	t.Setenv(testDriverEnv, manifest.ID+"=sdk")
+	handled, err := m.Watch(context.Background(), []domain.Device{{ID: "device"}}, "device", "level", func([]domain.Device) error {
+		t.Fatal("a driver without Watch reported a change")
+		return nil
+	})
+	if handled || err != nil {
+		t.Fatalf("handled=%t err=%v", handled, err)
 	}
 }

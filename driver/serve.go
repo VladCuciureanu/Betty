@@ -27,6 +27,14 @@ type Driver struct {
 	// back from the device. A driver that cannot verify a write returns an
 	// error instead of echoing the requested value.
 	Set func(host *Session, request PropertyRequest) (*Enrichment, error)
+
+	// Watch reports request.Property of request.Device as it changes, by
+	// calling emit with an enrichment holding the current value: once
+	// straight away, then after each change. It returns when watching ends,
+	// for example because the device disconnected, or when emit fails
+	// because Betty stopped listening. Without a Watch handler, bt watch
+	// polls Get instead.
+	Watch func(host *Session, request PropertyRequest, emit func(Enrichment) error) error
 }
 
 // InspectRequest is an inspect request from Betty.
@@ -126,6 +134,18 @@ func (d Driver) handle(host *Session, request Request) (response Response) {
 			return errorResponse(err)
 		}
 		return Response{Enrichments: enrichments}
+	case MethodWatch:
+		device, ok := findDevice(request.Devices, request.DeviceID)
+		if d.Watch == nil || !ok {
+			return Response{}
+		}
+		emit := func(enrichment Enrichment) error {
+			return host.encoder.Encode(Response{Protocol: Version, Type: TypeEvent, ID: request.ID, Enrichments: map[string]Enrichment{device.ID: enrichment}})
+		}
+		if err := d.Watch(host, PropertyRequest{Device: device, Property: request.Property, Devices: request.Devices}, emit); err != nil {
+			return errorResponse(err)
+		}
+		return Response{}
 	case MethodGet, MethodSet:
 		handler := d.Get
 		if request.Method == MethodSet {

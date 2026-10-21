@@ -316,6 +316,9 @@ func validateRange(capability domain.DeviceCapability, name string, value float6
 // rescan. Retryable failures are reported as warnings and polling continues.
 func (a *application) watch(ctx context.Context, args []string) error {
 	query, name := args[0], args[1]
+	if handled, err := a.watchThroughDriver(ctx, query, name); handled || err != nil {
+		return err
+	}
 	var devices []domain.Device
 	var device domain.Device
 	resolved := false
@@ -358,4 +361,46 @@ func (a *application) watch(ctx context.Context, args []string) error {
 		case <-time.After(a.opts.interval):
 		}
 	}
+}
+
+// watchThroughDriver offers the watch to the drivers, which can push each
+// change instead of being polled. handled is false when none takes it.
+func (a *application) watchThroughDriver(ctx context.Context, query, name string) (handled bool, err error) {
+	if !a.hasDrivers() {
+		return false, nil
+	}
+	resolveCtx, cancel := context.WithTimeout(ctx, a.opts.timeout)
+	var devices []domain.Device
+	var device domain.Device
+	err = a.withDevice(resolveCtx, query, func(all []domain.Device, d domain.Device) error {
+		devices, device = all, d
+		return nil
+	})
+	cancel()
+	if err != nil {
+		return false, err
+	}
+	previous, event := "", "snapshot"
+	handled, err = a.drivers.Watch(ctx, devices, device.ID, name, func(updated []domain.Device) error {
+		d, ok := findByID(updated, device.ID)
+		if !ok {
+			return nil
+		}
+		property, ok := d.Properties[name]
+		if !ok {
+			return nil
+		}
+		result, err := newPropertyResult(d, name, property)
+		if err != nil || string(result.Value) == previous {
+			return err
+		}
+		result.Event = event
+		previous, event = string(result.Value), "changed"
+		return a.render.Data(result)
+	})
+	if ctx.Err() != nil {
+		// Interrupting a watch is how it is meant to end.
+		return true, nil
+	}
+	return handled, err
 }
