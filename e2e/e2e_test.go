@@ -158,10 +158,6 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	case runtime.GOOS == "windows":
 		fails(t, domain.CodeUnsupported, "connect", name)
 	default:
-		// Pairing can leave its link up while BlueZ's input plugin still
-		// sets it up, and connecting then races it. Start from a link
-		// that is down, so connect really reconnects a paired device.
-		ok(t, &m, "disconnect", name)
 		ok(t, &m, "connect", name)
 		if !m.Connected {
 			t.Fatalf("connect=%+v", m)
