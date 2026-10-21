@@ -127,6 +127,7 @@ type gattValue struct {
 	Event          string `json:"event,omitempty"`
 	DeviceID       string `json:"device_id"`
 	Characteristic string `json:"characteristic"`
+	Descriptor     string `json:"descriptor,omitempty"`
 	Value          string `json:"value"`
 }
 
@@ -138,6 +139,7 @@ func (r gattValue) WriteHuman(w io.Writer) error {
 type gattWriteResult struct {
 	DeviceID       string `json:"device_id"`
 	Characteristic string `json:"characteristic"`
+	Descriptor     string `json:"descriptor,omitempty"`
 	Bytes          int    `json:"bytes"`
 	WithResponse   bool   `json:"with_response"`
 }
@@ -164,26 +166,31 @@ func (r gattMTU) WriteHuman(w io.Writer) error {
 func (a *application) gatt(ctx context.Context, args []string) error {
 	operation, rest := args[1], args[2:]
 	usage := map[string]string{
-		"services":        "gatt <device> services",
-		"characteristics": "gatt <device> characteristics [service-uuid]",
-		"read":            "gatt <device> read [service-uuid/]<characteristic-uuid>",
-		"write":           "gatt <device> write [service-uuid/]<characteristic-uuid> <hex> [--without-response]",
-		"watch":           "gatt <device> watch [service-uuid/]<characteristic-uuid>",
-		"mtu":             "gatt <device> mtu",
+		"services":         "gatt <device> services",
+		"characteristics":  "gatt <device> characteristics [service-uuid]",
+		"read":             "gatt <device> read [service-uuid/]<characteristic-uuid>",
+		"write":            "gatt <device> write [service-uuid/]<characteristic-uuid> <hex> [--without-response]",
+		"watch":            "gatt <device> watch [service-uuid/]<characteristic-uuid>",
+		"mtu":              "gatt <device> mtu",
+		"descriptors":      "gatt <device> descriptors [service-uuid/]<characteristic-uuid>",
+		"read-descriptor":  "gatt <device> read-descriptor [service-uuid/]<characteristic-uuid> <descriptor-uuid>",
+		"write-descriptor": "gatt <device> write-descriptor [service-uuid/]<characteristic-uuid> <descriptor-uuid> <hex>",
 	}
-	wantArgs := map[string][2]int{"services": {0, 0}, "characteristics": {0, 1}, "read": {1, 1}, "write": {2, 2}, "watch": {1, 1}, "mtu": {0, 0}}
+	wantArgs := map[string][2]int{"services": {0, 0}, "characteristics": {0, 1}, "read": {1, 1}, "write": {2, 2}, "watch": {1, 1}, "mtu": {0, 0},
+		"descriptors": {1, 1}, "read-descriptor": {2, 2}, "write-descriptor": {3, 3}}
 	limits, ok := wantArgs[operation]
 	if !ok {
-		return domain.NewError(domain.CodeUsage, "unknown gatt operation %q; use services, characteristics, read, write, watch, or mtu", operation)
+		return domain.NewError(domain.CodeUsage, "unknown gatt operation %q; use services, characteristics, read, write, watch, mtu, descriptors, read-descriptor, or write-descriptor", operation)
 	}
 	if len(rest) < limits[0] || len(rest) > limits[1] {
 		return domain.NewError(domain.CodeUsage, "usage: bt %s", usage[operation])
 	}
 	var value []byte
-	if operation == "write" {
+	if operation == "write" || operation == "write-descriptor" {
+		input := rest[len(rest)-1]
 		var err error
-		if value, err = hex.DecodeString(strings.TrimPrefix(rest[1], "0x")); err != nil || len(value) == 0 {
-			return domain.NewError(domain.CodeUsage, "%q is not a hexadecimal value", rest[1])
+		if value, err = hex.DecodeString(strings.TrimPrefix(input, "0x")); err != nil || len(value) == 0 {
+			return domain.NewError(domain.CodeUsage, "%q is not a hexadecimal value", input)
 		}
 	}
 	return a.withDevice(ctx, args[0], func(_ []domain.Device, d domain.Device) error {
@@ -208,6 +215,23 @@ func (a *application) gatt(ctx context.Context, args []string) error {
 				return err
 			}
 			return a.render.Data(nonNil(characteristics))
+		case "descriptors":
+			descriptors, err := a.ble.Descriptors(ctx, address, rest[0])
+			if err != nil {
+				return err
+			}
+			return a.render.Data(nonNil(descriptors))
+		case "read-descriptor":
+			data, err := a.ble.ReadDescriptor(ctx, address, rest[0], rest[1])
+			if err != nil {
+				return err
+			}
+			return a.render.Data(gattValue{DeviceID: d.ID, Characteristic: rest[0], Descriptor: rest[1], Value: hex.EncodeToString(data)})
+		case "write-descriptor":
+			if err := a.ble.WriteDescriptor(ctx, address, rest[0], rest[1], value); err != nil {
+				return err
+			}
+			return a.render.Data(gattWriteResult{DeviceID: d.ID, Characteristic: rest[0], Descriptor: rest[1], Bytes: len(value), WithResponse: true})
 		case "mtu":
 			mtu, err := a.ble.MTU(ctx, address)
 			if err != nil {

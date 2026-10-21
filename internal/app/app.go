@@ -169,7 +169,7 @@ var commands = []command{
 	{name: "unpair", usage: "unpair <device>", summary: "remove a pairing", minArgs: 1, maxArgs: 1, run: mutation("unpair")},
 	{name: "connect", usage: "connect <device>", summary: "connect a paired device", minArgs: 1, maxArgs: 1, run: mutation("connect")},
 	{name: "disconnect", usage: "disconnect <device>", summary: "disconnect a device", minArgs: 1, maxArgs: 1, run: mutation("disconnect")},
-	{name: "gatt", usage: "gatt <device> services|characteristics|read|write|watch ...", summary: "use BLE GATT directly; see bt help gatt", details: gattHelp, minArgs: 2, maxArgs: 4, run: (*application).gatt, streams: func(args []string) bool { return len(args) > 1 && args[1] == "watch" }},
+	{name: "gatt", usage: "gatt <device> services|characteristics|read|write|watch|mtu|descriptors|read-descriptor|write-descriptor ...", summary: "use BLE GATT directly; see bt help gatt", details: gattHelp, minArgs: 2, maxArgs: 5, run: (*application).gatt, streams: func(args []string) bool { return len(args) > 1 && args[1] == "watch" }},
 	{name: "adapter", usage: "adapter [power on|off | discoverable on|off | name <name>]", summary: "show or change the local Bluetooth adapter; see bt help adapter", details: adapterHelp, maxArgs: 2, run: (*application).adapter},
 	{name: "capabilities", usage: "capabilities", summary: "show which operations this platform supports", maxArgs: 0, run: (*application).capabilities},
 	{name: "driver", usage: "driver list|install|upgrade|remove|export-state|import-state|check ...", summary: "manage optional device drivers; see bt help driver", details: driverHelp, minArgs: 0, maxArgs: 3, run: (*application).driverCommand},
@@ -182,6 +182,9 @@ const gattHelp = `Subcommands:
   bt gatt <device> write <characteristic> <hex>   write a value [--without-response]
   bt gatt <device> watch <characteristic>         print notifications until interrupted
   bt gatt <device> mtu                            show the ATT MTU the OS negotiated
+  bt gatt <device> descriptors <characteristic>   list a characteristic's descriptors (Linux)
+  bt gatt <device> read-descriptor <characteristic> <descriptor>
+  bt gatt <device> write-descriptor <characteristic> <descriptor> <hex>
 
 UUIDs may be 16-bit (2a19) or 128-bit. A characteristic UUID that appears in
 several services is ambiguous: name the service too, as service/characteristic.
