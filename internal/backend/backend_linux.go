@@ -139,8 +139,23 @@ func (b *linuxBackend) Pair(ctx context.Context, d domain.Device) error {
 	return b.waitProperty(ctx, path, "Paired", true)
 }
 func (b *linuxBackend) Connect(ctx context.Context, d domain.Device) error {
-	return b.deviceCall(ctx, d, "Connect", "Connected", true)
+	// Right after a link drops, as when pairing's link closes or a
+	// disconnect has just finished, the kernel can still hold the old
+	// connection, and BlueZ fails to open a profile's channel with
+	// br-connection-create-socket. Try again shortly, within ctx.
+	for attempt := 1; ; attempt++ {
+		err := b.deviceCall(ctx, d, "Connect", "Connected", true)
+		if err == nil || attempt == 3 || !strings.Contains(err.Error(), "br-connection-create-socket") {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Second):
+		}
+	}
 }
+
 func (b *linuxBackend) Disconnect(ctx context.Context, d domain.Device) error {
 	return b.deviceCall(ctx, d, "Disconnect", "Connected", false)
 }
