@@ -125,7 +125,7 @@ Medium:
 - **Fixed** (a channel is held open for the whole read or write; Close shuts the socket down to wake it, waits, then closes). On Linux, the fd was read outside the lock, a latent reuse race.
 - **Fixed** (one statement per line; the token stream is unchanged apart from braces around single-statement `if`s). The `.m` files were written as single lines of 400–900 characters.
 - **Fixed** (`internal/btsock` holds the Linux socket I/O and the one address parser; `maxDuration` is the builtin `max`). `waitFD`, the address parsers and `maxDuration` were copied between packages.
-- The macOS L2CAP hardware test opens a PSM that the code says macOS always rejects, so it can never pass.
+- **Fixed** (it opens SDP's PSM 1, which every Classic device serves, and skips on Windows). The macOS L2CAP hardware test opened a PSM that the code says macOS always rejects, so it could never pass.
 
 ### Driver system (`internal/driver`, `driver`, the drivers)
 
