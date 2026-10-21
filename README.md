@@ -222,8 +222,8 @@ driver.
 | --- | --- | --- | --- |
 | BLE scan and GATT | Implemented | Implemented | Implemented |
 | Known-device listing | Implemented | Paired devices | Implemented |
-| Classic discovery | Implemented | Not implemented: only paired devices and BLE advertisements are found | Implemented |
-| Pair | Implemented | Paired-list devices only, so new Classic devices cannot be paired yet | Implemented; Windows may show its own dialog |
+| Classic discovery | Implemented | Implemented through device inquiry; not yet run on hardware | Implemented |
+| Pair | Implemented | Implemented | Implemented; Windows may show its own dialog |
 | Unpair | Implemented | Unsupported: no public API | Implemented |
 | Connect and disconnect | Implemented | Opens or closes the baseband link, not individual profiles | Unsupported: no public API for every profile |
 | Adapter | Show, power, discoverable, name | Show only | Show and discoverable; the name is the computer's, and power isn't implemented yet |
