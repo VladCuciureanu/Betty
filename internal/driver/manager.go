@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -32,6 +33,10 @@ type Manager struct {
 	// up to 64 KiB per driver process. Otherwise stderr is discarded.
 	OnDriverLog func(driverID, line string)
 	host           Host
+	// reuse keeps driver processes in procs until Close; see SetReuse.
+	reuse   bool
+	procsMu sync.Mutex
+	procs   map[string]*driverProcess
 	rfcomm         RFCOMMHost
 	gattHost       GATTHost
 }

@@ -43,6 +43,8 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		a.drivers.SetHost(l2cap.New())
 		a.drivers.SetRFCOMMHost(rfcomm.New())
 		a.drivers.SetGATTHost(gattHost{client})
+		// One process per driver serves the whole command.
+		a.drivers.SetReuse(true)
 		a.drivers.OnInspectError = func(id string, err error) {
 			a.render.Warn("driver %s failed to inspect devices: %v", id, err)
 		}
@@ -100,6 +102,9 @@ func run(args []string, stdout, stderr io.Writer, version string, connect func(*
 		defer cancel()
 	}
 	err = c.run(a, ctx, args)
+	if a.drivers != nil {
+		a.drivers.Close()
+	}
 	if interrupted.Err() != nil && c.streams != nil && c.streams(args) {
 		// Interrupting a stream is how it is meant to end.
 		return 0
