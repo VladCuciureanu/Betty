@@ -123,7 +123,7 @@ Medium:
 - Windows L2CAP reads ignore the context and hold the channel lock for up to 5s.
 - **Fixed** (the host reads each instance's bound address and connects only through the matching one). The Go side sends `CONNECT` to every kernel-driver instance, so it can connect through an instance bound to a different headset.
 - **Fixed** (a channel is held open for the whole read or write; Close shuts the socket down to wake it, waits, then closes). On Linux, the fd was read outside the lock, a latent reuse race.
-- The `.m` files are written as single lines of 400–900 characters.
+- **Fixed** (one statement per line; the token stream is unchanged apart from braces around single-statement `if`s). The `.m` files were written as single lines of 400–900 characters.
 - **Fixed** (`internal/btsock` holds the Linux socket I/O and the one address parser; `maxDuration` is the builtin `max`). `waitFD`, the address parsers and `maxDuration` were copied between packages.
 - The macOS L2CAP hardware test opens a PSM that the code says macOS always rejects, so it can never pass.
 
