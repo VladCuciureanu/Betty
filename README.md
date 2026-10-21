@@ -140,6 +140,8 @@ bt gatt sensor write <characteristic-uuid> 01 --without-response
 bt gatt sensor watch <characteristic-uuid>
 bt gatt sensor read <service-uuid>/<characteristic-uuid>
 bt gatt sensor mtu
+bt gatt sensor descriptors 2a37
+bt gatt sensor read-descriptor 2a37 2902
 ```
 
 UUIDs may be written in 16-bit or 128-bit form. Writes use write-with-response

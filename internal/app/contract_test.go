@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -55,6 +56,8 @@ type fakeBLE struct {
 	err     error
 	scanErr error
 	reads   atomic.Int32
+	// descriptorWrite is the last value written to a descriptor.
+	descriptorWrite []byte
 }
 
 func (b *fakeBLE) Scan(context.Context) ([]domain.Device, error) { return b.devices, b.scanErr }
@@ -71,6 +74,16 @@ func (b *fakeBLE) Read(context.Context, string, string) ([]byte, error) {
 func (*fakeBLE) Write(context.Context, string, string, []byte, bool) error       { return nil }
 func (*fakeBLE) Watch(context.Context, string, string, func([]byte) error) error { return nil }
 func (*fakeBLE) MTU(context.Context, string) (int, error)                        { return 247, nil }
+func (*fakeBLE) Descriptors(context.Context, string, string) ([]ble.Descriptor, error) {
+	return []ble.Descriptor{{CharacteristicUUID: "2a37", UUID: "00002902-0000-1000-8000-00805f9b34fb"}}, nil
+}
+func (b *fakeBLE) ReadDescriptor(context.Context, string, string, string) ([]byte, error) {
+	return []byte{0x01, 0x00}, nil
+}
+func (b *fakeBLE) WriteDescriptor(_ context.Context, _, _, _ string, value []byte) error {
+	b.descriptorWrite = value
+	return nil
+}
 func (b *fakeBLE) DeviceInformation(context.Context, string) (map[string]string, error) {
 	return b.info, b.err
 }
@@ -446,5 +459,22 @@ func TestAdapterReportsAndChangesTheAdapter(t *testing.T) {
 		if code := run(args...); code != 2 {
 			t.Errorf("bt %v: code=%d, want a usage error", args, code)
 		}
+	}
+}
+
+func TestGATTDescriptorCommands(t *testing.T) {
+	h := newHarness()
+	h.backend.known = []domain.Device{bleDevice("AA:BB:CC:DD:EE:01", "Sensor")}
+	if code := h.run("--json", "gatt", "Sensor", "descriptors", "2a37"); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, h.stderr.String())
+	}
+	if code := h.run("--json", "gatt", "Sensor", "read-descriptor", "2a37", "2902"); code != 0 || !strings.Contains(h.stdout.String(), `"value":"0100"`) {
+		t.Fatalf("code=%d stdout=%s stderr=%s", code, h.stdout.String(), h.stderr.String())
+	}
+	if code := h.run("--json", "gatt", "Sensor", "write-descriptor", "2a37", "2902", "0200"); code != 0 || hex.EncodeToString(h.ble.descriptorWrite) != "0200" {
+		t.Fatalf("code=%d written=%x stderr=%s", code, h.ble.descriptorWrite, h.stderr.String())
+	}
+	if code := h.run("gatt", "Sensor", "write-descriptor", "2a37", "2902", "zz"); code != 2 {
+		t.Fatalf("a bad hex value: code=%d", code)
 	}
 }

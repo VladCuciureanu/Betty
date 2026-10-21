@@ -30,6 +30,9 @@ type Client interface {
 	Write(context.Context, string, string, []byte, bool) error
 	Watch(context.Context, string, string, func([]byte) error) error
 	MTU(context.Context, string) (int, error)
+	Descriptors(context.Context, string, string) ([]Descriptor, error)
+	ReadDescriptor(context.Context, string, string, string) ([]byte, error)
+	WriteDescriptor(context.Context, string, string, string, []byte) error
 	DeviceInformation(context.Context, string) (map[string]string, error)
 }
 
