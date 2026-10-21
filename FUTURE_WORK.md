@@ -56,7 +56,7 @@ The earlier `bt <device>` and `bt <device> battery` aliases were removed: they t
 - [x] Define schema-version-1 envelopes for inspect, get, set, watch events, and errors.
 - [x] Add structured errors for interaction required, disconnected devices, missing drivers, unsupported features, permissions, unavailable adapters, authentication, and timeout.
 - At 1.0, freeze schema version 1: from then on, unknown JSON fields are safe for clients to ignore and existing fields do not change meaning within a schema version. Until then the JSON API and driver protocol may change incompatibly.
-- Test cancellation and timeout behavior at every process and Bluetooth resource boundary.
+- [x] Test cancellation and timeout behavior at every process and Bluetooth resource boundary: backend contract tests, driver process tests, and socket close tests cover it.
 
 ### 3. Cross-platform generic hardware behavior
 
@@ -77,14 +77,14 @@ Validate on native macOS, Linux, and Windows:
 
 ### 4. Backend contracts and device identity
 
-- Add shared backend contract tests for adapter unavailability, permission denial, authentication cancellation, connection timeout, duplicate endpoints, and unexpected disconnection.
+- [x] Add shared backend contract tests for adapter unavailability, permission denial, authentication cancellation, connection timeout, duplicate endpoints, and unexpected disconnection.
 - Put native APIs behind narrow testable interfaces where practical.
-- Treat OS, Classic, and BLE endpoints as separate observations.
-- Never merge endpoints solely because their display names match.
-- Preserve uncertain relationships in `possible_matches`.
+- [x] Treat OS, Classic, and BLE endpoints as separate observations.
+- [x] Never merge endpoints solely because their display names match.
+- [x] Preserve uncertain relationships in `possible_matches`, and mark values copied across them as `correlated`.
 - Use protocol keys or authenticated sessions as stronger identity evidence where available.
 - Add fixtures for duplicate names, rotating BLE addresses, stale devices, and multiple identical nearby products.
-- Keep stable device IDs opaque and platform-local.
+- [x] Keep stable device IDs opaque and platform-local.
 
 ### 5. Linux Apple Audio transport privilege
 
@@ -97,7 +97,7 @@ Validate on native macOS, Linux, and Windows:
 - [x] License the project under the DFSG-compatible SPDX `MIT` license.
 - [x] Generate SHA-256 checksums for every immutable tagged release artifact. GitHub supplies source archives for tags.
 - Build releases natively on macOS, Linux, and Windows; cross-compilation remains supplementary validation.
-- Verify ordinary commands perform no network requests and leave no background process.
+- [x] Verify ordinary commands perform no network requests and leave no background process: the Linux end-to-end suite traces them.
 
 #### macOS and Homebrew
 
@@ -111,18 +111,18 @@ Validate on native macOS, Linux, and Windows:
 
 #### Linux
 
-- Build and install Debian packages on native Ubuntu and Debian runners.
-- Verify that `betty` contains no vendor protocol implementation.
-- Test `betty-apple-audio` version matching, upgrades, and clean uninstall.
-- Test `betty-sony` installation and clean uninstall.
-- Preserve per-user driver state during package removal and document explicit state deletion.
+- [x] Build and install Debian packages on Ubuntu and Debian, in clean containers.
+- [x] Verify that `betty` contains no vendor protocol implementation.
+- [x] Test `betty-apple-audio` version matching, upgrades, and clean uninstall.
+- [x] Test `betty-sony` installation and clean uninstall.
+- [x] Preserve per-user driver state during package removal.
 
 #### Windows
 
 - Build and test `betty-windows-x64.msi` on clean Windows 10 and Windows 11 systems.
 - Build and test the optional `betty-apple-audio-advanced-windows-x64.msi` separately.
 - Validate install, upgrade, rollback, repair, and uninstall ordering.
-- Ensure the base MSI contains no Apple Audio implementation or kernel payload.
+- [x] Ensure the base MSI contains no Apple Audio implementation or kernel payload.
 - Complete security review and native hardware testing of the Apple Audio IOCTL bridge.
 - Submit the profile driver through Microsoft Hardware Dev Center and validate the returned catalog under kernel signing policy.
 - Sign user-space executables and MSI packages independently from Microsoft kernel signing.
@@ -150,7 +150,7 @@ Third-party drivers are a first-class extension point. The protocol in [docs/DRI
 - [x] Ship a conformance checker that runs a driver against scripted requests and a fake host: `bt driver check <executable>`.
 - [x] Surface driver stderr and skipped-inspect failures under `--verbose`. Inspect failures are warnings in every mode.
 - [x] Publish JSON Schemas for protocol messages, generated from or tested against the Go types.
-- Bound message sizes and test malformed, oversized, crashing, and hanging drivers.
+- [x] Bound message sizes and test malformed, oversized, crashing, and hanging drivers.
 - [x] Reuse one driver process across requests within a command once the per-request loop is proven by every official driver.
 
 ## Optional driver work required for supported claims
@@ -164,7 +164,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 - Validate exact AAP battery reports on real AirPods and Beats devices on Linux. Windows doesn't support the AAP channel: only a signed kernel-mode driver could open it.
 - Validate authorized System Keychain acquisition and encrypted BLE battery reports on macOS.
 - Compare headset, left, right, case, charging, disconnected, sleeping, and reconnect states against a trustworthy reference.
-- Add fixtures for fragmented packets, unrelated notifications, missing components, malformed lengths, invalid statuses, private-key responses, and timeouts.
+- [x] Add fixtures for fragmented packets, unrelated notifications, missing components, malformed lengths, invalid statuses, private-key responses, and timeouts.
 - Validate IRK and advertisement-key persistence, address rotation, reboot, and state transfer.
 - Continue marking unencrypted proximity values as estimated with 10% resolution.
 - Never silently substitute an estimate when exact data was explicitly requested.
@@ -196,7 +196,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 
 ## Hardening after the v1 API is stable
 
-- Test malformed or oversized driver messages, crashes, hangs, and leaked channels.
+- [x] Test malformed or oversized driver messages, crashes, hangs, and leaked channels.
 - Define driver compatibility, upgrade, rollback, and deprecation policy.
 - Preserve namespaced, user-private driver state and migration behavior.
 - Add cryptographic endpoint verification where supported by a protocol.
@@ -218,7 +218,6 @@ These are outside Betty v1 unless a concrete Bluetooth-device use case demonstra
 - complex action parameter schemas;
 - in-process plugins or a plugin runtime other than executable drivers;
 - driver sandboxing;
-- multi-adapter selection;
 - RPM, Arch, and portable package formats;
 - automatic endpoint correlation without verifiable evidence;
 - broad diagnostic or hardware-setup commands such as `bt doctor`;
