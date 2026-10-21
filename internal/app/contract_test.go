@@ -24,6 +24,9 @@ type fakeBackend struct {
 	scanErr   error
 	scans     atomic.Int32
 	mutations []string
+	// mutationErr, when set, is what pair, unpair, connect, and disconnect
+	// return.
+	mutationErr error
 }
 
 func (b *fakeBackend) Capabilities() domain.Capabilities { return domain.Capabilities{} }
@@ -34,18 +37,30 @@ func (b *fakeBackend) Scan(context.Context) ([]domain.Device, error) {
 func (b *fakeBackend) List(context.Context) ([]domain.Device, error) { return b.known, b.err }
 func (b *fakeBackend) Pair(_ context.Context, d domain.Device) error {
 	b.mutations = append(b.mutations, "pair "+d.ID)
+	if b.mutationErr != nil {
+		return b.mutationErr
+	}
 	return b.err
 }
 func (b *fakeBackend) Unpair(_ context.Context, d domain.Device) error {
 	b.mutations = append(b.mutations, "unpair "+d.ID)
+	if b.mutationErr != nil {
+		return b.mutationErr
+	}
 	return b.err
 }
 func (b *fakeBackend) Connect(_ context.Context, d domain.Device) error {
 	b.mutations = append(b.mutations, "connect "+d.ID)
+	if b.mutationErr != nil {
+		return b.mutationErr
+	}
 	return b.err
 }
 func (b *fakeBackend) Disconnect(_ context.Context, d domain.Device) error {
 	b.mutations = append(b.mutations, "disconnect "+d.ID)
+	if b.mutationErr != nil {
+		return b.mutationErr
+	}
 	return b.err
 }
 
@@ -58,6 +73,8 @@ type fakeBLE struct {
 	reads   atomic.Int32
 	// descriptorWrite is the last value written to a descriptor.
 	descriptorWrite []byte
+	// watchErr is what Watch returns, as when the link drops.
+	watchErr error
 }
 
 func (b *fakeBLE) Scan(context.Context) ([]domain.Device, error) { return b.devices, b.scanErr }
@@ -71,9 +88,9 @@ func (b *fakeBLE) Read(context.Context, string, string) ([]byte, error) {
 	b.reads.Add(1)
 	return b.battery, b.err
 }
-func (*fakeBLE) Write(context.Context, string, string, []byte, bool) error       { return nil }
-func (*fakeBLE) Watch(context.Context, string, string, func([]byte) error) error { return nil }
-func (*fakeBLE) MTU(context.Context, string) (int, error)                        { return 247, nil }
+func (*fakeBLE) Write(context.Context, string, string, []byte, bool) error         { return nil }
+func (b *fakeBLE) Watch(context.Context, string, string, func([]byte) error) error { return b.watchErr }
+func (*fakeBLE) MTU(context.Context, string) (int, error)                          { return 247, nil }
 func (*fakeBLE) Descriptors(context.Context, string, string) ([]ble.Descriptor, error) {
 	return []ble.Descriptor{{CharacteristicUUID: "2a37", UUID: "00002902-0000-1000-8000-00805f9b34fb"}}, nil
 }
