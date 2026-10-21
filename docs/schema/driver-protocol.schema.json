@@ -597,7 +597,8 @@
           "enum": [
             "inspect",
             "get",
-            "set"
+            "set",
+            "watch"
           ],
           "type": "string"
         },
@@ -654,7 +655,8 @@
         },
         "type": {
           "enum": [
-            "response"
+            "response",
+            "event"
           ],
           "type": "string"
         }

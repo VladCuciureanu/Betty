@@ -92,7 +92,7 @@ bt get "ACME-42" battery
 
 | Piece | What it does |
 | --- | --- |
-| `Driver` | Your manifest and the optional `Inspect`, `Get`, and `Set` handlers. |
+| `Driver` | Your manifest and the optional `Inspect`, `Get`, `Set`, and `Watch` handlers. `Watch` pushes each change to `bt watch`; without it, `bt watch` polls `Get`. |
 | `Serve(d)` | Runs the driver: answers `--manifest`, handles requests until Betty closes stdin, and exits. |
 | `Driver.Run(args, in, out)` | The same over arbitrary streams, for tests. |
 | `*Session` | Host calls for the current request: `OpenL2CAP`, `ReadL2CAP`, `WriteL2CAP`, `CloseL2CAP`, the same four for RFCOMM, `GATTServices`, `ReadGATT`, `WriteGATT`, `SubscribeGATT`, `NextGATT`, `UnsubscribeGATT`, `GetState`, and `SetState`. |

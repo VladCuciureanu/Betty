@@ -5,6 +5,7 @@ const (
 	MethodInspect = "inspect"
 	MethodGet     = "get"
 	MethodSet     = "set"
+	MethodWatch   = "watch"
 )
 
 // Purposes describe why Betty sent an inspect request. Drivers must treat an

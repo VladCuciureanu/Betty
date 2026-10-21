@@ -200,10 +200,10 @@ When a driver misses its deadline, Betty kills it and reports `timeout`.
 | Field | Type | Present for | Meaning |
 | --- | --- | --- | --- |
 | `id` | string | all | Request ID to echo in the response. Treat as opaque. |
-| `method` | string | all | `inspect`, `get`, or `set`. |
+| `method` | string | all | `inspect`, `get`, `set`, or `watch`. |
 | `purpose` | string | `inspect` | `list` when `devices` holds only the devices the OS already knows, or `scan` when it also holds devices found by an active scan. Drivers MUST treat unknown values as `scan`. |
-| `device_id` | string | `get`, `set` | ID of the target device. |
-| `property` | string | `get`, `set` | Property name. |
+| `device_id` | string | `get`, `set`, `watch` | ID of the target device. |
+| `property` | string | `get`, `set`, `watch` | Property name. |
 | `value` | any JSON | `set` | Value to write. |
 | `devices` | array of [Device](#device) | all | Every device Betty currently knows. For `get` and `set` it includes the target. |
 
@@ -233,6 +233,26 @@ Betty validates `value` against the capability you reported before it sends a
 in `values` or within `minimum`, `maximum`, and `step`. Values for `integer`
 and `number` capabilities arrive as JSON numbers; all other values arrive as
 JSON strings.
+
+### `watch`
+
+`bt watch` sends `watch` so a driver can push changes instead of being polled
+with `get`. A driver that can watch `property` on `device_id` sends a message
+of type `event`, with the request's `id` and the `enrichments` of a response,
+holding the current value, then another for each change:
+
+```json
+{"protocol":1,"type":"event","id":"watch","enrichments":{"opaque-id":{"properties":{"noise_control":{"value":"anc"}}}}}
+```
+
+It MAY make host calls between events. It ends the watch with a `response`,
+an error such as `device_disconnected` when the device went away, or a
+success when watching simply ended. Betty ends a watch early by closing the
+driver's stdin or killing it, and runs each watch on its own process.
+
+A driver that can't watch the property responds with no enrichments, or with
+`unsupported` for a method it doesn't know, before sending any event; Betty
+then asks the next driver, and polls `get` when none takes the watch.
 
 ## 6. Responses to Betty
 

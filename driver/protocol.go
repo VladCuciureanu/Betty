@@ -78,6 +78,9 @@ const (
 	TypeResponse     = "response"
 	TypeHostRequest  = "host_request"
 	TypeHostResponse = "host_response"
+	// TypeEvent carries one change during a watch request. It has the
+	// request's ID and the enrichments of a response.
+	TypeEvent = "event"
 )
 const (
 	HostL2CAPOpen   = "l2cap.open"
