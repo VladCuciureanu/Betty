@@ -196,20 +196,20 @@ func TestSonyControlReadWriteReadback(t *testing.T) {
 	if err := json.Unmarshal(runJSON(t, "inspect", device), &inspected); err != nil {
 		t.Fatal(err)
 	}
-	if inspected.Capabilities["ambient_level"].Status != "available" {
+	if inspected.Capabilities["transparency_level"].Status != "available" {
 		return
 	}
-	data := runJSON(t, "get", device, "ambient_level")
+	data := runJSON(t, "get", device, "transparency_level")
 	var property struct {
 		Property string          `json:"property"`
 		Value    json.RawMessage `json:"value"`
 	}
-	if err := json.Unmarshal(data, &property); err == nil && property.Property == "ambient_level" {
+	if err := json.Unmarshal(data, &property); err == nil && property.Property == "transparency_level" {
 		var level int
 		if json.Unmarshal(property.Value, &level) != nil {
 			t.Fatalf("invalid ambient level: %s", property.Value)
 		}
-		runJSON(t, "set", device, "ambient_level", fmt.Sprintf("%d", level))
+		runJSON(t, "set", device, "transparency_level", fmt.Sprintf("%d", level))
 	}
 }
 

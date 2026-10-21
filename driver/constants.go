@@ -77,3 +77,31 @@ var ErrorCodes = []ErrorCode{
 	CodeInteractionRequired, CodeDeviceDisconnected, CodeDriverRequired,
 	CodeTimeout, CodeInternal,
 }
+
+// Shared property names. A driver reports a property under one of these names
+// when it means the same thing, so that clients need no vendor knowledge;
+// vendor-specific properties are named "vendor.name" instead.
+const (
+	// PropertyBattery is a BatteryValue.
+	PropertyBattery = "battery"
+	// PropertyNoiseControl is a KindEnum of NoiseControl values, as supported
+	// by the model.
+	PropertyNoiseControl = "noise_control"
+	// PropertyTransparencyLevel is a KindInteger: how much outside sound
+	// passes through in NoiseTransparency, in a model-specific range.
+	PropertyTransparencyLevel = "transparency_level"
+	// PropertyFirmwareVersion is a KindString.
+	PropertyFirmwareVersion = "firmware_version"
+)
+
+// NoiseControl values.
+const (
+	NoiseOff = "off"
+	// NoiseANC is active noise cancellation.
+	NoiseANC = "anc"
+	// NoiseTransparency passes outside sound through. Vendors call it
+	// transparency, ambient sound, or hear-through.
+	NoiseTransparency = "transparency"
+	// NoiseAdaptive switches between the others automatically.
+	NoiseAdaptive = "adaptive"
+)

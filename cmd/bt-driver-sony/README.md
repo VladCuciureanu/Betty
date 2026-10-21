@@ -9,8 +9,8 @@ not linked into the base `bt` binary.
 | Property | State | Values / shape | Current scope |
 | --- | --- | --- | --- |
 | `battery` | Available for v2 | one percentage, or left/right/case percentages, including charging state when reported | Connected device exposing Sony protocol v2 |
-| `noise_control` | Implemented, validation-gated | `off`, `anc`, `ambient` | WH-CH720N and ULT Wear v2 layouts only |
-| `ambient_level` | Implemented, validation-gated | integer `1` through `20` | WH-CH720N v2 layout only |
+| `noise_control` | Implemented, validation-gated | `off`, `anc`, `transparency` (Sony's ambient sound) | WH-CH720N and ULT Wear v2 layouts only |
+| `transparency_level` | Implemented, validation-gated | integer `1` through `20` (Sony's ambient sound level) | WH-CH720N v2 layout only |
 | `equalizer` | Planned | model-specific presets | Packet layout and hardware validation required |
 | `dsee` | Planned | `off`, `on` | v2 models; hardware validation required |
 | `sony.speak_to_chat` | Planned | `off`, `on` | v2 models; hardware validation required |
@@ -20,7 +20,7 @@ evidence exists. Maintainers can opt into the implemented model-scoped paths:
 
 ```console
 BETTY_VALIDATE_SONY_CONTROLS=1 bt get "WH-CH720N" noise_control
-BETTY_VALIDATE_SONY_CONTROLS=1 bt set "WH-CH720N" ambient_level 10
+BETTY_VALIDATE_SONY_CONTROLS=1 bt set "WH-CH720N" transparency_level 10
 ```
 
 Control writes first read current state, preserve unrelated fields, write the

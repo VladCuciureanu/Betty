@@ -42,7 +42,7 @@ type sonyBattery = protocol.BatteryValue
 
 type sonyNoiseState struct {
 	Mode         string `json:"mode"`
-	AmbientLevel *int   `json:"ambient_level,omitempty"`
+	AmbientLevel *int   `json:"transparency_level,omitempty"`
 	VoiceFocus   bool   `json:"voice_focus"`
 }
 
@@ -348,7 +348,7 @@ func parseSonyNoiseStateV2(payload []byte, layout sonyNoiseLayout) (sonyNoiseSta
 	if payload[3] == 1 {
 		state.Mode = "anc"
 		if payload[4] == 1 {
-			state.Mode = "ambient"
+			state.Mode = "transparency"
 		}
 	}
 	voiceIndex, levelIndex := 5, 6
@@ -361,7 +361,7 @@ func parseSonyNoiseStateV2(payload []byte, layout sonyNoiseLayout) (sonyNoiseSta
 	state.VoiceFocus = payload[voiceIndex] == 1
 	if levelIndex >= 0 {
 		level := int(payload[levelIndex])
-		if level < 1 && state.Mode == "ambient" {
+		if level < 1 && state.Mode == "transparency" {
 			return sonyNoiseState{}, fmt.Errorf("invalid Sony v2 ambient level")
 		}
 		if level >= 1 {
@@ -377,7 +377,7 @@ func encodeSonyNoiseStateV2(state sonyNoiseState, layout sonyNoiseLayout) ([]byt
 	case "off":
 		enabled = 0
 	case "anc":
-	case "ambient":
+	case "transparency":
 		ambient = 1
 	default:
 		return nil, fmt.Errorf("invalid Sony noise-control mode %q", state.Mode)
@@ -419,7 +419,7 @@ func writeAndVerifySonyNoiseStateV2(session *sonySession, desired sonyNoiseState
 }
 
 func sameAmbientLevel(actual, desired *int, mode string) bool {
-	if mode != "ambient" || desired == nil {
+	if mode != "transparency" || desired == nil {
 		return true
 	}
 	return actual != nil && *actual == *desired
