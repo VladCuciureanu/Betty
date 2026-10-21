@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vladcuciureanu/betty/internal/ble"
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/output"
 )
@@ -152,5 +153,25 @@ func TestMergePrefersARealNameOverAnAddress(t *testing.T) {
 	devices := mergeDevices([]domain.Device{bleDevice("AA:AA:AA:AA:AA:AA", "AA:AA:AA:AA:AA:AA")}, []domain.Device{bleDevice("AA:AA:AA:AA:AA:AA", "Heart Rate")})
 	if len(devices) != 1 || devices[0].Name != "Heart Rate" {
 		t.Fatalf("devices=%+v", devices)
+	}
+}
+
+func TestAdapterFlag(t *testing.T) {
+	opts, args, err := parseArgs([]string{"--adapter", "hci1", "list"})
+	if err != nil || opts.adapter != "hci1" || len(args) != 1 {
+		t.Fatalf("opts=%+v args=%v err=%v", opts, args, err)
+	}
+	if opts, _, err := parseArgs([]string{"--adapter=hci2", "scan"}); err != nil || opts.adapter != "hci2" {
+		t.Fatalf("opts=%+v err=%v", opts, err)
+	}
+	if _, _, err := parseArgs([]string{"list", "--adapter"}); domain.AsError(err).Code != domain.CodeUsage {
+		t.Fatalf("a missing adapter ID: %v", err)
+	}
+}
+
+func TestSelectingAnAdapterNeedsAPlatformThatHasSeveral(t *testing.T) {
+	// fakeBackend, like the macOS and Windows backends, can't select one.
+	if err := selectAdapter(&fakeBackend{}, ble.New(), "hci1"); domain.AsError(err).Code != domain.CodeUnsupported {
+		t.Fatalf("err=%v", err)
 	}
 }

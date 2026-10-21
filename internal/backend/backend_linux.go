@@ -24,6 +24,17 @@ type linuxBackend struct {
 	conn    *dbus.Conn
 	initErr error
 	pairing PairingIO
+	// selected is the adapter chosen with --adapter, such as "hci1", or
+	// empty to choose one automatically.
+	selected string
+}
+
+func (b *linuxBackend) SelectAdapter(id string) error {
+	if strings.ContainsAny(id, "/ ") {
+		return domain.NewError(domain.CodeUsage, "%q is not a BlueZ adapter ID such as hci1", id)
+	}
+	b.selected = id
+	return nil
 }
 
 func newPlatformBackend(pairing PairingIO) Backend {
@@ -219,6 +230,14 @@ func (b *linuxBackend) adapter(ctx context.Context) (dbus.ObjectPath, error) {
 		}
 	}
 	slices.Sort(adapters)
+	if b.selected != "" {
+		for _, path := range adapters {
+			if strings.HasSuffix(string(path), "/"+b.selected) {
+				return path, nil
+			}
+		}
+		return "", domain.NewError(domain.CodeNotFound, "no BlueZ adapter %q", b.selected)
+	}
 	for _, path := range adapters {
 		if powered, _ := variant[bool](objects[path]["org.bluez.Adapter1"], "Powered"); powered {
 			return path, nil

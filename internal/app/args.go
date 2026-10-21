@@ -26,6 +26,7 @@ type options struct {
 	nonInteractive bool
 	timeout        time.Duration
 	timeoutSet     bool
+	adapter        string
 	help           bool
 	version        bool
 
@@ -88,6 +89,10 @@ func parseArgs(args []string) (options, []string, error) {
 			o.withoutResponse = true
 		case "--all":
 			o.all = true
+		case "--adapter":
+			if o.adapter = takeValue(); o.adapter == "" && parseErr == nil {
+				fail("--adapter requires an adapter ID, such as hci1")
+			}
 		case "--timeout":
 			o.timeout, o.timeoutSet = parsePositiveDuration(name, takeValue(), fail), true
 		case "--interval":
@@ -122,7 +127,9 @@ func isFlag(arg string) bool {
 	return len(arg) > 1 && arg[0] == '-' && (arg[1] < '0' || arg[1] > '9')
 }
 
-func flagTakesValue(name string) bool { return name == "--timeout" || name == "--interval" }
+func flagTakesValue(name string) bool {
+	return name == "--timeout" || name == "--interval" || name == "--adapter"
+}
 
 func parsePositiveDuration(name, value string, fail func(string, ...any)) time.Duration {
 	if value == "" {
@@ -244,6 +251,7 @@ const globalFlagsHelp = `Flags (allowed anywhere):
   -q, --quiet         print nothing on success
   -v, --verbose       print diagnostics to stderr
   --non-interactive   fail instead of waiting for a person
+  --adapter <id>      use this BlueZ adapter, such as hci1 (Linux only)
   --timeout <dur>     bound the command (default 10s; pairing 60s)
   -h, --help          show help
   --version           show the version`

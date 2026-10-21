@@ -162,6 +162,7 @@ bt get headphones battery --json --timeout 15s
 | `-q`, `--quiet` | Print nothing on success. |
 | `-v`, `--verbose` | Print diagnostics, such as why a command decided to scan. |
 | `--non-interactive` | Fail instead of prompting for a pairing passkey. Only Linux honors it today; Windows and macOS may still show their own pairing dialogs. |
+| `--adapter <id>` | Linux only: use the BlueZ adapter `id`, such as `hci1`, instead of the first powered one. `bt adapter` lists them. |
 | `--timeout <duration>` | Bound the command. The default is 10 seconds, or 60 seconds for `pair`, which may wait for a person. Streaming commands such as `watch` have no deadline. |
 
 Every result uses the same envelope:
@@ -239,7 +240,7 @@ instead of working around them with private APIs:
 | Connecting or disconnecting an individual profile, such as A2DP | macOS | IOBluetooth opens and closes only the baseband link. |
 | Connecting or disconnecting every kind of saved device | Windows | No public API covers every profile. Windows' audio stack could connect audio devices, which isn't implemented yet ([#20](https://github.com/VladCuciureanu/Betty/issues/20)); other devices will stay `unsupported`. |
 | Unpairing | macOS | No public API. |
-| Choosing between several Bluetooth adapters | macOS, Windows | Both use one radio at a time. BlueZ exposes several ([#23](https://github.com/VladCuciureanu/Betty/issues/23)). |
+| Choosing between several Bluetooth adapters | macOS, Windows | Both use one radio at a time. On Linux, `--adapter` chooses among BlueZ's. |
 | Setting the MTU of a GATT connection | macOS, Windows | Both negotiate it and only let apps read the result ([#10](https://github.com/VladCuciureanu/Betty/issues/10)). |
 | Apple's AirPods control channel (exact battery over AAP, noise control) | macOS, Windows | macOS doesn't appear to open the channel to third-party processes, which hasn't been confirmed on hardware ([#18](https://github.com/VladCuciureanu/Betty/issues/18)); Windows opens Classic L2CAP only to signed kernel-mode drivers. See [the Apple Audio driver](cmd/bt-driver-apple-audio/README.md#platform-behavior). |
 
