@@ -11,7 +11,7 @@ device firmware, and observed limitation to every test record.
 | macOS | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | — |
 | Linux / BlueZ | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | — |
 | Windows 10 | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | — |
-| Windows 11 | Pro 10.0.26300 | Built-in (model not recorded) | Not tested | JBL Go 3 (A2DP) | Listing passes | Not tested | Pass for audio devices; a keyboard returns `unsupported` | Not tested | Not tested | Manual run, 2026-10-22 ([#20](https://github.com/VladCuciureanu/Betty/issues/20)) |
+| Windows 11 | Pro 10.0.26300 | Built-in (model not recorded) | Not tested | JBL Go 3 (A2DP), Magic Keyboard (HID) | Listing passes | Not tested | Pass for audio devices; a keyboard returns `unsupported` | Not tested | Magic Keyboard over HID while awake; DualSense not read ([#24](https://github.com/VladCuciureanu/Betty/issues/24)) | Manual runs, 2026-10-22 ([#20](https://github.com/VladCuciureanu/Betty/issues/20), [#24](https://github.com/VladCuciureanu/Betty/issues/24)) |
 
 Known public-API limitations are listed in the
 [README's platform section](README.md#platform-support). Device IDs are opaque

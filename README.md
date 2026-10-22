@@ -110,8 +110,10 @@ reports the same fields under `information`.
 On macOS it also reads battery levels that the system HID stack publishes for
 connected keyboards, mice, and trackpads, matched by exact address. On Linux it
 reads the levels BlueZ publishes for HID devices, LE devices with the Battery
-Service, and headsets that report battery over HFP. Windows battery for such
-devices isn't read yet ([#24](https://github.com/VladCuciureanu/Betty/issues/24)).
+Service, and headsets that report battery over HFP. On Windows it reads the
+standard HID battery usages of connected Bluetooth keyboards and mice, such as
+Apple's Magic Keyboard. Those only answer while awake, so an idle device may
+show no battery, and Betty waits at most a second for them.
 
 `set` prints the value the driver read back from the device after writing it.
 `watch` prints the value once and again whenever it changes, polling every 2
