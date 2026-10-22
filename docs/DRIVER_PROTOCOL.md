@@ -348,6 +348,7 @@ What a driver tells Betty about a device. Every field is optional.
 | `values` | array of strings | Accepted values for `enum` and `boolean`. |
 | `minimum`, `maximum`, `step` | number | Accepted range for `integer` and `number`. |
 | `reason` | string | Why the capability is not `available`. |
+| `requires_connection` | boolean | The capability works only while the device is connected. For a disconnected device, Betty refuses it with `device_disconnected` before asking the driver, with one message for every driver, and never connects the device to serve it. Drivers still return `device_disconnected` when the link drops during a request. |
 
 ### Property names
 

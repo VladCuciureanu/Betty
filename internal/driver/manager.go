@@ -203,7 +203,7 @@ func applyEnrichments(devices []domain.Device, enrichments map[string]protocol.E
 func domainCapabilities(capabilities map[string]protocol.Capability) map[string]domain.DeviceCapability {
 	out := map[string]domain.DeviceCapability{}
 	for name, capability := range capabilities {
-		out[name] = domain.DeviceCapability{Status: domain.CapabilityStatus(capability.Status), Kind: domain.ValueKind(capability.Kind), Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason}
+		out[name] = domain.DeviceCapability{Status: domain.CapabilityStatus(capability.Status), Kind: domain.ValueKind(capability.Kind), Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason, RequiresConnection: capability.RequiresConnection}
 	}
 	return out
 }
