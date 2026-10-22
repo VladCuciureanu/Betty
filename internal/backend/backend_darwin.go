@@ -35,7 +35,7 @@ type darwinBackend struct{ pairing PairingIO }
 func newPlatformBackend(pairing PairingIO) Backend { return &darwinBackend{pairing: pairing} }
 
 func (*darwinBackend) Capabilities() domain.Capabilities {
-	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Unsupported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
+	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Supported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
 }
 
 // Scan runs a Classic device inquiry until ctx ends and adds the paired
@@ -116,8 +116,11 @@ func (*darwinBackend) Connect(ctx context.Context, d domain.Device) error {
 func (*darwinBackend) Disconnect(ctx context.Context, d domain.Device) error {
 	return darwinCall(ctx, d, "disconnect", nil)
 }
-func (*darwinBackend) Unpair(context.Context, domain.Device) error {
-	return domain.NewError(domain.CodeUnsupported, "macOS does not expose a supported public API for programmatic unpairing; remove the device in System Settings")
+
+// Unpair uses a private IOBluetooth API, because macOS has no public one
+// (#14).
+func (*darwinBackend) Unpair(ctx context.Context, d domain.Device) error {
+	return darwinCall(ctx, d, "unpair", nil)
 }
 
 func darwinCall(ctx context.Context, d domain.Device, operation string, agent *pairingAgent) error {
@@ -143,6 +146,8 @@ func darwinCall(ctx context.Context, d domain.Device, operation string, agent *p
 			code = int(C.betty_connect(c))
 		case "disconnect":
 			code = int(C.betty_disconnect(c))
+		case "unpair":
+			code = int(C.betty_unpair(c))
 		}
 		result <- code
 	}()
@@ -160,9 +165,12 @@ func darwinCall(ctx context.Context, d domain.Device, operation string, agent *p
 	defer C.free(unsafe.Pointer(c))
 	desired := true
 	state := func() bool { return C.betty_is_connected(c) != 0 }
-	if operation == "pair" {
+	switch operation {
+	case "pair":
 		state = func() bool { return C.betty_is_paired(c) != 0 }
-	} else if operation == "disconnect" {
+	case "unpair":
+		state, desired = func() bool { return C.betty_is_paired(c) != 0 }, false
+	case "disconnect":
 		desired = false
 	}
 	ticker := time.NewTicker(100 * time.Millisecond)

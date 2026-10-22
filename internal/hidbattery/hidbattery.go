@@ -1,11 +1,11 @@
-// Package hidbattery collects battery observations from the operating system's
-// HID stack and correlates them with Betty devices by stable transport identity.
+// Package hidbattery collects battery observations from the operating system,
+// mostly its HID stack, and correlates them with Betty devices by stable
+// transport identity.
 package hidbattery
 
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -13,9 +13,41 @@ import (
 )
 
 type Observation struct {
-	Address    string `json:"address"`
-	Percentage int    `json:"percentage"`
-	Source     string `json:"source"`
+	Address string `json:"address"`
+	// Percentage is a single battery's level, used when no part is set.
+	Percentage int `json:"percentage"`
+	// Left, Right and Case are the levels of independently reported parts,
+	// such as earbuds and their case. Unknown parts are nil.
+	Left   *int   `json:"left,omitempty"`
+	Right  *int   `json:"right,omitempty"`
+	Case   *int   `json:"case,omitempty"`
+	Source string `json:"source"`
+}
+
+// value is the battery property for the observation, and false when a
+// level is out of range.
+func (o Observation) value() (protocol.BatteryValue, bool) {
+	valid := func(level int) bool { return level >= 0 && level <= 100 }
+	if o.Left == nil && o.Right == nil && o.Case == nil {
+		if !valid(o.Percentage) {
+			return protocol.BatteryValue{}, false
+		}
+		return protocol.SingleBattery(protocol.BatteryComponent{Level: o.Percentage}), true
+	}
+	var value protocol.BatteryValue
+	for _, part := range []struct {
+		level *int
+		into  **protocol.BatteryComponent
+	}{{o.Left, &value.Left}, {o.Right, &value.Right}, {o.Case, &value.Case}} {
+		if part.level == nil {
+			continue
+		}
+		if !valid(*part.level) {
+			return protocol.BatteryValue{}, false
+		}
+		*part.into = &protocol.BatteryComponent{Level: *part.level}
+	}
+	return value, true
 }
 
 type Provider interface {
@@ -31,7 +63,7 @@ func Apply(devices []domain.Device, observations []Observation) []domain.Device 
 	ambiguous := map[string]bool{}
 	for _, observation := range observations {
 		address := normalizeAddress(observation.Address)
-		if address == "" || observation.Percentage < 0 || observation.Percentage > 100 {
+		if _, valid := observation.value(); address == "" || !valid {
 			continue
 		}
 		if _, exists := byAddress[address]; exists {
@@ -66,8 +98,9 @@ func Apply(devices []domain.Device, observations []Observation) []domain.Device 
 		if devices[i].Capabilities == nil {
 			devices[i].Capabilities = map[string]domain.DeviceCapability{}
 		}
-		raw, _ := json.Marshal(protocol.SingleBattery(protocol.BatteryComponent{Level: observation.Percentage}))
-		devices[i].Properties["battery"] = domain.Property{Value: raw, Unit: "%", Display: strconv.Itoa(observation.Percentage) + "%"}
+		value, _ := observation.value()
+		raw, _ := json.Marshal(value)
+		devices[i].Properties["battery"] = domain.Property{Value: raw, Unit: "%", Display: value.Display()}
 		devices[i].Capabilities["battery"] = domain.DeviceCapability{Status: "available", Kind: "battery", Readable: true}
 	}
 	return devices

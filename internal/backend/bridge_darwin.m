@@ -160,6 +160,20 @@ int betty_is_paired(const char *address) {
 	}
 }
 
+int betty_unpair(const char *address) {
+	@autoreleasepool {
+		IOBluetoothDevice *device = bettyDevice(address);
+		if (!device) return kIOReturnNoDevice;
+		// Private API (#14): there is no public way to unpair. blueutil
+		// uses the same selector. It returns nothing; the caller polls
+		// isPaired.
+		SEL remove = NSSelectorFromString(@"remove");
+		if (![device respondsToSelector:remove]) return kIOReturnUnsupported;
+		[device performSelector:remove];
+		return kIOReturnSuccess;
+	}
+}
+
 @interface BettyPairDelegate : NSObject <IOBluetoothDevicePairDelegate>
 @property(assign) BOOL finished;
 @property(assign) IOReturn result;
@@ -246,4 +260,22 @@ int betty_adapter(char **address, char **name, int *powered) {
 		*powered = [controller powerState] == kBluetoothHCIPowerStateON;
 		return 0;
 	}
+}
+
+// Private API (#15): IOBluetooth exports these undocumented functions, and
+// blueutil and Chromium declare them the same way. They are weak imports so
+// that Betty still loads if a macOS release drops them.
+extern int IOBluetoothPreferenceGetControllerPowerState(void) __attribute__((weak_import));
+extern void IOBluetoothPreferenceSetControllerPowerState(int state) __attribute__((weak_import));
+
+int betty_set_adapter_power(int on) {
+	if (!IOBluetoothPreferenceSetControllerPowerState) return kIOReturnUnsupported;
+	IOBluetoothPreferenceSetControllerPowerState(on ? 1 : 0);
+	return kIOReturnSuccess;
+}
+
+int betty_adapter_power_state(int *on) {
+	if (!IOBluetoothPreferenceGetControllerPowerState) return kIOReturnUnsupported;
+	*on = IOBluetoothPreferenceGetControllerPowerState() ? 1 : 0;
+	return kIOReturnSuccess;
 }

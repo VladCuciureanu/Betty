@@ -73,7 +73,7 @@ Validate on native macOS, Linux, and Windows:
 - standard Battery Service readings;
 - adapter disabled, permission denied, timeout, reset, and unexpected disconnect behavior.
 
-- [x] Document public-API limitations instead of working around them with private APIs. The README's platform section lists them.
+- [x] Document public-API limitations instead of working around them with private APIs. The README's platform section lists them, and the three macOS exceptions: unpairing (#14), adapter power (#15) and the Apple headphone battery fallback (#16).
 
 ### 4. Backend contracts and device identity
 
