@@ -92,6 +92,9 @@ type DeviceCapability struct {
 	Maximum  *float64         `json:"maximum,omitempty"`
 	Step     *float64         `json:"step,omitempty"`
 	Reason   string           `json:"reason,omitempty"`
+	// RequiresConnection: the capability works only while the device is
+	// connected.
+	RequiresConnection bool `json:"requires_connection,omitempty"`
 }
 
 type Support string

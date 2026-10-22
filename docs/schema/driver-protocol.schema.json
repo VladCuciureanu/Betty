@@ -54,6 +54,9 @@
         "reason": {
           "type": "string"
         },
+        "requires_connection": {
+          "type": "boolean"
+        },
         "status": {
           "enum": [
             "available",

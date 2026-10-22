@@ -107,7 +107,7 @@ func identification(model string, confidence string) *protocol.Identification {
 }
 
 var batteryCapability = map[string]protocol.Capability{
-	protocol.PropertyBattery: {Status: protocol.StatusAvailable, Kind: protocol.KindBattery, Readable: true},
+	protocol.PropertyBattery: {Status: protocol.StatusAvailable, Kind: protocol.KindBattery, Readable: true, RequiresConnection: true},
 }
 
 func batteryProperty(battery protocol.BatteryComponent) protocol.Property {
@@ -129,7 +129,7 @@ func inspect(host *protocol.Session, request protocol.InspectRequest) (map[strin
 		c, ok, err := open(host, device)
 		if err != nil || !ok {
 			if !device.Connected && strings.Contains(device.Name, "DualSense") {
-				enrichments[device.ID] = protocol.Enrichment{Identification: identification("DualSense", protocol.ConfidenceName)}
+				enrichments[device.ID] = protocol.Enrichment{Identification: identification("DualSense", protocol.ConfidenceName), Capabilities: batteryCapability}
 			}
 			continue
 		}

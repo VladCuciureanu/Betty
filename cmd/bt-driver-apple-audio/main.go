@@ -259,7 +259,7 @@ func appleAudioCapabilities(profile appleAudioProfile) map[string]protocol.Capab
 		if profile.Adaptive {
 			values = append(values, "adaptive")
 		}
-		capability := protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation"}
+		capability := protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: values, Reason: "Apple AAP noise control awaits model-specific hardware validation", RequiresConnection: true}
 		if aapUnavailable != "" {
 			capability.Status, capability.Reason = protocol.StatusUnsupported, aapUnavailable
 		}

@@ -220,6 +220,11 @@ type Capability struct {
 	Maximum  *float64 `json:"maximum,omitempty"`
 	Step     *float64 `json:"step,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
+	// RequiresConnection marks a capability that works only while the device
+	// is connected. Betty refuses it for a disconnected device with
+	// device_disconnected before asking the driver, and never connects the
+	// device itself to serve it.
+	RequiresConnection bool `json:"requires_connection,omitempty"`
 }
 type Enrichment struct {
 	Identification  *Identification       `json:"identification,omitempty"`
