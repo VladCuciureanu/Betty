@@ -40,6 +40,11 @@ jobs:
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.artifact }}" ./cmd/bt
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.driver }}" ./cmd/bt-driver-apple-audio
           go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o "${{ matrix.sony }}" ./cmd/bt-driver-sony
+          # The PlayStation driver needs the hid host calls, which only
+          # Windows has so far.
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o bt-driver-playstation-windows-amd64.exe ./cmd/bt-driver-playstation
+          fi
           if [ "$RUNNER_OS" = "Linux" ]; then
             ./packaging/linux/build-deb.sh "${GITHUB_REF_NAME}" dist-deb
           fi
@@ -50,6 +55,7 @@ jobs:
             ${{ matrix.artifact }}
             ${{ matrix.driver }}
             ${{ matrix.sony }}
+            bt-driver-playstation-*.exe
             dist-deb/*.deb
 
   windows-base-msi:

@@ -206,6 +206,7 @@ support comes from optional driver executables, while the CLI stays `inspect`,
 | --- | --- | --- | --- |
 | Apple Audio | AirPods and Beats | identification, estimated battery from advertisements, exact battery paths per platform | [capabilities and platform behavior](cmd/bt-driver-apple-audio/README.md) |
 | Sony Headphones | Sony WH/WF/WI/MDR, LinkBuds, and ULT families | identification and protocol v2 battery | [capabilities and tested scope](cmd/bt-driver-sony/README.md) |
+| PlayStation Controllers | DualSense, DualSense Edge and DualShock 4 | identification and battery, on Windows | [capabilities and side effects](cmd/bt-driver-playstation/README.md) |
 
 ```console
 go build -o bt-driver-sony ./cmd/bt-driver-sony

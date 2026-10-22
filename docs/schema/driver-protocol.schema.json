@@ -193,6 +193,12 @@
             "$ref": "#/$defs/Property"
           },
           "type": "object"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"

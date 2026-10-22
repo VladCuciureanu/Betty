@@ -84,6 +84,49 @@ func (s *Session) CloseRFCOMM(channelID string) error {
 	return s.CallHost(HostRFCOMMClose, RFCOMMChannelParams{ChannelID: channelID}, nil)
 }
 
+// OpenHID opens a HID collection of a device Betty supplied in the current
+// request, chosen by its top-level usage page and usage (zero for both opens
+// the first one Betty can open), and reports the device's USB-style vendor
+// and product IDs. It requires PermissionHID.
+func (s *Session) OpenHID(deviceID string, usagePage, usage uint16) (HIDCollection, error) {
+	var result HIDCollection
+	err := s.CallHost(HostHIDOpen, HIDOpenParams{DeviceID: deviceID, UsagePage: usagePage, Usage: usage}, &result)
+	return result, err
+}
+
+// ReadHID returns the next input report from a collection, starting with its
+// report ID. A zero timeout waits for the request deadline; otherwise it must
+// not exceed 30 seconds.
+func (s *Session) ReadHID(handleID string, timeout time.Duration) ([]byte, error) {
+	var result struct {
+		Data string `json:"data"`
+	}
+	if err := s.CallHost(HostHIDRead, HIDReadParams{HandleID: handleID, TimeoutMS: milliseconds(timeout)}, &result); err != nil {
+		return nil, err
+	}
+	return decodeHostData(result.Data)
+}
+
+// GetHIDFeature requests a feature report from the device, starting with its
+// report ID. The device answers synchronously, and some devices change
+// behavior when asked for one, so drivers should request only the reports
+// they need.
+func (s *Session) GetHIDFeature(handleID string, reportID uint8) ([]byte, error) {
+	var result struct {
+		Data string `json:"data"`
+	}
+	if err := s.CallHost(HostHIDGetFeature, HIDFeatureParams{HandleID: handleID, ReportID: reportID}, &result); err != nil {
+		return nil, err
+	}
+	return decodeHostData(result.Data)
+}
+
+// CloseHID closes a collection. Betty also closes every collection left open
+// when the request finishes.
+func (s *Session) CloseHID(handleID string) error {
+	return s.CallHost(HostHIDClose, HIDHandleParams{HandleID: handleID}, nil)
+}
+
 // GetState reads a value from this driver's private persistent state. It
 // requires PermissionStorage.
 func (s *Session) GetState(key string) (string, bool, error) {
