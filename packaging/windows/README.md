@@ -1,9 +1,11 @@
 # Betty Windows package
 
-`build.ps1` produces two independent Windows release artifacts:
+`build.ps1` produces two independent Windows artifacts:
 
-- `betty-windows-x64.msi`, the device-generic Betty CLI;
-- `betty-apple-audio-advanced-windows-x64.msi`, optional AirPods and Beats Advanced Support.
+- `betty-windows-x64.msi`, the device-generic Betty CLI, which releases ship;
+- `betty-apple-audio-advanced-windows-x64.msi`, AirPods and Beats Advanced Support, an unsupported developer build that releases don't include.
+
+Releases are not code-signed yet ([#74](https://github.com/VladCuciureanu/Betty/issues/74)), so Windows SmartScreen warns when the MSI or `bt.exe` is first run: choose **More info**, then **Run anyway**. Verify the download against the release's `SHA256SUMS` and build provenance attestation first.
 
 The normal package contains only `bt.exe` and a system `PATH` entry. It has no Apple Audio parser, model data, setup helper, or kernel payload.
 
@@ -13,7 +15,7 @@ The optional Advanced Support package contains:
 - `BettyAAP.sys`, its INF, and signed catalog;
 - a small elevated setup helper that stages/binds the driver during install and unbinds/removes it during uninstall.
 
-**AirPods control is unsupported on Windows.** The kernel driver is unsigned, so it loads only with test signing enabled, and the Apple Audio driver no longer uses it: on Windows it reads battery from advertisements only. Whether to keep this package is tracked in [#8](https://github.com/VladCuciureanu/Betty/issues/8).
+**AirPods control is unsupported on Windows, and Advanced Support is a developer build.** The kernel driver is unsigned, so it loads only with test signing enabled, and the Apple Audio driver no longer uses it: on Windows it reads battery from advertisements only. The package stays in the repository for development and is not part of releases ([#8](https://github.com/VladCuciureanu/Betty/issues/8)).
 
 The KMDF driver is a narrow bridge. It binds only to the Apple AAP SDP service UUID, opens the requested encrypted/authenticated Classic L2CAP channel, and exposes connect, disconnect, send, and bounded receive operations through a Betty-owned device-interface GUID. All AAP parsing and feature behavior remains in the optional Go driver.
 
@@ -49,7 +51,7 @@ Upload the signed CAB to Hardware Dev Center for attestation or WHCP signing. Af
   -RequireMicrosoftDriverSignature -RequireSigning
 ```
 
-The first requirement verifies the returned catalog using kernel signing policy. The second requires Authenticode credentials for Betty's executables and MSI. Tag releases always enforce Authenticode signing of the base MSI. They build the Advanced Support MSI only when the protected `BETTY_MICROSOFT_SIGNED_DRIVER_URL` secret provides a Microsoft-signed driver package, and skip it otherwise.
+The first requirement verifies the returned catalog using kernel signing policy. The second requires Authenticode credentials for Betty's executables and MSI. Tag releases build only the base MSI, and sign it when the signing secrets are configured; they never build Advanced Support.
 
 ## Lifecycle
 

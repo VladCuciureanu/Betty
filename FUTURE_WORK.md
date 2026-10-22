@@ -120,12 +120,12 @@ Validate on native macOS, Linux, and Windows:
 #### Windows
 
 - Build and test `betty-windows-x64.msi` on clean Windows 10 and Windows 11 systems.
-- Build and test the optional `betty-apple-audio-advanced-windows-x64.msi` separately.
+- Build and test the optional `betty-apple-audio-advanced-windows-x64.msi` separately. It is an unsupported developer build and not part of releases (#8).
 - Validate install, upgrade, rollback, repair, and uninstall ordering.
 - [x] Ensure the base MSI contains no Apple Audio implementation or kernel payload.
 - Complete security review and native hardware testing of the Apple Audio IOCTL bridge.
 - Submit the profile driver through Microsoft Hardware Dev Center and validate the returned catalog under kernel signing policy.
-- Sign user-space executables and MSI packages independently from Microsoft kernel signing.
+- Sign user-space executables and MSI packages independently from Microsoft kernel signing. Releases ship unsigned until then (#74).
 - Keep source releases and the base MSI publishable when optional Apple Audio signing is unavailable.
 
 ### 7. Release evidence
