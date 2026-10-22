@@ -60,13 +60,15 @@ jobs:
         with:
           go-version: '1.24.x'
       - uses: microsoft/setup-msbuild@v3
-      - name: Build and sign base Windows MSI
+      # Releases ship unsigned until signing is set up (#74): build.ps1 signs
+      # only when these secrets are configured.
+      - name: Build base Windows MSI
         shell: pwsh
         env:
           BETTY_SIGNING_PFX_BASE64: ${{ secrets.BETTY_SIGNING_PFX_BASE64 }}
           BETTY_SIGNING_PFX_PASSWORD: ${{ secrets.BETTY_SIGNING_PFX_PASSWORD }}
-        run: ./packaging/windows/build.ps1 -Version "${env:GITHUB_REF_NAME}" -RequireSigning -BaseOnly
-      - name: Smoke-test signed base MSI install and clean uninstall
+        run: ./packaging/windows/build.ps1 -Version "${env:GITHUB_REF_NAME}" -BaseOnly
+      - name: Smoke-test base MSI install and clean uninstall
         shell: pwsh
         run: |
           $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
@@ -76,56 +78,8 @@ jobs:
           name: betty-windows-base-msi
           path: packaging/windows/artifacts/msi/**/betty-windows-x64.msi
 
-  windows-advanced-msi:
-    runs-on: windows-2025-vs2026
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version: '1.24.x'
-      - uses: microsoft/setup-msbuild@v3
-      - name: Check optional Advanced Support availability
-        shell: pwsh
-        env:
-          DRIVER_URL: ${{ secrets.BETTY_MICROSOFT_SIGNED_DRIVER_URL }}
-        run: |
-          "BETTY_BUILD_ADVANCED=$([int][bool]$env:DRIVER_URL)" | Out-File $env:GITHUB_ENV -Append
-      - name: Fetch Microsoft-signed profile driver
-        if: env.BETTY_BUILD_ADVANCED == '1'
-        shell: pwsh
-        env:
-          BETTY_MICROSOFT_SIGNED_DRIVER_URL: ${{ secrets.BETTY_MICROSOFT_SIGNED_DRIVER_URL }}
-          BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN: ${{ secrets.BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN }}
-        run: |
-          $headers = @{}
-          if ($env:BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN) { $headers.Authorization = "Bearer $env:BETTY_MICROSOFT_SIGNED_DRIVER_TOKEN" }
-          Invoke-WebRequest $env:BETTY_MICROSOFT_SIGNED_DRIVER_URL -Headers $headers -OutFile "$env:RUNNER_TEMP\betty-driver.zip"
-          Expand-Archive "$env:RUNNER_TEMP\betty-driver.zip" "$env:RUNNER_TEMP\betty-driver" -Force
-          $inf = Get-ChildItem "$env:RUNNER_TEMP\betty-driver" -Filter BettyAAP.inf -Recurse | Select-Object -First 1
-          if (-not $inf) { throw 'Downloaded package does not contain BettyAAP.inf' }
-          "BETTY_MICROSOFT_SIGNED_DRIVER_DIR=$($inf.DirectoryName)" | Out-File $env:GITHUB_ENV -Append
-      - name: Build and sign Advanced Support MSI
-        if: env.BETTY_BUILD_ADVANCED == '1'
-        shell: pwsh
-        env:
-          BETTY_SIGNING_PFX_BASE64: ${{ secrets.BETTY_SIGNING_PFX_BASE64 }}
-          BETTY_SIGNING_PFX_PASSWORD: ${{ secrets.BETTY_SIGNING_PFX_PASSWORD }}
-        run: ./packaging/windows/build.ps1 -Version "${env:GITHUB_REF_NAME}" -MicrosoftSignedDriverDir $env:BETTY_MICROSOFT_SIGNED_DRIVER_DIR -RequireSigning -RequireMicrosoftDriverSignature
-      - name: Smoke-test Advanced Support install and clean uninstall
-        if: env.BETTY_BUILD_ADVANCED == '1'
-        shell: pwsh
-        run: |
-          $base = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-windows-x64.msi -Recurse).FullName
-          $advanced = (Get-ChildItem ./packaging/windows/artifacts/msi -Filter betty-apple-audio-advanced-windows-x64.msi -Recurse).FullName
-          ./packaging/windows/test-installer.ps1 -BaseMsi $base -AdvancedMsi $advanced
-      - uses: actions/upload-artifact@v7
-        if: env.BETTY_BUILD_ADVANCED == '1'
-        with:
-          name: betty-windows-advanced-msi
-          path: packaging/windows/artifacts/msi/**/betty-apple-audio-advanced-windows-x64.msi
-
   publish:
-    needs: [build, windows-base-msi, windows-advanced-msi]
+    needs: [build, windows-base-msi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

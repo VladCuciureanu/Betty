@@ -51,6 +51,8 @@ go install github.com/vladcuciureanu/betty/cmd/bt@latest
 
 Packaging is defined for [Homebrew](packaging/homebrew/README.md),
 [Debian](packaging/linux/README.md), and [Windows MSI](packaging/windows/README.md).
+Release builds aren't code-signed yet, so Windows SmartScreen warns the first
+time they run; check them against the release's `SHA256SUMS` first.
 
 ## Everyday use
 
