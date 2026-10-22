@@ -101,7 +101,7 @@ Validate on native macOS, Linux, and Windows:
 
 #### macOS and Homebrew
 
-- Create `VladCuciureanu/homebrew-tap`.
+- [x] Create `VladCuciureanu/homebrew-tap`.
 - [x] Add release templates for `betty-bluetooth`, `betty-apple-audio`, and `betty-sony`; render them into `VladCuciureanu/homebrew-tap` after a tag exists.
 - [x] Use `betty-bluetooth` as the base formula name because Homebrew already has an unrelated `betty` formula.
 - [x] Install the `bt` executable while building only `cmd/bt` in the base formula.
