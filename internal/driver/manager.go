@@ -29,18 +29,20 @@ type Manager struct {
 	exitGrace      time.Duration
 	// OnInspectError, when set, receives each driver failure during inspect.
 	// Inspect failures never fail the command, so this is how they surface.
-	OnInspectError func(driverID string, err error)
+	// The context is the one the failing request ran with.
+	OnInspectError func(ctx context.Context, driverID string, err error)
 	// OnDriverLog, when set, receives each line a driver writes to stderr,
 	// up to 64 KiB per driver process. Otherwise stderr is discarded.
 	OnDriverLog func(driverID, line string)
 	// OnDriverWarning, when set, receives each warning a driver attaches to
 	// an enrichment. Otherwise warnings are discarded.
-	OnDriverWarning func(driverID, message string)
+	OnDriverWarning func(ctx context.Context, driverID, message string)
 	host            Host
 	// reuse keeps driver processes in procs until Close; see SetReuse.
 	reuse    bool
 	procsMu  sync.Mutex
 	procs    map[string]*driverProcess
+	closed   bool
 	rfcomm   RFCOMMHost
 	gattHost GATTHost
 	hid      HIDHost
@@ -99,11 +101,11 @@ func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpo
 		response, err := m.call(ctx, item, protocol.Request{Protocol: protocol.Version, Type: protocol.TypeRequest, ID: "1", Method: protocol.MethodInspect, Purpose: purpose, Devices: wireDevices(devices)}, m.inspectBudget())
 		if err != nil {
 			if m.OnInspectError != nil {
-				m.OnInspectError(item.ID, err)
+				m.OnInspectError(ctx, item.ID, err)
 			}
 			continue
 		}
-		m.relayWarnings(item.ID, response.Enrichments)
+		m.relayWarnings(ctx, item.ID, response.Enrichments)
 		devices = applyEnrichments(devices, response.Enrichments)
 	}
 	return devices
@@ -144,7 +146,7 @@ func (m *Manager) Property(ctx context.Context, devices []domain.Device, method,
 		if _, ok := response.Enrichments[deviceID]; ok {
 			handled = true
 		}
-		m.relayWarnings(item.ID, response.Enrichments)
+		m.relayWarnings(ctx, item.ID, response.Enrichments)
 		devices = applyEnrichments(devices, response.Enrichments)
 	}
 	if !handled && operationErr != nil {
@@ -155,13 +157,13 @@ func (m *Manager) Property(ctx context.Context, devices []domain.Device, method,
 
 // relayWarnings passes each warning in enrichments to OnDriverWarning, in
 // device order so that output never depends on map order.
-func (m *Manager) relayWarnings(driverID string, enrichments map[string]protocol.Enrichment) {
+func (m *Manager) relayWarnings(ctx context.Context, driverID string, enrichments map[string]protocol.Enrichment) {
 	if m.OnDriverWarning == nil {
 		return
 	}
 	for _, id := range slices.Sorted(maps.Keys(enrichments)) {
 		for _, warning := range enrichments[id].Warnings {
-			m.OnDriverWarning(driverID, warning)
+			m.OnDriverWarning(ctx, driverID, warning)
 		}
 	}
 }

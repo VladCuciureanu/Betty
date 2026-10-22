@@ -58,9 +58,7 @@ func (a *application) withDevice(ctx context.Context, query string, op func(devi
 			a.render.Debugf("%q is not a known device; scanning", query)
 		}
 	}
-	scanCtx, cancel := context.WithTimeout(ctx, min(lookupScanLimit, scanBudget(ctx)))
-	defer cancel()
-	devices, err = a.discover(scanCtx, raw)
+	devices, err = a.discover(ctx, raw, lookupScanLimit)
 	if err != nil {
 		return err
 	}
@@ -96,22 +94,53 @@ func (a *application) enrich(ctx context.Context, raw []domain.Device, purpose s
 	return devices
 }
 
-// discover scans with the OS backend and BLE at the same time and merges the
-// results into base, the raw devices already known. When one scan fails and
-// the other succeeds, the failure becomes a warning.
-func (a *application) discover(ctx context.Context, base []domain.Device) ([]domain.Device, error) {
+// discover scans with the OS backend and BLE at the same time, for at most
+// limit (0 for no limit beyond ctx's deadline), and merges the results into
+// base, the raw devices already known. When one scan fails and the other
+// succeeds, the failure becomes a warning.
+func (a *application) discover(ctx context.Context, base []domain.Device, limit time.Duration) ([]domain.Device, error) {
+	if a.scans != nil {
+		select {
+		case a.scans <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	type result struct {
 		devices []domain.Device
 		err     error
 	}
-	scanCtx, cancel := context.WithTimeout(ctx, scanBudget(ctx))
+	// The budget starts once the scan slot is free, so waiting for another
+	// request's scan doesn't use it up.
+	budget := scanBudget(ctx)
+	if limit > 0 {
+		budget = min(limit, budget)
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	osResult, bleResult := make(chan result, 1), make(chan result, 1)
 	go func() { d, err := a.backend.Scan(scanCtx); osResult <- result{d, err} }()
 	go func() { d, err := a.ble.Scan(scanCtx); bleResult <- result{d, err} }()
-	// Merge in a fixed order, OS first, so that output never depends on
-	// which scan finished first.
-	fromOS, fromBLE := <-osResult, <-bleResult
+	// Some platform scans, such as a Windows inquiry, ignore scanCtx and
+	// overrun it. Wait for them only while the request itself lasts, and hold
+	// the scan slot until both have really finished, so the next scan never
+	// overlaps this one.
+	var fromOS, fromBLE result
+	finished := make(chan struct{})
+	go func() {
+		// Merge in a fixed order, OS first, so that output never depends
+		// on which scan finished first.
+		fromOS, fromBLE = <-osResult, <-bleResult
+		close(finished)
+		if a.scans != nil {
+			<-a.scans
+		}
+	}()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	if fromOS.err != nil && fromBLE.err != nil {
 		return nil, fromOS.err
 	}

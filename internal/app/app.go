@@ -27,6 +27,9 @@ type application struct {
 	hid     hidbattery.Provider // nil disables HID battery readings
 	render  output.Renderer
 	opts    options
+	stdin   io.Reader
+	// scans lets one scan run at a time, across bt serve's requests.
+	scans chan struct{}
 	// setupErr is a failure while connecting the platform, such as an
 	// --adapter the platform can't select.
 	setupErr error
@@ -35,6 +38,7 @@ type application struct {
 // Main runs bt with args and returns the process exit status.
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version string) int {
 	return run(args, stdout, stderr, version, func(a *application) {
+		a.stdin = stdin
 		pairingInput := stdin
 		if a.opts.nonInteractive {
 			pairingInput = nil
@@ -53,11 +57,11 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		a.drivers.SetHIDHost(hid.New())
 		// One process per driver serves the whole command.
 		a.drivers.SetReuse(true)
-		a.drivers.OnInspectError = func(id string, err error) {
-			a.render.Warn("driver %s failed to inspect devices: %v", id, err)
+		a.drivers.OnInspectError = func(ctx context.Context, id string, err error) {
+			a.renderer(ctx).Warn("driver %s failed to inspect devices: %v", id, err)
 		}
-		a.drivers.OnDriverWarning = func(_, message string) {
-			a.render.Warn("%s", message)
+		a.drivers.OnDriverWarning = func(ctx context.Context, _, message string) {
+			a.renderer(ctx).Warn("%s", message)
 		}
 		if a.opts.verbose {
 			a.drivers.OnDriverLog = func(id, line string) {
@@ -71,7 +75,7 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 // called only once a command that needs them is about to run.
 func run(args []string, stdout, stderr io.Writer, version string, connect func(*application)) int {
 	opts, rest, err := parseArgs(args)
-	a := &application{opts: opts, render: output.Renderer{Out: stdout, Err: stderr, Mode: opts.mode, Verbose: opts.verbose}}
+	a := &application{opts: opts, render: output.Renderer{Out: stdout, Err: stderr, Mode: opts.mode, Verbose: opts.verbose}, scans: make(chan struct{}, 1)}
 	if err != nil {
 		return a.fail(err)
 	}
@@ -93,6 +97,10 @@ func run(args []string, stdout, stderr io.Writer, version string, connect func(*
 	}
 	if opts.help {
 		return a.fail(a.render.Data(helpResult{Text: helpText(c)}))
+	}
+	if c.name == "serve" {
+		// stdin carries requests, so pairing must never read from it.
+		a.opts.nonInteractive = true
 	}
 	args = rest[1:]
 	if err := c.checkArgs(args); err != nil {
@@ -131,6 +139,17 @@ func (a *application) commandTimeout(c *command) time.Duration {
 		return defaultPairTimeout
 	}
 	return a.opts.timeout
+}
+
+type rendererKey struct{}
+
+// renderer returns the renderer of the request ctx belongs to: bt serve
+// gives each request its own, and the CLI has only a.render.
+func (a *application) renderer(ctx context.Context) output.Renderer {
+	if r, ok := ctx.Value(rendererKey{}).(output.Renderer); ok {
+		return r
+	}
+	return a.render
 }
 
 // fail renders err, if any, and returns the exit status for it.
@@ -176,6 +195,7 @@ var commands = []command{
 	{name: "disconnect", usage: "disconnect <device>", summary: "disconnect a device", minArgs: 1, maxArgs: 1, run: mutation("disconnect")},
 	{name: "gatt", usage: "gatt <device> services|characteristics|read|write|watch|mtu|descriptors|read-descriptor|write-descriptor ...", summary: "use BLE GATT directly; see bt help gatt", details: gattHelp, minArgs: 2, maxArgs: 5, run: (*application).gatt, streams: func(args []string) bool { return len(args) > 1 && args[1] == "watch" }},
 	{name: "adapter", usage: "adapter [power on|off | discoverable on|off | name <name>]", summary: "show or change the local Bluetooth adapter; see bt help adapter", details: adapterHelp, maxArgs: 2, run: (*application).adapter},
+	{name: "serve", usage: "serve", summary: "answer JSON requests on stdin until it closes, for apps; see bt help serve", details: serveHelp, maxArgs: 0, run: (*application).serve, streams: streamsAlways},
 	{name: "capabilities", usage: "capabilities", summary: "show which operations this platform supports", maxArgs: 0, run: (*application).capabilities},
 	{name: "driver", usage: "driver list|install|upgrade|remove|export-state|import-state|check ...", summary: "manage optional device drivers; see bt help driver", details: driverHelp, minArgs: 0, maxArgs: 3, run: (*application).driverCommand},
 }

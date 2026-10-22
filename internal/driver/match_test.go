@@ -45,7 +45,7 @@ func TestDriversWhoseHintsDontMatchAreNotStarted(t *testing.T) {
 	installTestDriver(t, m.root, skipped)
 	installTestDriver(t, m.root, matched)
 	t.Setenv(testDriverEnv, skipped.ID+"=hang,"+matched.ID+"=ok")
-	m.OnInspectError = func(id string, err error) { t.Errorf("driver %s ran: %v", id, err) }
+	m.OnInspectError = func(_ context.Context, id string, err error) { t.Errorf("driver %s ran: %v", id, err) }
 	started := time.Now()
 	devices := m.Inspect(context.Background(), []domain.Device{{ID: "device", Name: "Kitchen sensor"}})
 	if devices[0].Identification == nil || devices[0].Identification.Vendor != matched.ID {

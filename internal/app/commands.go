@@ -30,7 +30,7 @@ func (r helpResult) WriteHuman(w io.Writer) error {
 }
 
 func (a *application) scan(ctx context.Context, _ []string) error {
-	devices, err := a.discover(ctx, nil)
+	devices, err := a.discover(ctx, nil, 0)
 	if err != nil {
 		return err
 	}
