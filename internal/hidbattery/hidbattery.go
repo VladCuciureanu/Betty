@@ -6,6 +6,7 @@ package hidbattery
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"strings"
 
 	protocol "github.com/vladcuciureanu/betty/driver"
@@ -55,6 +56,26 @@ type Provider interface {
 }
 
 func New() Provider { return newPlatformProvider() }
+
+// helperArgument, as the only argument, makes bt run as the battery helper
+// that Windows needs (see provider_windows.go).
+const helperArgument = "__hid-battery-helper"
+
+// helperEnabled is set once ServeHelper has run, so that only bt itself,
+// never a test binary, is started as the helper.
+var helperEnabled bool
+
+// ServeHelper must be called first in bt's main. When args ask for the
+// battery helper it runs it, writing to stdout, and returns true, and bt
+// should exit. Otherwise it lets providers start bt as the helper.
+func ServeHelper(args []string, stdout io.Writer) bool {
+	if len(args) == 1 && args[0] == helperArgument {
+		runHelper(stdout)
+		return true
+	}
+	helperEnabled = true
+	return false
+}
 
 // Apply attaches observations only through an exact normalized endpoint
 // address. Display names are deliberately never used for correlation.
