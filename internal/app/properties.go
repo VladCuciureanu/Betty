@@ -135,6 +135,9 @@ func (a *application) getAll(ctx context.Context, name string) error {
 // readProperty reads name from d, asking drivers first and then standard
 // GATT services. It returns needsDiscovery when a scan might help.
 func (a *application) readProperty(ctx context.Context, devices []domain.Device, d domain.Device, name string) (propertyResult, error) {
+	if err := requireConnection(d, name, "reading"); err != nil {
+		return propertyResult{}, err
+	}
 	if a.drivers != nil {
 		updated, _, err := a.drivers.Property(ctx, devices, "get", d.ID, name, nil)
 		if err != nil {
@@ -163,6 +166,16 @@ func (a *application) readProperty(ctx context.Context, devices []domain.Device,
 	default:
 		return propertyResult{}, needsDiscovery(domain.NewError(domain.CodeUnsupported, "%s does not expose %q", d.Name, name))
 	}
+}
+
+// requireConnection refuses an operation on a capability that works only
+// while the device is connected, when it isn't, with the same message
+// whichever driver provides the capability.
+func requireConnection(d domain.Device, name, operation string) error {
+	if capability, ok := d.Capabilities[name]; ok && capability.RequiresConnection && !d.Connected {
+		return domain.NewError(domain.CodeDisconnected, "%s %s needs %s to be connected over Bluetooth", operation, name, d.Name)
+	}
+	return nil
 }
 
 func (a *application) readGATTBattery(ctx context.Context, d domain.Device) (propertyResult, error) {
@@ -232,6 +245,9 @@ func (a *application) set(ctx context.Context, args []string) error {
 		}
 		if capability.Status != domain.StatusAvailable || !capability.Writable {
 			return domain.NewError(domain.CodeUnsupported, "%s on %s is not writable: %s", name, d.Name, capability.Reason)
+		}
+		if err := requireConnection(d, name, "setting"); err != nil {
+			return err
 		}
 		value, err := propertyInput(capability, name, input)
 		if err != nil {
@@ -379,6 +395,10 @@ func (a *application) watchThroughDriver(ctx context.Context, query, name string
 	cancel()
 	if err != nil {
 		return false, err
+	}
+	// Polling reports the missing connection and waits for it.
+	if requireConnection(device, name, "watching") != nil {
+		return false, nil
 	}
 	previous, event := "", "snapshot"
 	handled, err = a.drivers.Watch(ctx, devices, device.ID, name, func(updated []domain.Device) error {

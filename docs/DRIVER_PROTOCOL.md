@@ -133,6 +133,7 @@ Permissions:
 | `l2cap` | `l2cap.*` host calls. |
 | `rfcomm` | `rfcomm.*` host calls. |
 | `gatt` | `gatt.*` host calls. |
+| `hid` | `hid.*` host calls. |
 | `driver-storage` | `storage.*` host calls. |
 
 Betty accepts other permission names without granting anything for them. The
@@ -313,6 +314,7 @@ What a driver tells Betty about a device. Every field is optional.
 | `properties` | object of [Property](#property) | Current values, keyed by property name. |
 | `capabilities` | object of [Capability](#capability) | What can be read or written, keyed by property name. |
 | `possible_matches` | array of strings | Replaces the device's possible matches. |
+| `warnings` | array of strings | Short sentences Betty shows the user on stderr, such as a side effect the driver had to cause. They never appear in JSON data. |
 
 ### Identification
 
@@ -346,6 +348,7 @@ What a driver tells Betty about a device. Every field is optional.
 | `values` | array of strings | Accepted values for `enum` and `boolean`. |
 | `minimum`, `maximum`, `step` | number | Accepted range for `integer` and `number`. |
 | `reason` | string | Why the capability is not `available`. |
+| `requires_connection` | boolean | The capability works only while the device is connected. For a disconnected device, Betty refuses it with `device_disconnected` before asking the driver, with one message for every driver, and never connects the device to serve it. Drivers still return `device_disconnected` when the link drops during a request. |
 
 ### Property names
 
@@ -414,6 +417,10 @@ the request ends.
 | `gatt.subscribe` | `gatt` | `device_id`, `characteristic_uuid`, `service_uuid` (optional) | `subscription_id` |
 | `gatt.next` | `gatt` | `subscription_id`, `timeout_ms` (optional, at most 30000) | `data` (lowercase hex) |
 | `gatt.unsubscribe` | `gatt` | `subscription_id` | `unsubscribed` (true) |
+| `hid.open` | `hid` | `device_id`, `usage_page` and `usage` (optional: the collection's top-level usage) | `handle_id`, `vendor_id`, `product_id` (integers) |
+| `hid.read` | `hid` | `handle_id`, `timeout_ms` (optional, at most 30000) | `data` (lowercase hex): the next input report, starting with its report ID |
+| `hid.get_feature` | `hid` | `handle_id`, `report_id` | `data` (lowercase hex): the feature report, starting with its report ID |
+| `hid.close` | `hid` | `handle_id` | `closed` (true) |
 
 Notes:
 
@@ -461,6 +468,25 @@ GATT calls:
 When a host call fails, propagate its `error_code` unless you have a more
 precise one. A driver that crashes, exits without responding, or writes invalid
 JSON is treated as `internal`.
+
+HID calls:
+
+- They are supported on Windows so far; elsewhere they fail with
+  `unsupported`.
+- `hid.open` opens a connected Bluetooth device's HID collection whose
+  top-level `usage_page` and `usage` match, or the first one Betty can open
+  when both are omitted. `vendor_id` and `product_id` are the device's
+  USB-style IDs, so a driver can confirm what it opened. A device with no
+  matching collection, such as one that isn't connected, fails with
+  `unsupported`; Windows keeps keyboard and mouse collections to itself, which
+  fails with `permission_denied`.
+- `hid.read` returns input reports in the order the device sent them, waiting
+  for the next one, and fails with `timeout` when none arrives in time.
+- A device answers `hid.get_feature` synchronously, and Betty cannot cancel
+  it: a device that doesn't answer holds the call for several seconds. Some
+  devices also change behavior when asked for a feature report, so request
+  only the reports you need, and say so in `warnings` when it is visible to
+  the user.
 
 ## 10. How Betty uses driver results
 

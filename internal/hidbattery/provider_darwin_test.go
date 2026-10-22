@@ -16,8 +16,8 @@ func TestDarwinProviderReturnsValidObservations(t *testing.T) {
 		if normalizeAddress(observation.Address) == "" {
 			t.Errorf("invalid address in observation: %#v", observation)
 		}
-		if observation.Percentage < 0 || observation.Percentage > 100 {
-			t.Errorf("invalid percentage in observation: %#v", observation)
+		if _, valid := observation.value(); !valid {
+			t.Errorf("invalid level in observation: %#v", observation)
 		}
 	}
 	t.Logf("macOS HID battery observations: %#v", observations)

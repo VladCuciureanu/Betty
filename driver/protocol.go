@@ -100,6 +100,11 @@ const (
 	HostGATTSubscribe   = "gatt.subscribe"
 	HostGATTNext        = "gatt.next"
 	HostGATTUnsubscribe = "gatt.unsubscribe"
+
+	HostHIDOpen       = "hid.open"
+	HostHIDRead       = "hid.read"
+	HostHIDGetFeature = "hid.get_feature"
+	HostHIDClose      = "hid.close"
 )
 
 type Device struct {
@@ -215,12 +220,20 @@ type Capability struct {
 	Maximum  *float64 `json:"maximum,omitempty"`
 	Step     *float64 `json:"step,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
+	// RequiresConnection marks a capability that works only while the device
+	// is connected. Betty refuses it for a disconnected device with
+	// device_disconnected before asking the driver, and never connects the
+	// device itself to serve it.
+	RequiresConnection bool `json:"requires_connection,omitempty"`
 }
 type Enrichment struct {
 	Identification  *Identification       `json:"identification,omitempty"`
 	PossibleMatches []string              `json:"possible_matches,omitempty"`
 	Properties      map[string]Property   `json:"properties,omitempty"`
 	Capabilities    map[string]Capability `json:"capabilities,omitempty"`
+	// Warnings are short sentences Betty shows the user on stderr, such as a
+	// side effect the driver had to cause. They never appear in JSON data.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type L2CAPOpenParams struct {
@@ -288,6 +301,36 @@ type GATTNextParams struct {
 
 type GATTSubscriptionParams struct {
 	SubscriptionID string `json:"subscription_id"`
+}
+
+// HIDOpenParams selects one HID collection of a device by its top-level
+// usage page and usage; zero for both opens the first collection Betty can
+// open.
+type HIDOpenParams struct {
+	DeviceID  string `json:"device_id"`
+	UsagePage uint16 `json:"usage_page,omitempty"`
+	Usage     uint16 `json:"usage,omitempty"`
+}
+
+// HIDCollection is the result of hid.open.
+type HIDCollection struct {
+	HandleID  string `json:"handle_id"`
+	VendorID  uint16 `json:"vendor_id"`
+	ProductID uint16 `json:"product_id"`
+}
+
+type HIDHandleParams struct {
+	HandleID string `json:"handle_id"`
+}
+
+type HIDReadParams struct {
+	HandleID  string `json:"handle_id"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
+}
+
+type HIDFeatureParams struct {
+	HandleID string `json:"handle_id"`
+	ReportID uint8  `json:"report_id"`
 }
 
 type StorageGetParams struct {

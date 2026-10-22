@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,24 +33,28 @@ type Manager struct {
 	// OnDriverLog, when set, receives each line a driver writes to stderr,
 	// up to 64 KiB per driver process. Otherwise stderr is discarded.
 	OnDriverLog func(driverID, line string)
-	host        Host
+	// OnDriverWarning, when set, receives each warning a driver attaches to
+	// an enrichment. Otherwise warnings are discarded.
+	OnDriverWarning func(driverID, message string)
+	host            Host
 	// reuse keeps driver processes in procs until Close; see SetReuse.
 	reuse    bool
 	procsMu  sync.Mutex
 	procs    map[string]*driverProcess
 	rfcomm   RFCOMMHost
 	gattHost GATTHost
+	hid      HIDHost
 }
 
 func New() *Manager {
 	if root := os.Getenv("BETTY_DRIVER_DIR"); root != "" {
-		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
+		return &Manager{root: root, bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}, hid: UnsupportedHIDHost{}}
 	}
 	root, _ := os.UserConfigDir()
-	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
+	return &Manager{root: filepath.Join(root, "betty", "drivers"), bundled: bundledDriverRoot(), systemBundled: systemBundledDriverRoot(), host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}, hid: UnsupportedHIDHost{}}
 }
 func NewAt(root string) *Manager {
-	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}}
+	return &Manager{root: root, host: UnsupportedHost{}, rfcomm: UnsupportedRFCOMMHost{}, gattHost: UnsupportedGATTHost{}, hid: UnsupportedHIDHost{}}
 }
 func (m *Manager) SetHost(host Host) {
 	if host == nil {
@@ -64,6 +69,14 @@ func (m *Manager) SetRFCOMMHost(host RFCOMMHost) {
 		return
 	}
 	m.rfcomm = host
+}
+
+func (m *Manager) SetHIDHost(host HIDHost) {
+	if host == nil {
+		m.hid = UnsupportedHIDHost{}
+		return
+	}
+	m.hid = host
 }
 
 func (m *Manager) SetGATTHost(host GATTHost) {
@@ -90,6 +103,7 @@ func (m *Manager) InspectFor(ctx context.Context, devices []domain.Device, purpo
 			}
 			continue
 		}
+		m.relayWarnings(item.ID, response.Enrichments)
 		devices = applyEnrichments(devices, response.Enrichments)
 	}
 	return devices
@@ -130,12 +144,26 @@ func (m *Manager) Property(ctx context.Context, devices []domain.Device, method,
 		if _, ok := response.Enrichments[deviceID]; ok {
 			handled = true
 		}
+		m.relayWarnings(item.ID, response.Enrichments)
 		devices = applyEnrichments(devices, response.Enrichments)
 	}
 	if !handled && operationErr != nil {
 		return devices, false, operationErr
 	}
 	return devices, handled, nil
+}
+
+// relayWarnings passes each warning in enrichments to OnDriverWarning, in
+// device order so that output never depends on map order.
+func (m *Manager) relayWarnings(driverID string, enrichments map[string]protocol.Enrichment) {
+	if m.OnDriverWarning == nil {
+		return
+	}
+	for _, id := range slices.Sorted(maps.Keys(enrichments)) {
+		for _, warning := range enrichments[id].Warnings {
+			m.OnDriverWarning(driverID, warning)
+		}
+	}
 }
 
 func applyEnrichments(devices []domain.Device, enrichments map[string]protocol.Enrichment) []domain.Device {
@@ -175,7 +203,7 @@ func applyEnrichments(devices []domain.Device, enrichments map[string]protocol.E
 func domainCapabilities(capabilities map[string]protocol.Capability) map[string]domain.DeviceCapability {
 	out := map[string]domain.DeviceCapability{}
 	for name, capability := range capabilities {
-		out[name] = domain.DeviceCapability{Status: domain.CapabilityStatus(capability.Status), Kind: domain.ValueKind(capability.Kind), Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason}
+		out[name] = domain.DeviceCapability{Status: domain.CapabilityStatus(capability.Status), Kind: domain.ValueKind(capability.Kind), Readable: capability.Readable, Writable: capability.Writable, Values: capability.Values, Minimum: capability.Minimum, Maximum: capability.Maximum, Step: capability.Step, Reason: capability.Reason, RequiresConnection: capability.RequiresConnection}
 	}
 	return out
 }
@@ -637,8 +665,9 @@ func officialPathDrivers() map[string]string {
 		suffix = ".exe"
 	}
 	return map[string]string{
-		"official/apple-audio":     "bt-driver-apple-audio" + suffix,
-		"official/sony-headphones": "bt-driver-sony" + suffix,
+		"official/apple-audio":             "bt-driver-apple-audio" + suffix,
+		"official/sony-headphones":         "bt-driver-sony" + suffix,
+		"official/playstation-controllers": "bt-driver-playstation" + suffix,
 	}
 }
 

@@ -9,6 +9,7 @@
 #import <IOKit/hid/IOHIDManager.h>
 #import <IOKit/hid/IOHIDKeys.h>
 #import <IOKit/hid/IOHIDUsageTables.h>
+#import <IOBluetooth/IOBluetooth.h>
 #include <stdlib.h>
 
 static NSString *BettyStringProperty(IOHIDDeviceRef device, CFStringRef key) {
@@ -116,11 +117,45 @@ static void BettyCollectRegistryFallback(NSMutableDictionary<NSString *, NSDicti
     IOObjectRelease(iterator);
 }
 
+// Private API (#16): IOBluetoothDevice has undocumented battery getters,
+// which report what Apple headphones send over their own channel. Each is 0
+// when unknown, and macOS 15 reportedly stopped filling in the case.
+static NSNumber *BettyPrivateBattery(IOBluetoothDevice *device, NSString *key) {
+    if (![device respondsToSelector:NSSelectorFromString(key)]) return nil;
+    id value = [device valueForKey:key];
+    if (![value isKindOfClass:[NSNumber class]]) return nil;
+    NSInteger level = [value integerValue];
+    return level > 0 && level <= 100 ? @(level) : nil;
+}
+
+// BettyCollectPrivateIOBluetooth runs last, so a public reading of the same
+// device wins.
+static void BettyCollectPrivateIOBluetooth(NSMutableDictionary<NSString *, NSDictionary *> *observations) {
+    NSDictionary<NSString *, NSString *> *parts = @{ @"left": @"batteryPercentLeft", @"right": @"batteryPercentRight", @"case": @"batteryPercentCase" };
+    for (IOBluetoothDevice *device in [IOBluetoothDevice pairedDevices]) {
+        if (!device.isConnected) continue;
+        NSString *address = BettyAddress(device.addressString);
+        if (!address || observations[address]) continue;
+        NSMutableDictionary *observation = [NSMutableDictionary dictionaryWithDictionary:@{ @"address": address, @"source": @"macos-iobluetooth-private" }];
+        for (NSString *part in parts) {
+            NSNumber *level = BettyPrivateBattery(device, parts[part]);
+            if (level) observation[part] = level;
+        }
+        if (observation.count == 2) {
+            NSNumber *level = BettyPrivateBattery(device, @"batteryPercentSingle");
+            if (!level) continue;
+            observation[@"percentage"] = level;
+        }
+        observations[address] = observation;
+    }
+}
+
 char *betty_copy_hid_batteries_json(void) {
     @autoreleasepool {
         NSMutableDictionary<NSString *, NSDictionary *> *observations = [NSMutableDictionary dictionary];
         BettyCollectPublicHID(observations);
         BettyCollectRegistryFallback(observations);
+        BettyCollectPrivateIOBluetooth(observations);
         NSData *data = [NSJSONSerialization dataWithJSONObject:observations.allValues options:0 error:nil];
         if (!data) return NULL;
         NSString *json = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];

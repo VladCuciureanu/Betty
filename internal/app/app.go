@@ -13,6 +13,7 @@ import (
 	"github.com/vladcuciureanu/betty/internal/ble"
 	"github.com/vladcuciureanu/betty/internal/domain"
 	"github.com/vladcuciureanu/betty/internal/driver"
+	"github.com/vladcuciureanu/betty/internal/hid"
 	"github.com/vladcuciureanu/betty/internal/hidbattery"
 	"github.com/vladcuciureanu/betty/internal/l2cap"
 	"github.com/vladcuciureanu/betty/internal/output"
@@ -49,10 +50,14 @@ func Main(args []string, stdin io.Reader, stdout, stderr io.Writer, version stri
 		a.drivers.SetHost(l2cap.New())
 		a.drivers.SetRFCOMMHost(rfcomm.New())
 		a.drivers.SetGATTHost(gattHost{client})
+		a.drivers.SetHIDHost(hid.New())
 		// One process per driver serves the whole command.
 		a.drivers.SetReuse(true)
 		a.drivers.OnInspectError = func(id string, err error) {
 			a.render.Warn("driver %s failed to inspect devices: %v", id, err)
+		}
+		a.drivers.OnDriverWarning = func(_, message string) {
+			a.render.Warn("%s", message)
 		}
 		if a.opts.verbose {
 			a.drivers.OnDriverLog = func(id, line string) {

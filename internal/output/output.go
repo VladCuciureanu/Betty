@@ -180,6 +180,9 @@ func writeDevice(w io.Writer, d domain.Device) error {
 			if len(capability.Values) > 0 {
 				fmt.Fprintf(w, " (%s)", strings.Join(capability.Values, ", "))
 			}
+			if capability.RequiresConnection {
+				fmt.Fprint(w, ", needs a connection")
+			}
 			fmt.Fprintln(w)
 		}
 	}

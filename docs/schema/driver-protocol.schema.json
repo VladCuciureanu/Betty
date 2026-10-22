@@ -54,6 +54,9 @@
         "reason": {
           "type": "string"
         },
+        "requires_connection": {
+          "type": "boolean"
+        },
         "status": {
           "enum": [
             "available",
@@ -193,6 +196,12 @@
             "$ref": "#/$defs/Property"
           },
           "type": "object"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "type": "object"

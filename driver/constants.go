@@ -24,6 +24,7 @@ const (
 	PermissionRFCOMM         = "rfcomm"
 	PermissionGATT           = "gatt"
 	PermissionStorage        = "driver-storage"
+	PermissionHID            = "hid"
 )
 
 // Capability statuses. Clients must not offer reads or writes for a capability

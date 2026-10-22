@@ -110,8 +110,10 @@ reports the same fields under `information`.
 On macOS it also reads battery levels that the system HID stack publishes for
 connected keyboards, mice, and trackpads, matched by exact address. On Linux it
 reads the levels BlueZ publishes for HID devices, LE devices with the Battery
-Service, and headsets that report battery over HFP. Windows battery for such
-devices isn't read yet ([#24](https://github.com/VladCuciureanu/Betty/issues/24)).
+Service, and headsets that report battery over HFP. On Windows it reads the
+standard HID battery usages of connected Bluetooth keyboards and mice, such as
+Apple's Magic Keyboard. Those only answer while awake, so an idle device may
+show no battery, and Betty waits at most a second for them.
 
 `set` prints the value the driver read back from the device after writing it.
 `watch` prints the value once and again whenever it changes, polling every 2
@@ -204,6 +206,7 @@ support comes from optional driver executables, while the CLI stays `inspect`,
 | --- | --- | --- | --- |
 | Apple Audio | AirPods and Beats | identification, estimated battery from advertisements, exact battery paths per platform | [capabilities and platform behavior](cmd/bt-driver-apple-audio/README.md) |
 | Sony Headphones | Sony WH/WF/WI/MDR, LinkBuds, and ULT families | identification and protocol v2 battery | [capabilities and tested scope](cmd/bt-driver-sony/README.md) |
+| PlayStation Controllers | DualSense, DualSense Edge and DualShock 4 | identification and battery, on Windows | [capabilities and side effects](cmd/bt-driver-playstation/README.md) |
 
 ```console
 go build -o bt-driver-sony ./cmd/bt-driver-sony
@@ -229,21 +232,24 @@ driver.
 | Known-device listing | Implemented | Paired devices | Implemented |
 | Classic discovery | Implemented | Implemented through device inquiry; not yet run on hardware | Implemented |
 | Pair | Implemented | Implemented | Implemented; Windows may show its own dialog |
-| Unpair | Implemented | Unsupported: no public API | Implemented |
-| Connect and disconnect | Implemented | Opens or closes the baseband link, not individual profiles | Unsupported: no public API for every profile |
-| Adapter | Show, power, discoverable, name | Show only | Show and discoverable; the name is the computer's, and power isn't implemented yet |
+| Unpair | Implemented | Implemented through a private API; not yet run on hardware | Implemented |
+| Connect and disconnect | Implemented | Opens or closes the baseband link, not individual profiles | Bluetooth audio devices only, through their audio drivers |
+| Adapter | Show, power, discoverable, name | Show, and power through a private API; not yet run on hardware | Show and discoverable; the name is the computer's, and power isn't implemented yet |
 
 An operation a platform cannot perform returns `unsupported`. Device IDs are
 opaque and platform-local; don't parse them.
 
 Some gaps are the operating system's, not Betty's. Betty documents them
-instead of working around them with private APIs:
+instead of working around them with private APIs, with three exceptions on
+macOS: unpairing (`-[IOBluetoothDevice remove]`), adapter power
+(`IOBluetoothPreferenceSetControllerPowerState`), and a battery fallback for
+Apple headphones from `IOBluetoothDevice`'s undocumented battery properties.
+Each fails with `unsupported`, or is skipped, if a macOS release removes it.
 
 | Limitation | Platforms | Why |
 | --- | --- | --- |
 | Connecting or disconnecting an individual profile, such as A2DP | macOS | IOBluetooth opens and closes only the baseband link. |
-| Connecting or disconnecting every kind of saved device | Windows | No public API covers every profile. Windows' audio stack could connect audio devices, which isn't implemented yet ([#20](https://github.com/VladCuciureanu/Betty/issues/20)); other devices will stay `unsupported`. |
-| Unpairing | macOS | No public API. |
+| Connecting or disconnecting every kind of saved device | Windows | No public API covers every profile. Betty connects audio devices the way the Sound control panel does; other devices return `unsupported`. |
 | Choosing between several Bluetooth adapters | macOS, Windows | Both use one radio at a time. On Linux, `--adapter` chooses among BlueZ's. |
 | Setting the MTU of a GATT connection | macOS, Windows | Both negotiate it and only let apps read the result ([#10](https://github.com/VladCuciureanu/Betty/issues/10)). |
 | Apple's AirPods control channel (exact battery over AAP, noise control) | macOS, Windows | macOS doesn't appear to open the channel to third-party processes, which hasn't been confirmed on hardware ([#18](https://github.com/VladCuciureanu/Betty/issues/18)); Windows opens Classic L2CAP only to signed kernel-mode drivers. See [the Apple Audio driver](cmd/bt-driver-apple-audio/README.md#platform-behavior). |

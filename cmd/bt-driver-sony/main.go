@@ -247,14 +247,20 @@ func sonyCapabilities(protocolVersion sonyProtocol) map[string]protocol.Capabili
 	reason := "Sony control messages are not enabled until current-state reads and hardware-verified writes are implemented"
 	minimum, maximum, step := 1.0, 20.0, 1.0
 	capabilities := map[string]protocol.Capability{
-		"battery":       batteryCapability(protocolVersion),
-		"noise_control": {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: []string{"off", "anc", "transparency"}, Reason: reason},
+		"battery":            batteryCapability(protocolVersion),
+		"noise_control":      {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Values: []string{"off", "anc", "transparency"}, Reason: reason},
 		"transparency_level": {Status: protocol.StatusPlanned, Kind: protocol.KindInteger, Readable: true, Writable: true, Minimum: &minimum, Maximum: &maximum, Step: &step, Reason: reason},
-		"equalizer":     {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Reason: reason},
+		"equalizer":          {Status: protocol.StatusPlanned, Kind: protocol.KindEnum, Readable: true, Writable: true, Reason: reason},
 	}
 	if protocolVersion == protocolV2 || protocolVersion == protocolUnknown {
 		capabilities["dsee"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindBoolean, Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
 		capabilities["sony.speak_to_chat"] = protocol.Capability{Status: protocol.StatusPlanned, Kind: protocol.KindBoolean, Readable: true, Writable: true, Values: []string{"off", "on"}, Reason: reason}
+	}
+	// Everything goes over the RFCOMM session, which needs the headphones
+	// connected.
+	for name, capability := range capabilities {
+		capability.RequiresConnection = true
+		capabilities[name] = capability
 	}
 	return capabilities
 }

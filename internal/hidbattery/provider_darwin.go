@@ -3,7 +3,7 @@
 package hidbattery
 
 /*
-#cgo LDFLAGS: -framework Foundation -framework IOKit -framework CoreFoundation
+#cgo LDFLAGS: -framework Foundation -framework IOKit -framework CoreFoundation -framework IOBluetooth
 #include <stdlib.h>
 #include "provider_darwin.h"
 */
@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"unsafe"
 )
 
@@ -35,3 +36,6 @@ func (platformProvider) Batteries(ctx context.Context) ([]Observation, error) {
 	}
 	return observations, nil
 }
+
+// runHelper does nothing: only Windows reads batteries in a helper.
+func runHelper(io.Writer) {}
