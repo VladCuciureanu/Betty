@@ -23,6 +23,7 @@ type hostSession struct {
 	channels      map[channelKey]bool
 	gatt          map[string]GATTConnection
 	subscriptions map[string]*subscription
+	hid           map[string]bool
 	next          int
 }
 
@@ -31,7 +32,7 @@ type hostSession struct {
 type channelKey struct{ transport, id string }
 
 func newHostSession(devices []protocol.Device) *hostSession {
-	s := &hostSession{devices: map[string]protocol.Device{}, channels: map[channelKey]bool{}, gatt: map[string]GATTConnection{}, subscriptions: map[string]*subscription{}}
+	s := &hostSession{devices: map[string]protocol.Device{}, channels: map[channelKey]bool{}, gatt: map[string]GATTConnection{}, subscriptions: map[string]*subscription{}, hid: map[string]bool{}}
 	for _, device := range devices {
 		s.devices[device.ID] = device
 	}
@@ -62,6 +63,9 @@ func (m *Manager) closeSession(s *hostSession) {
 	}
 	for _, conn := range s.gatt {
 		_ = conn.Close()
+	}
+	for id := range s.hid {
+		release(func(ctx context.Context) error { return m.hid.CloseHID(ctx, id) })
 	}
 }
 
@@ -143,6 +147,7 @@ var hostPermissions = map[string]string{
 	"rfcomm":  protocol.PermissionRFCOMM,
 	"storage": protocol.PermissionStorage,
 	"gatt":    protocol.PermissionGATT,
+	"hid":     protocol.PermissionHID,
 }
 
 func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, message protocol.Message, s *hostSession) (json.RawMessage, error) {
@@ -163,6 +168,8 @@ func (m *Manager) handleHost(ctx context.Context, driver protocol.Manifest, mess
 		result, err = m.handleStorage(driver, operation, message.Params)
 	case "gatt":
 		result, err = m.handleGATT(ctx, operation, message.Params, s)
+	case "hid":
+		result, err = m.handleHID(ctx, operation, message.Params, s)
 	}
 	if err != nil {
 		return nil, err
@@ -268,6 +275,72 @@ func (m *Manager) handleStream(ctx context.Context, transport, operation string,
 		return map[string]bool{"closed": true}, nil
 	}
 	return nil, domain.NewError(domain.CodeUnsupported, "unsupported host method %q", transport+"."+operation)
+}
+
+func (m *Manager) handleHID(ctx context.Context, operation string, params json.RawMessage, s *hostSession) (any, error) {
+	if operation == "open" {
+		var p protocol.HIDOpenParams
+		if err := decode(params, &p); err != nil {
+			return nil, err
+		}
+		device, err := s.device(p.DeviceID)
+		if err != nil {
+			return nil, err
+		}
+		address := ""
+		for _, endpoint := range device.Endpoints {
+			if endpoint.Address != "" {
+				address = endpoint.Address
+				break
+			}
+		}
+		if address == "" {
+			return nil, domain.NewError(domain.CodeUnsupported, "device %q has no Bluetooth address", p.DeviceID)
+		}
+		collection, err := m.hid.OpenHID(ctx, address, p.UsagePage, p.Usage)
+		if err != nil {
+			return nil, err
+		}
+		s.hid[collection.HandleID] = true
+		return collection, nil
+	}
+	var p struct {
+		HandleID  string `json:"handle_id"`
+		TimeoutMS int    `json:"timeout_ms"`
+		ReportID  uint8  `json:"report_id"`
+	}
+	if err := decode(params, &p); err != nil {
+		return nil, err
+	}
+	if !s.hid[p.HandleID] {
+		return nil, domain.NewError(domain.CodePermission, "driver does not own HID handle %q", p.HandleID)
+	}
+	switch operation {
+	case "read":
+		readCtx, cancel, err := readContext(ctx, p.TimeoutMS)
+		if err != nil {
+			return nil, err
+		}
+		defer cancel()
+		data, err := m.hid.ReadHID(readCtx, p.HandleID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"data": hex.EncodeToString(data)}, nil
+	case "get_feature":
+		data, err := m.hid.GetHIDFeature(ctx, p.HandleID, p.ReportID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"data": hex.EncodeToString(data)}, nil
+	case "close":
+		if err := m.hid.CloseHID(ctx, p.HandleID); err != nil {
+			return nil, err
+		}
+		delete(s.hid, p.HandleID)
+		return map[string]bool{"closed": true}, nil
+	}
+	return nil, domain.NewError(domain.CodeUnsupported, "unsupported host method %q", "hid."+operation)
 }
 
 func (m *Manager) handleStorage(driver protocol.Manifest, operation string, params json.RawMessage) (any, error) {

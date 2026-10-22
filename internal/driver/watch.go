@@ -90,6 +90,7 @@ func (m *Manager) watchOne(ctx context.Context, item protocol.Manifest, devices 
 			if message.ID != request.ID {
 				return handled, driverFailure(item, "sent an event for request %q instead of %q", message.ID, request.ID)
 			}
+			m.relayWarnings(item.ID, message.Enrichments)
 			devices = applyEnrichments(devices, message.Enrichments)
 			handled = true
 			if err := onChange(devices); err != nil {

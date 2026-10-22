@@ -9,14 +9,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/vladcuciureanu/betty/internal/hid"
 )
 
 // Windows publishes no battery property for Bluetooth HID devices, so Betty
@@ -24,23 +24,16 @@ import (
 // macOS's IOHID path does.
 
 var (
-	hid                   = windows.NewLazySystemDLL("hid.dll")
-	hidDGetPreparsedData  = hid.NewProc("HidD_GetPreparsedData")
-	hidDFreePreparsedData = hid.NewProc("HidD_FreePreparsedData")
-	hidDGetInputReport    = hid.NewProc("HidD_GetInputReport")
-	hidDGetFeature        = hid.NewProc("HidD_GetFeature")
-	hidPGetCaps           = hid.NewProc("HidP_GetCaps")
-	hidPGetValueCaps      = hid.NewProc("HidP_GetValueCaps")
-	hidPGetUsageValue     = hid.NewProc("HidP_GetUsageValue")
-
-	guidDevinterfaceHID = windows.GUID{Data1: 0x4d1e55b2, Data2: 0xf16f, Data3: 0x11cf, Data4: [8]byte{0x88, 0xcb, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30}}
-	devpkeyDeviceParent = windows.DEVPROPKEY{FmtID: windows.DEVPROPGUID{Data1: 0x4340a6c5, Data2: 0x93fa, Data3: 0x4706, Data4: [8]byte{0x97, 0x2c, 0x7b, 0x64, 0x80, 0x08, 0xa5, 0xa7}}, PID: 8}
+	hidDLL             = windows.NewLazySystemDLL("hid.dll")
+	hidDGetInputReport = hidDLL.NewProc("HidD_GetInputReport")
+	hidDGetFeature     = hidDLL.NewProc("HidD_GetFeature")
+	hidPGetValueCaps   = hidDLL.NewProc("HidP_GetValueCaps")
+	hidPGetUsageValue  = hidDLL.NewProc("HidP_GetUsageValue")
 )
 
 const (
-	hidpInput         = 0
-	hidpFeature       = 2
-	hidpStatusSuccess = 0x00110000
+	hidpInput   = 0
+	hidpFeature = 2
 
 	usagePageGenericDeviceControls = 0x06
 	usageBatteryStrength           = 0x20
@@ -61,20 +54,6 @@ var batteryUsages = []struct {
 	{usagePageBatterySystem, usageAbsoluteStateOfCharge, true},
 }
 
-type hidpCaps struct {
-	Usage, UsagePage                                uint16
-	InputReportByteLength, OutputReportByteLength   uint16
-	FeatureReportByteLength                         uint16
-	Reserved                                        [17]uint16
-	NumberLinkCollectionNodes                       uint16
-	NumberInputButtonCaps, NumberInputValueCaps     uint16
-	NumberInputDataIndices                          uint16
-	NumberOutputButtonCaps, NumberOutputValueCaps   uint16
-	NumberOutputDataIndices                         uint16
-	NumberFeatureButtonCaps, NumberFeatureValueCaps uint16
-	NumberFeatureDataIndices                        uint16
-}
-
 type hidpValueCaps struct {
 	UsagePage                                          uint16
 	ReportID                                           uint8
@@ -90,19 +69,6 @@ type hidpValueCaps struct {
 	// designator and data indices.
 	Usage, UsageMax uint16
 	Rest            [6]uint16
-}
-
-// bluetoothParent finds the Bluetooth address in a HID collection's parent
-// device instance ID, such as
-// `BTHENUM\{00001124-0000-1000-8000-00805F9B34FB}_VID&0001004C_PID&029C\A&AE70F6&0&B0BE83F34CD4_C00000000`.
-var bluetoothParent = regexp.MustCompile(`(?i)^(?:bthenum|bthledevice)\\.*&([0-9a-f]{12})(?:_c[0-9a-f]+)?$`)
-
-func parentAddress(parent string) string {
-	match := bluetoothParent.FindStringSubmatch(parent)
-	if match == nil {
-		return ""
-	}
-	return strings.ToLower(match[1])
 }
 
 type platformProvider struct{}
@@ -121,7 +87,7 @@ func (platformProvider) Batteries(ctx context.Context) ([]Observation, error) {
 	if !helperEnabled {
 		return nil, nil
 	}
-	collections, err := bluetoothCollections()
+	collections, err := hid.Collections()
 	if err != nil || len(collections) == 0 {
 		return nil, err
 	}
@@ -174,7 +140,7 @@ func (platformProvider) Batteries(ctx context.Context) ([]Observation, error) {
 // runHelper reads every Bluetooth HID collection at once and prints one
 // JSON Observation per line as each device answers.
 func runHelper(stdout io.Writer) {
-	collections, err := bluetoothCollections()
+	collections, err := hid.Collections()
 	if err != nil {
 		return
 	}
@@ -186,61 +152,19 @@ func runHelper(stdout io.Writer) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			level, ok := batteryLevel(collection.path)
+			level, ok := batteryLevel(collection.Path)
 			if !ok {
 				return
 			}
 			mu.Lock()
 			defer mu.Unlock()
-			if !seen[collection.address] {
-				seen[collection.address] = true
-				encoder.Encode(Observation{Address: collection.address, Percentage: level, Source: "windows-hid"})
+			if !seen[collection.Address] {
+				seen[collection.Address] = true
+				encoder.Encode(Observation{Address: collection.Address, Percentage: level, Source: "windows-hid"})
 			}
 		}()
 	}
 	wg.Wait()
-}
-
-type collection struct{ address, path string }
-
-// bluetoothCollections lists the present HID collections of Bluetooth
-// devices, with each device's address.
-func bluetoothCollections() ([]collection, error) {
-	devices, err := windows.SetupDiGetClassDevsEx(&guidDevinterfaceHID, "", 0, windows.DIGCF_PRESENT|windows.DIGCF_DEVICEINTERFACE, 0, "")
-	if err != nil {
-		return nil, err
-	}
-	defer devices.Close()
-	var collections []collection
-	for i := 0; ; i++ {
-		info, err := windows.SetupDiEnumDeviceInfo(devices, i)
-		if err == windows.ERROR_NO_MORE_ITEMS {
-			return collections, nil
-		}
-		if err != nil {
-			continue
-		}
-		parent, err := windows.SetupDiGetDeviceProperty(devices, info, &devpkeyDeviceParent)
-		if err != nil {
-			continue
-		}
-		parentID, _ := parent.(string)
-		address := parentAddress(parentID)
-		if address == "" {
-			continue
-		}
-		instance, err := windows.SetupDiGetDeviceInstanceId(devices, info)
-		if err != nil {
-			continue
-		}
-		paths, err := windows.CM_Get_Device_Interface_List(instance, &guidDevinterfaceHID, windows.CM_GET_DEVICE_INTERFACE_LIST_PRESENT)
-		if err != nil {
-			continue
-		}
-		for _, path := range paths {
-			collections = append(collections, collection{address, path})
-		}
-	}
 }
 
 // batteryLevel reads the battery percentage of one HID collection. Windows
@@ -256,13 +180,13 @@ func batteryLevel(path string) (int, bool) {
 		return 0, false
 	}
 	defer windows.CloseHandle(handle)
-	var preparsed uintptr
-	if ok, _, _ := hidDGetPreparsedData.Call(uintptr(handle), uintptr(unsafe.Pointer(&preparsed))); ok == 0 {
+	preparsed, free, ok := hid.PreparsedData(handle)
+	if !ok {
 		return 0, false
 	}
-	defer hidDFreePreparsedData.Call(preparsed)
-	var caps hidpCaps
-	if status, _, _ := hidPGetCaps.Call(preparsed, uintptr(unsafe.Pointer(&caps))); uint32(status) != hidpStatusSuccess {
+	defer free()
+	caps, ok := hid.GetCaps(preparsed)
+	if !ok {
 		return 0, false
 	}
 	for _, kind := range []struct {
@@ -279,7 +203,7 @@ func batteryLevel(path string) (int, bool) {
 		}
 		values := make([]hidpValueCaps, kind.count)
 		count := kind.count
-		if status, _, _ := hidPGetValueCaps.Call(kind.reportType, uintptr(unsafe.Pointer(&values[0])), uintptr(unsafe.Pointer(&count)), preparsed); uint32(status) != hidpStatusSuccess {
+		if status, _, _ := hidPGetValueCaps.Call(kind.reportType, uintptr(unsafe.Pointer(&values[0])), uintptr(unsafe.Pointer(&count)), preparsed); uint32(status) != hid.StatusSuccess {
 			continue
 		}
 		for _, value := range values[:count] {
@@ -298,7 +222,7 @@ func batteryLevel(path string) (int, bool) {
 				continue
 			}
 			var raw uint32
-			if status, _, _ := hidPGetUsageValue.Call(kind.reportType, uintptr(value.UsagePage), uintptr(value.LinkCollection), uintptr(value.Usage), uintptr(unsafe.Pointer(&raw)), preparsed, uintptr(unsafe.Pointer(&report[0])), uintptr(len(report))); uint32(status) != hidpStatusSuccess {
+			if status, _, _ := hidPGetUsageValue.Call(kind.reportType, uintptr(value.UsagePage), uintptr(value.LinkCollection), uintptr(value.Usage), uintptr(unsafe.Pointer(&raw)), preparsed, uintptr(unsafe.Pointer(&report[0])), uintptr(len(report))); uint32(status) != hid.StatusSuccess {
 				continue
 			}
 			if batteryUsages[usage].percent {

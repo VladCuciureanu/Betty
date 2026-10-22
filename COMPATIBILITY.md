@@ -27,6 +27,7 @@ and platform-local; they are not portable Bluetooth addresses.
 | Sony Headphones | macOS | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Native RFCOMM hardware validation required. |
 | Sony Headphones | Linux | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Native RFCOMM hardware validation required. |
 | Sony Headphones | Windows | Not tested | Not tested | Not tested | Not tested | Planned | Not tested | Native RFCOMM hardware validation required. |
+| PlayStation Controllers | Windows | 11 Pro 10.0.26300 | Built-in (model not recorded) | DualSense (`0x0CE6`) | Pass: discharging and charging read correctly from extended reports | Not supported | Model (vendor and product ID) | Manual run, 2026-10-22 ([#133](https://github.com/VladCuciureanu/Betty/issues/133)). The calibration request answers in under 10 ms, but the controller was already in extended mode, so its switch from basic mode wasn't observed. DualSense Edge and DualShock 4 not tested. |
 
 ## Emulated end-to-end runs
 
