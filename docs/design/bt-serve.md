@@ -1,6 +1,6 @@
 # Design: `bt serve`
 
-Status: accepted ([#26](https://github.com/VladCuciureanu/Betty/issues/26)).
+Status: implemented ([#26](https://github.com/VladCuciureanu/Betty/issues/26)).
 
 ## Problem
 
@@ -43,20 +43,27 @@ sequential behavior simply waits for each response.
 
 ### Requests
 
-Methods mirror the CLI, so the JSON API stays one vocabulary:
+Methods mirror the CLI, and each result is the `data` that `bt --json` prints
+for the same command, so the JSON API stays one vocabulary:
 
 | Method | Parameters | Result |
 | --- | --- | --- |
-| `list`, `scan` | `duration_ms` for scan | array of devices, as `bt --json list` |
+| `list`, `scan`, `capabilities` | none | as the CLI |
 | `inspect` | `device` | device |
-| `get` | `device`, `property` | property result, as `bt --json get` |
-| `set` | `device`, `property`, `value` | property result with `verified` |
+| `get` | `device` and `property`, or `all: true` and `property` | property result, or one entry per device |
+| `set` | `device`, `property`, `value` (any JSON value) | property result with `verified` |
 | `pair`, `unpair`, `connect`, `disconnect` | `device` | mutation result |
-| `gatt.services`, `gatt.characteristics`, `gatt.read`, `gatt.write`, `gatt.descriptors` | as the CLI | as the CLI |
-| `adapter`, `adapter.set` | `power`, `discoverable`, `name` | adapter state |
-| `subscribe` | one of `device` + `property`, `device` + `characteristic`, or `devices` | a subscription; events follow |
-| `cancel` | `request` (an ID) | ends that request or subscription |
+| `adapter` | none | adapters |
+| `adapter.set` | `setting` (`power`, `discoverable` or `name`), `value` (`true`/`false`, `"on"`/`"off"`, or a name) | adapter state |
+| `gatt.services`, `gatt.mtu` | `device` | as the CLI |
+| `gatt.characteristics` | `device`, `service` (optional) | as the CLI |
+| `gatt.read`, `gatt.descriptors` | `device`, `characteristic`, `service` (optional) | as the CLI |
+| `gatt.write` | `device`, `characteristic`, `data` (hex), `service` and `without_response` (optional) | as the CLI |
+| `gatt.read_descriptor`, `gatt.write_descriptor` | `device`, `characteristic`, `descriptor`, and `data` (hex) to write | as the CLI |
+| `subscribe` | one of `device` + `property`, `device` + `characteristic`, or `devices: true`; `interval_ms` (optional) | events, then a response when it ends |
+| `cancel` | `request` (an ID) | `cancelled: true`; the cancelled request then responds with `canceled` |
 
+Every request may set `timeout_ms`; the default is `--timeout`, 10 seconds.
 `device` is a query as on the command line (ID, address or name), so
 ambiguity is reported the same way.
 
@@ -79,7 +86,9 @@ switched a controller's reports, goes in the response's `warnings` array.
 ### Subscriptions
 
 `subscribe` replaces `bt watch` and `bt gatt watch` for apps, and adds device
-events:
+events. Its events carry the subscribe request's `id`, and `cancel` with that
+ID ends it. A warning while it runs, such as a failed poll it will retry,
+arrives as an event whose data is `{"warning": "..."}`.
 
 - **Properties** (`device` + `property`): events carry the property result
   with `event` set to `snapshot` first, then `changed`. Unchanged values are
@@ -89,11 +98,12 @@ events:
 - **Characteristics** (`device` + `characteristic`): every notification is an
   event, as in `bt gatt watch`, never deduplicated: each is a reading.
 - **Devices** (`devices`: `true`): events describe changes to the devices the
-  OS knows, found by polling the known-device list every `interval_ms`:
-  `connected`, `disconnected`, `paired`, `unpaired` (removed) and `renamed`,
-  each with the device. This needs no scanning, so it costs no radio time.
-  Nearby unpaired devices appearing are out of scope; an app scans for those
-  explicitly.
+  OS knows, found by polling the known-device list every `interval_ms`. The
+  first is `{"event":"snapshot","devices":[...]}`; then each change is
+  `{"event":...,"device":{...}}` with `added`, `removed`, `paired`,
+  `unpaired`, `connected`, `disconnected` or `renamed`. This needs no
+  scanning, so it costs no radio time. Nearby unpaired devices appearing are
+  out of scope; an app scans for those explicitly.
 - A property or characteristic subscription ends with a response:
   `device_disconnected` when the link drops for a characteristic, or success
   after `cancel`.
@@ -138,17 +148,23 @@ The session protocol is independent of its transport, so a later
 `bt serve --listen` on a user-level socket could serve several clients with
 the same messages. That would extend this design, not replace it.
 
-## Implementation sketch
+## Implementation
 
-- `internal/serve`: the session loop, a request table keyed by ID, one
-  goroutine per request with its own context, cancelled by `cancel` or EOF,
-  and per-device queues.
-- Command handlers are refactored to return results instead of rendering
-  them, so the CLI and the session share one implementation per method.
+- `internal/app/serve.go` holds the session loop, a request table keyed by
+  ID, one goroutine per request with its own context, cancelled by `cancel`
+  or EOF, and per-device queues keyed by the device query.
+- Each request runs the CLI command it mirrors on a copy of the application
+  whose renderer captures the result and warnings, so the CLI and the session
+  share one implementation per method. Driver warnings reach the right
+  request through its context.
+- A reused driver process serves one request at a time; a concurrent request
+  starts another, which stops when it is no longer needed.
+- Scans take a session-wide slot, held until the platform scan really
+  finishes, since a Windows inquiry overruns its deadline.
 - Output goes through one writer with a mutex, so concurrent responses never
   interleave within a line.
-- A test harness drives a session over pipes against the fake backend and
-  BLE client the app tests already use.
+- `serve_test.go` drives sessions over pipes against the fake backend and BLE
+  client the app tests use.
 
 ## Decisions
 

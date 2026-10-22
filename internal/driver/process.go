@@ -137,11 +137,12 @@ func (p *driverProcess) kill() {
 // serves requests until its input ends, as the protocol requires.
 func (m *Manager) SetReuse(reuse bool) { m.reuse = reuse }
 
-// Close stops every driver process kept for reuse.
+// Close stops every driver process kept for reuse, and any that is serving a
+// request when that request ends.
 func (m *Manager) Close() {
 	m.procsMu.Lock()
 	procs := m.procs
-	m.procs = nil
+	m.procs, m.closed = nil, true
 	m.procsMu.Unlock()
 	for _, p := range procs {
 		_ = p.stop(m.exitBudget())
@@ -167,8 +168,11 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 		return checkResponse(item, response)
 	}
 	for attempt := 0; ; attempt++ {
+		// A process serves one request at a time, so it leaves the pool
+		// while it does; a concurrent request starts its own.
 		m.procsMu.Lock()
 		p := m.procs[item.ID]
+		delete(m.procs, item.ID)
 		m.procsMu.Unlock()
 		fresh := p == nil
 		if fresh {
@@ -180,7 +184,6 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 		response, err := m.serve(ctx, p, item, request)
 		if err != nil {
 			p.kill()
-			m.forget(item.ID, p)
 			// A reused driver that has exited since its last request gets one
 			// fresh start.
 			if !fresh && attempt == 0 && ctx.Err() == nil && errors.Is(err, errDriverGone) {
@@ -188,21 +191,25 @@ func (m *Manager) exchange(ctx context.Context, item protocol.Manifest, request 
 			}
 			return response, err
 		}
-		m.procsMu.Lock()
-		if m.procs == nil {
-			m.procs = map[string]*driverProcess{}
-		}
-		m.procs[item.ID] = p
-		m.procsMu.Unlock()
+		m.checkIn(item.ID, p)
 		return checkResponse(item, response)
 	}
 }
 
-func (m *Manager) forget(id string, p *driverProcess) {
+// checkIn returns a process to the pool after a request. A spare one,
+// started for a concurrent request, or one returned after Close, is stopped.
+func (m *Manager) checkIn(id string, p *driverProcess) {
 	m.procsMu.Lock()
-	defer m.procsMu.Unlock()
-	if m.procs[id] == p {
-		delete(m.procs, id)
+	keep := !m.closed && m.procs[id] == nil
+	if keep {
+		if m.procs == nil {
+			m.procs = map[string]*driverProcess{}
+		}
+		m.procs[id] = p
+	}
+	m.procsMu.Unlock()
+	if !keep {
+		go p.stop(m.exitBudget())
 	}
 }
 

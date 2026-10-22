@@ -196,6 +196,26 @@ command, such as a BLE scan failing while the OS scan succeeds, print as
 | 9 | Timeout |
 | 130 | Interrupted |
 
+## Using Betty from apps
+
+`bt serve` keeps one Betty process running for an app: the app writes JSON
+requests to its stdin and reads responses and events from its stdout, one per
+line, until it closes stdin. Requests run concurrently, driver processes stay
+up for the whole session, and `subscribe` streams property changes, GATT
+notifications, or devices connecting and disconnecting.
+
+```console
+$ bt serve
+{"schema_version":1,"type":"request","id":"1","method":"get","params":{"device":"headphones","property":"battery"}}
+{"schema_version":1,"type":"response","id":"1","data":{"device_id":"bluez:AA:BB:CC:DD:EE:FF","property":"battery","value":{"level":80},"unit":"%"}}
+{"schema_version":1,"type":"request","id":"2","method":"subscribe","params":{"devices":true}}
+{"schema_version":1,"type":"event","id":"2","data":{"event":"snapshot","devices":[...]}}
+```
+
+It is not a daemon: it runs as the user, with the CLI's permissions, and
+nothing outlives it. Pairing never prompts. See `bt help serve` and
+[the design](docs/design/bt-serve.md) for every method.
+
 ## Device drivers
 
 Betty's base executable contains no vendor protocol code. Device-specific

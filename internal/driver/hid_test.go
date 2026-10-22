@@ -88,8 +88,8 @@ func TestHIDHostCallsAreScoped(t *testing.T) {
 func TestDriverWarningsAreRelayedInDeviceOrder(t *testing.T) {
 	m := NewAt(t.TempDir())
 	var got []string
-	m.OnDriverWarning = func(driverID, message string) { got = append(got, driverID+": "+message) }
-	m.relayWarnings("example/pad", map[string]protocol.Enrichment{
+	m.OnDriverWarning = func(_ context.Context, driverID, message string) { got = append(got, driverID+": "+message) }
+	m.relayWarnings(context.Background(), "example/pad", map[string]protocol.Enrichment{
 		"b": {Warnings: []string{"second"}},
 		"a": {Warnings: []string{"first"}},
 		"c": {},

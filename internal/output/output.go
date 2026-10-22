@@ -31,6 +31,15 @@ type Renderer struct {
 	Out, Err io.Writer
 	Mode     Mode
 	Verbose  bool
+	// Sink, when set, receives results and warnings instead of Out and Err,
+	// as bt serve does for each request. Diagnostics still go to Err.
+	Sink Sink
+}
+
+// Sink receives a command's results and warnings.
+type Sink interface {
+	Data(any) error
+	Warn(string)
 }
 
 // HumanWriter is implemented by results that print themselves in human mode.
@@ -52,6 +61,9 @@ type message struct {
 
 // Data prints a successful result. Quiet mode prints nothing.
 func (r Renderer) Data(data any) error {
+	if r.Sink != nil {
+		return r.Sink.Data(data)
+	}
 	switch r.Mode {
 	case Quiet:
 		return nil
@@ -65,6 +77,10 @@ func (r Renderer) Data(data any) error {
 // Warn reports a problem that did not stop the command, in every mode.
 func (r Renderer) Warn(format string, args ...any) {
 	text := fmt.Sprintf(format, args...)
+	if r.Sink != nil {
+		r.Sink.Warn(text)
+		return
+	}
 	if r.Mode == JSON {
 		_ = json.NewEncoder(r.Err).Encode(envelope{SchemaVersion: SchemaVersion, Warning: &message{text}})
 		return
