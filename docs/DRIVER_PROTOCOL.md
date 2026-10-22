@@ -547,8 +547,24 @@ guarantees at 1.0:
 - answer an unknown `method` with an `unsupported` error and keep running;
 - answer a request whose `protocol` is not `1` with an `unsupported` error.
 
-At 1.0, protocol version 1 freezes. After that, only additive changes are made
-within a version, and anything else requires protocol version 2.
+At 1.0, protocol version 1 freezes, and this policy applies:
+
+- **Additive only within a version.** Protocol 1 may gain optional fields,
+  message types, request methods, host calls, error codes, permissions, and
+  shared property names. An existing field, method, host call, or code never
+  changes meaning, never becomes required, and is never removed. Limits such
+  as message sizes and deadlines are never tightened.
+- **Permissions stay.** A permission is never removed or narrowed, so a
+  driver that worked keeps the access its manifest declares.
+- **Anything else is a new version.** A breaking change ships as protocol 2.
+  Betty then accepts both versions for at least one minor release before it
+  drops protocol 1, and says so in the release notes and in `bt driver check`.
+- **Deprecation is announced, not enforced.** Something superseded is marked
+  deprecated in this document and keeps working until the protocol version
+  that contains it is dropped.
+- **Driver upgrades keep state.** `bt driver upgrade` keeps a driver's
+  storage, and a driver that changes its storage format migrates its own
+  data, since Betty treats the store as opaque.
 
 ## 14. Example transcript
 
