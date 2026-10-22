@@ -77,7 +77,7 @@ type windowsBackend struct{}
 
 func newPlatformBackend(PairingIO) Backend { return &windowsBackend{} }
 func (*windowsBackend) Capabilities() domain.Capabilities {
-	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Supported, Connect: domain.Unsupported, Disconnect: domain.Unsupported, GATT: domain.Supported}
+	return domain.Capabilities{Scan: domain.Supported, Pair: domain.Supported, Unpair: domain.Supported, Connect: domain.Supported, Disconnect: domain.Supported, GATT: domain.Supported}
 }
 func (b *windowsBackend) Scan(context.Context) ([]domain.Device, error) { return b.enumerate(true) }
 func (b *windowsBackend) List(context.Context) ([]domain.Device, error) { return b.enumerate(false) }
@@ -125,6 +125,15 @@ func (b *windowsBackend) Unpair(ctx context.Context, d domain.Device) error {
 }
 
 func (b *windowsBackend) waitPaired(ctx context.Context, address uint64, desired bool) error {
+	return b.waitState(ctx, address, desired, func(d domain.Device) bool { return d.Paired })
+}
+
+func (b *windowsBackend) waitConnected(ctx context.Context, address uint64, desired bool) error {
+	return b.waitState(ctx, address, desired, func(d domain.Device) bool { return d.Connected })
+}
+
+// waitState polls until state(device) reaches desired.
+func (b *windowsBackend) waitState(ctx context.Context, address uint64, desired bool, state func(domain.Device) bool) error {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -132,15 +141,15 @@ func (b *windowsBackend) waitPaired(ctx context.Context, address uint64, desired
 		if err != nil {
 			return err
 		}
-		paired := false
+		current := false
 		formatted := formatWindowsAddress(address)
 		for _, device := range devices {
 			if device.ID == "windows:"+formatted {
-				paired = device.Paired
+				current = state(device)
 				break
 			}
 		}
-		if paired == desired {
+		if current == desired {
 			return nil
 		}
 		select {
@@ -150,11 +159,28 @@ func (b *windowsBackend) waitPaired(ctx context.Context, address uint64, desired
 		}
 	}
 }
-func (*windowsBackend) Connect(context.Context, domain.Device) error {
-	return domain.NewError(domain.CodeUnsupported, "Windows does not expose a reliable generic API for connecting every saved device profile; connect it from Windows Settings")
+// Connect and Disconnect work for Bluetooth audio devices only, through
+// their audio drivers (audio_windows.go): Windows has no generic API for
+// every profile.
+func (b *windowsBackend) Connect(ctx context.Context, d domain.Device) error {
+	return b.setConnected(ctx, d, true)
 }
-func (*windowsBackend) Disconnect(context.Context, domain.Device) error {
-	return domain.NewError(domain.CodeUnsupported, "Windows does not expose a reliable generic API for disconnecting every saved device profile; disconnect it from Windows Settings")
+func (b *windowsBackend) Disconnect(ctx context.Context, d domain.Device) error {
+	return b.setConnected(ctx, d, false)
+}
+
+func (b *windowsBackend) setConnected(ctx context.Context, d domain.Device, connect bool) error {
+	if err := loadBthprops(); err != nil {
+		return err
+	}
+	info, err := windowsInfo(d)
+	if err != nil {
+		return err
+	}
+	if err := setAudioConnection(formatWindowsAddress(info.Address), connect); err != nil {
+		return err
+	}
+	return b.waitConnected(ctx, info.Address, connect)
 }
 func (*windowsBackend) enumerate(inquiry bool) ([]domain.Device, error) {
 	if err := loadBthprops(); err != nil {
