@@ -150,7 +150,7 @@ func get(host *protocol.Session, request protocol.PropertyRequest) (*protocol.En
 		return nil, nil
 	}
 	if !request.Device.Connected {
-		return nil, protocol.Errorf(protocol.CodeDeviceDisconnected, "the controller's battery can be read only while it is connected")
+		return nil, protocol.Errorf(protocol.CodeDeviceDisconnected, "the controller's battery can be read only while it is connected over Bluetooth")
 	}
 	c, ok, err := open(host, request.Device)
 	if err != nil {
