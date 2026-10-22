@@ -1,6 +1,6 @@
 # Homebrew tap packaging
 
-The public tap will live in `VladCuciureanu/homebrew-tap`, which has not been created yet. Betty keeps reviewed
+The public tap is [`VladCuciureanu/homebrew-tap`](https://github.com/VladCuciureanu/homebrew-tap); it holds no formulas until the first release. Betty keeps reviewed
 formula templates here so a release can update that repository without putting
 vendor drivers in the base formula.
 
