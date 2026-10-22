@@ -20,6 +20,28 @@ func TestApplyCorrelatesAddressWithoutUsingName(t *testing.T) {
 	}
 }
 
+func TestApplyReportsIndependentParts(t *testing.T) {
+	left, right := 80, 75
+	devices := []domain.Device{{Endpoints: []domain.Endpoint{{Address: "00:11:22:33:44:55"}}}}
+	Apply(devices, []Observation{{Address: "00-11-22-33-44-55", Left: &left, Right: &right}})
+	battery := devices[0].Properties["battery"]
+	if got := string(battery.Value); got != `{"left":{"level":80},"right":{"level":75}}` {
+		t.Fatalf("battery=%s", got)
+	}
+	if battery.Display != "left 80% · right 75%" {
+		t.Fatalf("display=%q", battery.Display)
+	}
+}
+
+func TestApplyRejectsAnOutOfRangePart(t *testing.T) {
+	left, broken := 80, 101
+	devices := []domain.Device{{Endpoints: []domain.Endpoint{{Address: "00:11:22:33:44:55"}}}}
+	Apply(devices, []Observation{{Address: "00:11:22:33:44:55", Left: &left, Case: &broken}})
+	if _, exists := devices[0].Properties["battery"]; exists {
+		t.Fatal("an out-of-range case level was applied")
+	}
+}
+
 func TestApplyPreservesExistingBatteryAndRejectsAmbiguity(t *testing.T) {
 	devices := []domain.Device{{Endpoints: []domain.Endpoint{{Address: "00:11:22:33:44:55"}}, Properties: map[string]domain.Property{"battery": {Value: []byte("75")}}}, {Endpoints: []domain.Endpoint{{Address: "AA:BB:CC:DD:EE:FF"}}}}
 	observations := []Observation{{Address: "00:11:22:33:44:55", Percentage: 90}, {Address: "AA:BB:CC:DD:EE:FF", Percentage: 10}, {Address: "aa-bb-cc-dd-ee-ff", Percentage: 20}}

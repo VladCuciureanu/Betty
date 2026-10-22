@@ -3,7 +3,7 @@
 package hidbattery
 
 /*
-#cgo LDFLAGS: -framework Foundation -framework IOKit -framework CoreFoundation
+#cgo LDFLAGS: -framework Foundation -framework IOKit -framework CoreFoundation -framework IOBluetooth
 #include <stdlib.h>
 #include "provider_darwin.h"
 */
