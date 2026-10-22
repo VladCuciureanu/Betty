@@ -33,6 +33,10 @@ jobs:
       - id: diff
         shell: bash
         run: |
+          # macOS is off while Actions spend is capped; re-enable it by
+          # deleting these two lines (#130).
+          echo "macos=false" >> "$GITHUB_OUTPUT"
+          exit 0
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
             exit 0
