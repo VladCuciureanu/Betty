@@ -197,7 +197,7 @@ Optional drivers do not block a base Betty release unless their packages or feat
 ## Hardening after the v1 API is stable
 
 - [x] Test malformed or oversized driver messages, crashes, hangs, and leaked channels.
-- Define driver compatibility, upgrade, rollback, and deprecation policy.
+- [x] Define driver compatibility, upgrade, rollback, and deprecation policy: see the protocol's Stability section.
 - Preserve namespaced, user-private driver state and migration behavior.
 - Add cryptographic endpoint verification where supported by a protocol.
 - Review the pinned `tinygo.org/x/bluetooth` version before upgrades.
