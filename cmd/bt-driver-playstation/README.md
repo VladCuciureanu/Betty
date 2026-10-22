@@ -17,7 +17,7 @@ gamepad collection, not by its name:
 
 | Controller | Product ID | Hardware tested |
 | --- | --- | --- |
-| DualSense | `0x0CE6` | Yes |
+| DualSense | `0x0CE6` | Yes, on Windows 11; the switch from basic reports wasn't observed, because Steam or Windows had already switched the controller |
 | DualSense Edge | `0x0DF2` | No |
 | DualShock 4 (both versions) | `0x05C4`, `0x09CC` | No: decoding is covered by unit tests only |
 
