@@ -7,17 +7,21 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/vladcuciureanu/betty/internal/ble"
 	"github.com/vladcuciureanu/betty/internal/domain"
+	"github.com/vladcuciureanu/betty/internal/driver"
 	"github.com/vladcuciureanu/betty/internal/hidbattery"
 	"github.com/vladcuciureanu/betty/internal/output"
 )
 
 type fakeBackend struct {
+	// mu guards known, which a test may change while a command runs.
+	mu        sync.Mutex
 	known     []domain.Device
 	scanned   []domain.Device
 	err       error
@@ -34,7 +38,11 @@ func (b *fakeBackend) Scan(context.Context) ([]domain.Device, error) {
 	b.scans.Add(1)
 	return b.scanned, b.scanErr
 }
-func (b *fakeBackend) List(context.Context) ([]domain.Device, error) { return b.known, b.err }
+func (b *fakeBackend) List(context.Context) ([]domain.Device, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.known, b.err
+}
 func (b *fakeBackend) Pair(_ context.Context, d domain.Device) error {
 	b.mutations = append(b.mutations, "pair "+d.ID)
 	if b.mutationErr != nil {
@@ -65,6 +73,9 @@ func (b *fakeBackend) Disconnect(_ context.Context, d domain.Device) error {
 }
 
 type fakeBLE struct {
+	// mu guards devices, battery, and err, which a test may change while a
+	// command runs.
+	mu      sync.Mutex
 	devices []domain.Device
 	battery []byte
 	info    map[string]string
@@ -77,7 +88,11 @@ type fakeBLE struct {
 	watchErr error
 }
 
-func (b *fakeBLE) Scan(context.Context) ([]domain.Device, error) { return b.devices, b.scanErr }
+func (b *fakeBLE) Scan(context.Context) ([]domain.Device, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.devices, b.scanErr
+}
 func (*fakeBLE) Services(context.Context, string) ([]ble.Service, error) {
 	return nil, nil
 }
@@ -86,6 +101,8 @@ func (*fakeBLE) Characteristics(context.Context, string, string) ([]ble.Characte
 }
 func (b *fakeBLE) Read(context.Context, string, string) ([]byte, error) {
 	b.reads.Add(1)
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.battery, b.err
 }
 func (*fakeBLE) Write(context.Context, string, string, []byte, bool) error         { return nil }
@@ -356,6 +373,93 @@ func TestWatchReportsChangesAndStopsOnCancel(t *testing.T) {
 	}
 	if h.ble.reads.Load() < 2 {
 		t.Fatal("watch did not poll")
+	}
+}
+
+func TestWatchSeesPropertiesTheOSUpdates(t *testing.T) {
+	h := newHarness()
+	sensor := func(level int) domain.Device {
+		d := bleDevice("AA:BB:CC:DD:EE:01", "Sensor")
+		raw, _ := json.Marshal(map[string]int{"level": level})
+		d.Properties = map[string]domain.Property{"battery": {Value: raw}}
+		return d
+	}
+	h.backend.known = []domain.Device{sensor(87)}
+	var out bytes.Buffer
+	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond},
+		// Drivers see the device through the device list, which must stay current.
+		drivers: driver.NewAt(t.TempDir())}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
+	time.Sleep(30 * time.Millisecond)
+	h.backend.mu.Lock()
+	h.backend.known = []domain.Device{sensor(42)}
+	h.backend.mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"event":"changed"`) || !strings.Contains(out.String(), `"level":42`) {
+		t.Fatalf("the OS's new battery level was not reported:\n%s", out.String())
+	}
+}
+
+func TestWatchReadsADeviceTheOSForgot(t *testing.T) {
+	h := newHarness()
+	d := bleDevice("AA:BB:CC:DD:EE:01", "Sensor")
+	d.Properties = map[string]domain.Property{"battery": {Value: json.RawMessage(`{"level":87}`)}}
+	h.backend.known = []domain.Device{d}
+	h.ble.battery = []byte{42}
+	var out bytes.Buffer
+	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond},
+		// Drivers see the device through the device list, which must stay current.
+		drivers: driver.NewAt(t.TempDir())}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
+	time.Sleep(30 * time.Millisecond)
+	h.backend.mu.Lock()
+	h.backend.known = nil
+	h.backend.mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"event":"changed"`) || !strings.Contains(out.String(), `"level":42`) {
+		t.Fatalf("the device was not read again once the OS forgot it:\n%s", out.String())
+	}
+}
+
+func TestWatchRetriesADeviceAScanMissed(t *testing.T) {
+	h := newHarness()
+	const address = "AA:BB:CC:DD:EE:01"
+	h.backend.known = []domain.Device{classicDevice("os:1", "Sensor", address)}
+	h.ble.devices = []domain.Device{bleDevice(address, "Sensor")}
+	h.ble.battery = []byte{87}
+	var out bytes.Buffer
+	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond}}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
+	time.Sleep(30 * time.Millisecond)
+	// The link drops, and the device is missing from the next scans.
+	h.ble.mu.Lock()
+	h.ble.devices, h.ble.err = nil, domain.NewError(domain.CodeDisconnected, "gone")
+	h.ble.mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	h.ble.mu.Lock()
+	h.ble.devices, h.ble.err, h.ble.battery = []domain.Device{bleDevice(address, "Sensor")}, nil, []byte{42}
+	h.ble.mu.Unlock()
+	time.Sleep(30 * time.Millisecond)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("watch ended: %v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), `"level":42`) {
+		t.Fatalf("the device was not read once a scan found it again:\n%s", out.String())
 	}
 }
 

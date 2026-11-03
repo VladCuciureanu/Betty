@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"time"
 
@@ -81,6 +82,37 @@ func (a *application) known(ctx context.Context) ([]domain.Device, error) {
 		return nil, err
 	}
 	return a.enrich(ctx, devices, "list"), nil
+}
+
+// refresh returns devices and d, one of them, with the state and properties
+// the OS reports for d now, such as a battery level BlueZ has updated,
+// keeping the endpoints a scan found. A device the OS no longer lists, as
+// BlueZ forgets an unpaired device after it disconnects, keeps none of the
+// OS's earlier properties, so they are read from the device again.
+func (a *application) refresh(ctx context.Context, devices []domain.Device, d domain.Device) ([]domain.Device, domain.Device) {
+	raw, err := a.backend.List(ctx)
+	if err != nil {
+		return devices, d
+	}
+	current, ok := findByID(a.applyHIDBatteries(ctx, mergeDevices(raw)), d.ID)
+	if ok {
+		d.Paired, d.Connected, d.Properties = current.Paired, current.Connected, current.Properties
+		// Keep capabilities that drivers added when the device was resolved.
+		capabilities := maps.Clone(d.Capabilities)
+		if capabilities == nil {
+			capabilities = map[string]domain.DeviceCapability{}
+		}
+		maps.Copy(capabilities, current.Capabilities)
+		d.Capabilities = capabilities
+	} else {
+		d.Connected, d.Properties = false, nil
+	}
+	// Drivers read the device from the list, so it must hold the same state.
+	devices = slices.Clone(devices)
+	if i := slices.IndexFunc(devices, func(other domain.Device) bool { return other.ID == d.ID }); i >= 0 {
+		devices[i] = d
+	}
+	return devices, d
 }
 
 // enrich deduplicates raw devices and adds HID batteries and driver data.
@@ -269,12 +301,17 @@ func bleAddress(d domain.Device) (string, bool) {
 	return "", false
 }
 
+// errNoBLEEndpoint is the cause of requireBLE's error.
+var errNoBLEEndpoint = errors.New("no discoverable BLE endpoint")
+
 // requireBLE returns d's BLE address, or asks for a scan when d has none yet.
 func requireBLE(d domain.Device) (string, error) {
 	if address, ok := bleAddress(d); ok {
 		return address, nil
 	}
-	return "", needsDiscovery(domain.NewError(domain.CodeUnsupported, "%s has no discoverable BLE endpoint; GATT needs one", d.Name))
+	err := domain.NewError(domain.CodeUnsupported, "%s has no discoverable BLE endpoint; GATT needs one", d.Name)
+	err.Cause = errNoBLEEndpoint
+	return "", needsDiscovery(err)
 }
 
 func findByID(devices []domain.Device, id string) (domain.Device, bool) {
