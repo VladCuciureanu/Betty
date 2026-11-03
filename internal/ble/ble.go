@@ -37,7 +37,9 @@ type Client interface {
 }
 
 type TinyGo struct {
-	adapter   *bluetooth.Adapter
+	adapter *bluetooth.Adapter
+	// adapterID is the BlueZ adapter the client uses, such as "hci0".
+	adapterID string
 	once      sync.Once
 	enableErr error
 
@@ -45,7 +47,7 @@ type TinyGo struct {
 	disconnects map[string][]chan struct{}
 }
 
-func New() *TinyGo { return &TinyGo{adapter: bluetooth.DefaultAdapter} }
+func New() *TinyGo { return &TinyGo{adapter: bluetooth.DefaultAdapter, adapterID: "hci0"} }
 
 func (b *TinyGo) enable() error {
 	b.once.Do(func() {
@@ -133,28 +135,36 @@ func (b *TinyGo) Scan(ctx context.Context) ([]domain.Device, error) {
 	}
 	var mu sync.Mutex
 	byAddress := map[string]*advertisement{}
-	done := make(chan error, 1)
-	go func() {
-		done <- b.adapter.Scan(func(_ *bluetooth.Adapter, result bluetooth.ScanResult) {
-			address := result.Address.String()
-			now := time.Now().UTC()
-			mu.Lock()
-			defer mu.Unlock()
-			a, ok := byAddress[address]
-			if !ok {
-				a = &advertisement{address: address, manufacturer: map[uint16]string{}, serviceData: map[string]string{}}
-				byAddress[address] = a
+	found := func(_ *bluetooth.Adapter, result bluetooth.ScanResult) {
+		address := result.Address.String()
+		now := time.Now().UTC()
+		mu.Lock()
+		defer mu.Unlock()
+		a, ok := byAddress[address]
+		if !ok {
+			a = &advertisement{address: address, manufacturer: map[uint16]string{}, serviceData: map[string]string{}}
+			byAddress[address] = a
+		}
+		a.merge(result, now)
+	}
+scanning:
+	for {
+		done := make(chan error, 1)
+		go func() { done <- b.adapter.Scan(found) }()
+		select {
+		case <-ctx.Done():
+			_ = b.adapter.StopScan()
+			<-done
+			break scanning
+		case err := <-done:
+			if scanInterrupted(err) && ctx.Err() == nil {
+				endScanSession(b.adapterID)
+				continue
 			}
-			a.merge(result, now)
-		})
-	}()
-	select {
-	case <-ctx.Done():
-		_ = b.adapter.StopScan()
-		<-done
-	case err := <-done:
-		if err != nil {
-			return nil, translate("scan", err, domain.CodeUnavailable)
+			if err != nil {
+				return nil, translate("scan", err, domain.CodeUnavailable)
+			}
+			break scanning
 		}
 	}
 	mu.Lock()
@@ -456,4 +466,12 @@ func uuidFilter(value string) ([]bluetooth.UUID, error) {
 		return nil, domain.NewError(domain.CodeUsage, "invalid service UUID %q", value)
 	}
 	return []bluetooth.UUID{uuid}, nil
+}
+
+// scanInterrupted reports whether err is tinygo's error for a scan that
+// BlueZ ended on its own. A controller that interleaves LE scanning with
+// Classic inquiry ends discovery after each inquiry, and BlueZ starts it again
+// at once, so the scan should go on. tinygo doesn't export the error.
+func scanInterrupted(err error) bool {
+	return err != nil && err.Error() == "bluetooth: scan was stopped unexpectedly"
 }
