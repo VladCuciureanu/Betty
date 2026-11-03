@@ -39,7 +39,8 @@ same way.
 
 | Platform | Link | How | Result | Evidence |
 | --- | --- | --- | --- | --- |
-| Linux / BlueZ 5.72 | Virtual (`/dev/vhci`), Ubuntu generic kernel in a VM | CI, every pull request | Scan, GATT read/write/notify, property watch, link drop, ambiguity, pairing, refused pairing, unpairing pass. Classic connect and disconnect are skipped while they fail intermittently ([#116](https://github.com/VladCuciureanu/Betty/issues/116)), and Sony battery is skipped: its RFCOMM session stalls on the virtual link ([#100](https://github.com/VladCuciureanu/Betty/issues/100)). | `.github/workflows/e2e-linux.yml` |
+| Linux / BlueZ 5.72 | Virtual (`/dev/vhci`), Ubuntu generic kernel in a VM | CI, every pull request | Scan, GATT read/write/notify, property watch, link drop, ambiguity, pairing, refused pairing, unpairing pass. Classic connect and disconnect and Sony battery, which were skipped here ([#116](https://github.com/VladCuciureanu/Betty/issues/116), [#100](https://github.com/VladCuciureanu/Betty/issues/100)), now run; CI hasn't recorded a result for them yet. | `.github/workflows/e2e-linux.yml` |
+| Linux / BlueZ 5.85 | Virtual (`/dev/vhci`), Ubuntu 26.04 kernel 7.0 in a VM | Manual, 2026-11-03 | All 14 scenarios pass. | `e2e/linux/run-vm.sh` |
 | Windows | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
 | macOS | Over the air, built-in radio to a USB dongle | Manual | Not run yet | — |
 
