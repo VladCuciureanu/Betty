@@ -61,3 +61,38 @@ func TestDeviceFromObjectReadsBlueZBattery(t *testing.T) {
 		t.Fatal("an adapter was read as a device")
 	}
 }
+
+func TestListKeepsToTheSelectedAdapter(t *testing.T) {
+	device := func(name, address string) map[string]map[string]dbus.Variant {
+		return map[string]map[string]dbus.Variant{"org.bluez.Device1": {"Address": dbus.MakeVariant(address), "Alias": dbus.MakeVariant(name)}}
+	}
+	adapter := map[string]map[string]dbus.Variant{"org.bluez.Adapter1": {"Powered": dbus.MakeVariant(true)}}
+	objects := map[dbus.ObjectPath]map[string]map[string]dbus.Variant{
+		"/org/bluez/hci0":                       adapter,
+		"/org/bluez/hci0/dev_AA_AA_AA_AA_AA_AA": device("Keyboard", "AA:AA:AA:AA:AA:AA"),
+		"/org/bluez/hci1":                       adapter,
+		"/org/bluez/hci1/dev_BB_BB_BB_BB_BB_BB": device("Speaker", "BB:BB:BB:BB:BB:BB"),
+		// hci10 must not count as hci1.
+		"/org/bluez/hci10":                       adapter,
+		"/org/bluez/hci10/dev_CC_CC_CC_CC_CC_CC": device("Mouse", "CC:CC:CC:CC:CC:CC"),
+	}
+	names := func(devices []domain.Device) []string {
+		var out []string
+		for _, d := range devices {
+			out = append(out, d.Name)
+		}
+		return out
+	}
+
+	all, err := (&linuxBackend{}).devices(objects)
+	if err != nil || len(all) != 3 {
+		t.Fatalf("without --adapter: %v, %v", names(all), err)
+	}
+	selected, err := (&linuxBackend{selected: "hci1"}).devices(objects)
+	if err != nil || len(selected) != 1 || selected[0].Name != "Speaker" {
+		t.Fatalf("--adapter hci1: %v, %v", names(selected), err)
+	}
+	if _, err := (&linuxBackend{selected: "hci9"}).devices(objects); domain.AsError(err).Code != domain.CodeNotFound {
+		t.Fatalf("--adapter hci9: %v", err)
+	}
+}
