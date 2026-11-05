@@ -69,21 +69,15 @@ bluetoothd's log and the discovery, pairing, and connection traffic from an
 HCI trace. Set `BETTY_PEER_LOG=DEBUG` to also trace the scripted devices' own
 Bluetooth stack.
 
-### What the virtual link cannot do
+### The patched controller
 
-The Sony scenario stalls on the virtual link after its RFCOMM channel is
-encrypted, so it is skipped there and runs only over the air
-([#100](https://github.com/VladCuciureanu/Betty/issues/100)). Classic `connect`
-and `disconnect` fail intermittently there
-([#116](https://github.com/VladCuciureanu/Betty/issues/116)), so they are skipped
-on the virtual link too. Everything else runs on both.
-
-The scripted devices also run on a patched controller
+The scripted devices run on a patched controller
 (`peer/betty_peer/controller.py`). It reports dual-mode support, answers Classic
 inquiry and the setup commands Linux sends, re-authenticates paired Classic
-devices with their stored link key, reports Classic encryption, and keeps the
-link working when Linux changes its private address. Each patch is
-commented with the gap it fills.
+devices with their stored link key, reports Classic encryption with AES-CCM,
+reports new LE connections with the event Linux asks for, and keeps the link
+working when Linux changes its private address. Each patch is commented with
+the gap it fills.
 
 ## Running on Windows or macOS
 
@@ -126,8 +120,6 @@ Expect Windows to show its own pairing notifications during the pairing tests.
 
 - Tests that need several scripted devices at once, such as duplicate names,
   run only on Linux, because a dongle is one device.
-- The Sony test runs only over the air; see
-  [what the virtual link cannot do](#what-the-virtual-link-cannot-do).
 - The Sony test needs the headset to connect back to the computer. Over the
   air, set `BETTY_E2E_HOST_ADDRESS` to the computer's own Bluetooth address.
   On Windows, `ipconfig /all` shows it as the physical address of the

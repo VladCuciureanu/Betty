@@ -152,8 +152,6 @@ func TestClassicPairingLifecycle(t *testing.T) {
 	assertPaired(t, p.device(0).Address)
 
 	switch {
-	case virtual():
-		t.Log("skipping connect and disconnect: they fail intermittently on the virtual link (#116)")
 	case runtime.GOOS == "windows":
 		fails(t, domain.CodeUnsupported, "connect", name)
 	default:
@@ -179,12 +177,8 @@ func TestRefusedPairingIsAnAuthenticationFailure(t *testing.T) {
 }
 
 func TestSonyBatteryThroughTheDriver(t *testing.T) {
-	if virtual() {
-		// Pairing, SDP, and the RFCOMM channel's L2CAP connection work, but
-		// the driver's read stalls after the channel is encrypted.
-		t.Skip("the Sony RFCOMM session stalls on the virtual link (#100); run over the air to cover this")
-	}
-	if os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
+	// On the virtual link the peer knows the computer's address itself.
+	if !virtual() && os.Getenv("BETTY_E2E_HOST_ADDRESS") == "" {
 		t.Skip("set BETTY_E2E_HOST_ADDRESS so the headset can connect to this computer")
 	}
 	drivers := t.TempDir()

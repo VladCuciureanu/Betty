@@ -21,9 +21,11 @@ if [[ "${BETTY_E2E_IN_VM:-}" != 1 ]]; then
 		exit 1
 	fi
 	# The VM sees the host's files but gets a fresh /tmp; build caches go there.
+	# Root in the VM doesn't own the checkout, so git refuses it as "dubious
+	# ownership" and Go can't stamp builds with VCS information; skip that.
 	(cd "$repo" && go mod download)
 	exec vng --run "$kernel" --user root --memory 2G --cpus 2 --disable-microvm --rwdir "$repo" -- \
-		env BETTY_E2E_IN_VM=1 BETTY_PEER_LOG="${BETTY_PEER_LOG:-}" PATH="$PATH" GOMODCACHE="$(go env GOMODCACHE)" GOFLAGS=-mod=mod \
+		env BETTY_E2E_IN_VM=1 BETTY_PEER_LOG="${BETTY_PEER_LOG:-}" PATH="$PATH" GOMODCACHE="$(go env GOMODCACHE)" GOFLAGS="-mod=mod -buildvcs=false" \
 		"$repo/e2e/linux/run-vm.sh" "$@"
 fi
 

@@ -17,6 +17,8 @@ from bumble.link import LocalLink
 
 # Write Scan Enable values that include inquiry scan.
 _INQUIRY_SCAN = 0x01
+# Encryption Change's value for a BR/EDR link encrypted with AES-CCM.
+_AES_CCM = 0x02
 # How long a virtual inquiry takes; real inquiries take seconds, but nothing
 # here needs that.
 _INQUIRY_DELAY = 0.2
@@ -123,11 +125,44 @@ class InquiryController(Controller):
             if (opcode := getattr(hci, f"HCI_{name}_COMMAND", None)) is not None
         }
 
+    def send_hci_packet(self, packet) -> None:
+        # Bumble always reports a new LE connection with the legacy event. A
+        # host that unmasks LE Enhanced Connection Complete, as Linux does when
+        # the controller supports LL privacy, gets only that event from a real
+        # controller and waits for it, until its connection attempt times out.
+        enhanced = 1 << (hci.HCI_LE_ENHANCED_CONNECTION_COMPLETE_EVENT - 1)
+        if isinstance(packet, hci.HCI_LE_Connection_Complete_Event) and self.le_event_mask & enhanced:
+            packet = hci.HCI_LE_Enhanced_Connection_Complete_Event(
+                status=packet.status,
+                connection_handle=packet.connection_handle,
+                role=packet.role,
+                peer_address_type=packet.peer_address_type,
+                peer_address=packet.peer_address,
+                local_resolvable_private_address=hci.Address.ANY,
+                peer_resolvable_private_address=hci.Address.ANY,
+                connection_interval=packet.connection_interval,
+                peripheral_latency=packet.peripheral_latency,
+                supervision_timeout=packet.supervision_timeout,
+                central_clock_accuracy=packet.central_clock_accuracy,
+            )
+        super().send_hci_packet(packet)
+
     def on_hci_command(self, command):
         if command.name in _DEFAULT_REPLIES:
             fields = _DEFAULT_REPLIES[command.name]
             if fields is None:
-                return hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+                status = hci.HCI_StatusReturnParameters(hci.HCI_ErrorCode.SUCCESS)
+                if isinstance(command, hci.HCI_SyncCommand):
+                    return status
+                # Bumble has no class for some commands, such as Write Current
+                # IAC LAP, so it treats them as asynchronous and never
+                # completes them; the kernel then fails the operation.
+                self.send_hci_packet(
+                    hci.HCI_Command_Complete_Event(
+                        num_hci_command_packets=1, command_opcode=command.op_code, return_parameters=status
+                    )
+                )
+                return None
             replies = getattr(hci, type(command).__name__.replace("_Command", "_ReturnParameters"))
             return replies(status=hci.HCI_ErrorCode.SUCCESS, **fields)
         # Name the controller: the kernel and the scripted devices' hosts
@@ -163,13 +198,15 @@ class InquiryController(Controller):
 
     def on_hci_set_connection_encryption_command(self, command):
         # Bumble implements only LE encryption. Report Classic encryption as
-        # on, which is all the host checks; the link itself is virtual.
+        # on; the link itself is virtual. Bumble's pairing always produces an
+        # authenticated P-256 link key, and Linux fails pairing unless a link
+        # with that key is encrypted with AES-CCM rather than E0.
         self._send_hci_command_status(hci.HCI_ErrorCode.SUCCESS, command.op_code)
         self.send_hci_packet(
             hci.HCI_Encryption_Change_Event(
                 status=hci.HCI_ErrorCode.SUCCESS,
                 connection_handle=command.connection_handle,
-                encryption_enabled=command.encryption_enable,
+                encryption_enabled=_AES_CCM if command.encryption_enable else 0,
             )
         )
 

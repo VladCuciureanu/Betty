@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -328,8 +329,9 @@ func validateRange(capability domain.DeviceCapability, name string, value float6
 }
 
 // watch prints the property once, then again whenever its value changes.
-// After the first read it reuses the resolved device, so polling does not
-// rescan. Retryable failures are reported as warnings and polling continues.
+// After the first read it reuses the resolved device, refreshed from the
+// OS's known devices, so polling does not rescan. Retryable failures are
+// reported as warnings and polling continues.
 func (a *application) watch(ctx context.Context, args []string) error {
 	query, name := args[0], args[1]
 	if handled, err := a.watchThroughDriver(ctx, query, name); handled || err != nil {
@@ -337,16 +339,21 @@ func (a *application) watch(ctx context.Context, args []string) error {
 	}
 	var devices []domain.Device
 	var device domain.Device
-	resolved := false
+	// reachedBLE records that the device had a BLE endpoint during this watch.
+	resolved, reachedBLE := false, false
 	previous, event := "", "snapshot"
 	for {
 		readCtx, cancel := context.WithTimeout(ctx, a.opts.timeout)
 		var result propertyResult
 		var err error
 		if resolved {
+			devices, device = a.refresh(readCtx, devices, device)
 			result, err = a.readProperty(readCtx, devices, device, name)
 		} else {
 			err = a.withDevice(readCtx, query, func(all []domain.Device, d domain.Device) error {
+				if _, ok := bleAddress(d); ok {
+					reachedBLE = true
+				}
 				var readErr error
 				result, readErr = a.readProperty(readCtx, all, d, name)
 				if readErr == nil {
@@ -356,10 +363,23 @@ func (a *application) watch(ctx context.Context, args []string) error {
 			})
 		}
 		cancel()
+		if retry := (discoveryNeeded{}); resolved && errors.As(err, &retry) {
+			// The device needs an endpoint only a scan reports, such as after
+			// BlueZ forgot it, so resolve it again, which may scan.
+			a.render.Debugf("%s: %v; resolving it again", device.ID, retry.err)
+			resolved = false
+			continue
+		}
+		// The watch itself has no deadline, so a read that runs out of time
+		// is classified here, where its own timeout is known.
+		err = classifyContextError(err, ctx, a.opts.timeout)
 		switch {
 		case ctx.Err() != nil:
 			return nil
-		case err != nil && !domain.AsError(err).Retryable:
+		case err != nil && !domain.AsError(err).Retryable && !(reachedBLE && errors.Is(err, errNoBLEEndpoint)):
+			// A device that this watch has reached over BLE may only be
+			// missing from a scan, such as while another connection holds
+			// it and it stops advertising, so that failure is retried.
 			return err
 		case err != nil:
 			a.render.Warn("reading %s failed, retrying: %v", name, err)

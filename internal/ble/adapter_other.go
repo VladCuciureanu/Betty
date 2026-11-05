@@ -8,3 +8,6 @@ import "github.com/vladcuciureanu/betty/internal/domain"
 func (b *TinyGo) UseAdapter(string) error {
 	return domain.NewError(domain.CodeUnsupported, "only Linux can choose a Bluetooth adapter")
 }
+
+// endScanSession does nothing: only BlueZ ends a scan on its own.
+func endScanSession(string) {}
