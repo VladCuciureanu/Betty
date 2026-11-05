@@ -78,8 +78,25 @@ func (b *linuxBackend) List(ctx context.Context) ([]domain.Device, error) {
 	if err != nil {
 		return nil, err
 	}
+	return b.devices(objects)
+}
+
+// devices reads every adapter's devices from BlueZ's objects, or only the
+// devices of the adapter chosen with --adapter.
+func (b *linuxBackend) devices(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) ([]domain.Device, error) {
+	prefix := ""
+	if b.selected != "" {
+		adapter, err := b.chooseAdapter(objects)
+		if err != nil {
+			return nil, err
+		}
+		prefix = string(adapter) + "/"
+	}
 	var devices []domain.Device
 	for path, interfaces := range objects {
+		if !strings.HasPrefix(string(path), prefix) {
+			continue
+		}
 		if d, ok := deviceFromObject(path, interfaces); ok {
 			devices = append(devices, d)
 		}
@@ -221,6 +238,12 @@ func (b *linuxBackend) adapter(ctx context.Context) (dbus.ObjectPath, error) {
 	if err != nil {
 		return "", err
 	}
+	return b.chooseAdapter(objects)
+}
+
+// chooseAdapter returns the adapter selected with --adapter, or else one
+// chosen automatically, among BlueZ's objects.
+func (b *linuxBackend) chooseAdapter(objects map[dbus.ObjectPath]map[string]map[string]dbus.Variant) (dbus.ObjectPath, error) {
 	// Prefer a powered adapter, then the lowest path (hci0 before hci1), so
 	// the choice does not depend on map iteration order.
 	var adapters []dbus.ObjectPath
