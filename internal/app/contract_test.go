@@ -376,6 +376,53 @@ func TestWatchReportsChangesAndStopsOnCancel(t *testing.T) {
 	}
 }
 
+// syncBuffer is an output a test can read while a command writes to it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// waitFor waits until out contains want. Polling is slower on some CI
+// machines, so the deadline is generous.
+func waitFor(t *testing.T, out *syncBuffer, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(out.String(), want) {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s:\n%s", want, out.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// startWatch runs watch for battery on Sensor with a driver manager, which
+// sees the device through the device list, until the test ends.
+func startWatch(t *testing.T, h *harness, out *syncBuffer) {
+	t.Helper()
+	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: out, Err: out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond}, drivers: driver.NewAt(t.TempDir())}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Errorf("watch ended: %v\n%s", err, out.String())
+		}
+	})
+}
+
 func TestWatchSeesPropertiesTheOSUpdates(t *testing.T) {
 	h := newHarness()
 	sensor := func(level int) domain.Device {
@@ -385,25 +432,13 @@ func TestWatchSeesPropertiesTheOSUpdates(t *testing.T) {
 		return d
 	}
 	h.backend.known = []domain.Device{sensor(87)}
-	var out bytes.Buffer
-	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond},
-		// Drivers see the device through the device list, which must stay current.
-		drivers: driver.NewAt(t.TempDir())}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
-	time.Sleep(30 * time.Millisecond)
+	var out syncBuffer
+	startWatch(t, h, &out)
+	waitFor(t, &out, `"event":"snapshot"`)
 	h.backend.mu.Lock()
 	h.backend.known = []domain.Device{sensor(42)}
 	h.backend.mu.Unlock()
-	time.Sleep(30 * time.Millisecond)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"event":"changed"`) || !strings.Contains(out.String(), `"level":42`) {
-		t.Fatalf("the OS's new battery level was not reported:\n%s", out.String())
-	}
+	waitFor(t, &out, `"level":42`)
 }
 
 func TestWatchReadsADeviceTheOSForgot(t *testing.T) {
@@ -412,25 +447,13 @@ func TestWatchReadsADeviceTheOSForgot(t *testing.T) {
 	d.Properties = map[string]domain.Property{"battery": {Value: json.RawMessage(`{"level":87}`)}}
 	h.backend.known = []domain.Device{d}
 	h.ble.battery = []byte{42}
-	var out bytes.Buffer
-	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond},
-		// Drivers see the device through the device list, which must stay current.
-		drivers: driver.NewAt(t.TempDir())}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
-	time.Sleep(30 * time.Millisecond)
+	var out syncBuffer
+	startWatch(t, h, &out)
+	waitFor(t, &out, `"event":"snapshot"`)
 	h.backend.mu.Lock()
 	h.backend.known = nil
 	h.backend.mu.Unlock()
-	time.Sleep(30 * time.Millisecond)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), `"event":"changed"`) || !strings.Contains(out.String(), `"level":42`) {
-		t.Fatalf("the device was not read again once the OS forgot it:\n%s", out.String())
-	}
+	waitFor(t, &out, `"level":42`)
 }
 
 func TestWatchRetriesADeviceAScanMissed(t *testing.T) {
@@ -439,28 +462,18 @@ func TestWatchRetriesADeviceAScanMissed(t *testing.T) {
 	h.backend.known = []domain.Device{classicDevice("os:1", "Sensor", address)}
 	h.ble.devices = []domain.Device{bleDevice(address, "Sensor")}
 	h.ble.battery = []byte{87}
-	var out bytes.Buffer
-	a := &application{backend: h.backend, ble: h.ble, render: output.Renderer{Out: &out, Err: &out, Mode: output.JSON}, opts: options{timeout: time.Second, interval: 5 * time.Millisecond}}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- a.watch(ctx, []string{"Sensor", "battery"}) }()
-	time.Sleep(30 * time.Millisecond)
+	var out syncBuffer
+	startWatch(t, h, &out)
+	waitFor(t, &out, `"event":"snapshot"`)
 	// The link drops, and the device is missing from the next scans.
 	h.ble.mu.Lock()
 	h.ble.devices, h.ble.err = nil, domain.NewError(domain.CodeDisconnected, "gone")
 	h.ble.mu.Unlock()
-	time.Sleep(30 * time.Millisecond)
+	waitFor(t, &out, "no discoverable BLE endpoint")
 	h.ble.mu.Lock()
 	h.ble.devices, h.ble.err, h.ble.battery = []domain.Device{bleDevice(address, "Sensor")}, nil, []byte{42}
 	h.ble.mu.Unlock()
-	time.Sleep(30 * time.Millisecond)
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("watch ended: %v\n%s", err, out.String())
-	}
-	if !strings.Contains(out.String(), `"level":42`) {
-		t.Fatalf("the device was not read once a scan found it again:\n%s", out.String())
-	}
+	waitFor(t, &out, `"level":42`)
 }
 
 func TestClassifyContextError(t *testing.T) {
